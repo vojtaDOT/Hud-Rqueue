@@ -34,7 +34,7 @@ const formSchema = z.object({
     base_url: z.string().url({
         message: 'Please enter a valid URL.',
     }),
-    enabled: z.boolean().default(true),
+    enabled: z.boolean(),
     crawl_strategy: z.string().min(1, {
         message: 'Please select a crawl strategy.',
     }),

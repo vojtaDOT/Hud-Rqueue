@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -10,21 +11,28 @@ export function Header() {
     const pathname = usePathname();
 
     const links = [
-        { href: '/', label: 'Dashboard' },
         { href: '/tasks', label: 'Tasks' },
         { href: '/sources', label: 'Sources' },
     ];
 
     return (
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="container flex h-14 items-center mx-auto px-4 md:px-8">
-                <div className="mr-4 hidden md:flex">
-                    <Link href="/" className="mr-6 flex items-center space-x-2">
-                        <span className="hidden font-bold sm:inline-block">
-                            HUD <img src="tool.svg" alt="tool" />
-                        </span>
+            <div className="container flex h-14 items-center justify-between mx-auto px-4 md:px-8">
+                {/* Logo Section */}
+                <div className="flex items-center gap-6">
+                    <Link href="/" className="flex items-center gap-2 font-bold transition-opacity hover:opacity-90">
+                        <span>HUD</span>
+                        <Image
+                            src="/tool.svg"
+                            alt="HUD Tool"
+                            width={24}
+                            height={24}
+                            className="inline-block"
+                        />
                     </Link>
-                    <nav className="flex items-center space-x-6 text-sm font-medium">
+
+                    {/* Desktop Navigation */}
+                    <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
                         {links.map((link) => (
                             <Link
                                 key={link.href}
@@ -39,33 +47,26 @@ export function Header() {
                         ))}
                     </nav>
                 </div>
-                {/* Mobile View - Simplified for now, just main links in a flex row */}
-                <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
-                    <div className="flex md:hidden items-center space-x-4">
+
+                {/* Right Side Actions */}
+                <div className="flex items-center gap-4">
+                    {/* Mobile Navigation (simplified for now) */}
+                    <nav className="flex md:hidden items-center space-x-4 text-sm font-medium">
                         {links.map((link) => (
                             <Link
                                 key={link.href}
                                 href={link.href}
                                 className={cn(
-                                    'text-sm font-medium transition-colors hover:text-foreground/80',
+                                    'transition-colors hover:text-foreground/80',
                                     pathname === link.href ? 'text-foreground' : 'text-foreground/60'
                                 )}
                             >
                                 {link.label}
                             </Link>
                         ))}
-                    </div>
-                    <div className="w-full flex-1 md:w-auto md:flex-none">
-                        {/* Add search or other interactions here if needed */}
-                    </div>
-                    <nav className="flex items-center">
-                        {/* Theme Toggle can go here if we have one. I'll check if ThemeToggle exists, if not I'll just omit it for now or implement it. 
-                 The plan didn't explicitly say I MUST implement ThemeToggle, but "Theme Toggle" was mentioned as 'sleek'.
-                 I will assume ThemeToggle might not exist yet based on previous file list. I'll comment it out or create it.
-                 Actually, let's create a simple placeholders for now to not break build. 
-             */}
-                        <ThemeToggle />
                     </nav>
+
+                    <ThemeToggle />
                 </div>
             </div>
         </header>

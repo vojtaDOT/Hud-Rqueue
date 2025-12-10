@@ -95,3 +95,47 @@ export async function POST(request: Request) {
         );
     }
 }
+
+export async function DELETE() {
+    try {
+        const queueName = 'queue';
+
+        // Get all job keys using SCAN to avoid blocking
+        let cursor = '0';
+        const jobKeys: string[] = [];
+
+        do {
+            const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'job:*', 'COUNT', 100);
+            cursor = nextCursor;
+            jobKeys.push(...keys);
+        } while (cursor !== '0');
+
+        // Delete all job hashes and the queue
+        const pipeline = redis.pipeline();
+
+        for (const key of jobKeys) {
+            pipeline.del(key);
+        }
+
+        // Clear the queue list
+        pipeline.del(queueName);
+
+        // Reset the job ID counter
+        pipeline.set('job_id_counter', 0);
+
+        await pipeline.exec();
+
+        return NextResponse.json({
+            success: true,
+            message: `Flushed ${jobKeys.length} jobs from queue`,
+            deleted_jobs: jobKeys.length
+        });
+
+    } catch (error) {
+        console.error('Error flushing queue:', error);
+        return NextResponse.json(
+            { error: 'Internal Server Error' },
+            { status: 500 }
+        );
+    }
+}

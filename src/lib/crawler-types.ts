@@ -46,6 +46,7 @@ export interface PaginationStep {
     nextLinkSelector?: string;
     maxPages?: number;
     waitForSelector?: boolean;
+    waitTimeout?: number;
 }
 
 export interface SourceStep {
@@ -61,24 +62,24 @@ export type CrawlerStep = SelectStep | ExtractStep | ClickStep | PaginationStep 
 export interface CrawlerConfig {
     // Page detection
     pageType: PageType;
-    
+
     // Crawler type
     crawlerType: 'scrapy' | 'playwright';
-    
+
     // Base configuration
     baseUrl: string;
     startUrl?: string;
-    
+
     // Workflow steps
     steps: CrawlerStep[];
-    
+
     // Advanced options
     waitForSelector?: string;
     waitTimeout?: number;
     headers?: Record<string, string>;
     cookies?: Record<string, string>;
     userAgent?: string;
-    
+
     // Output configuration
     outputFormat?: 'json' | 'csv' | 'xml';
     outputFields?: string[];
@@ -119,6 +120,7 @@ export interface PlaywrightConfig {
         selector?: string;
         url?: string;
         waitForSelector?: string;
+        waitForNavigation?: boolean;
         waitTimeout?: number;
         extract?: {
             selector: string;
@@ -127,7 +129,7 @@ export interface PlaywrightConfig {
         };
     }>;
     output: {
-        format: 'json' | 'csv';
+        format: 'json' | 'csv' | 'xml';
         fields: string[];
     };
 }

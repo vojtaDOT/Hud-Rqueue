@@ -200,36 +200,6 @@ export async function GET(request: NextRequest) {
                 }
             );
 
-            // Detect if page is React/SPA or SSR
-            const detectPageType = () => {
-                // Check for React
-                const hasReact = window.React || 
-                                document.querySelector('[data-reactroot]') ||
-                                document.querySelector('[data-react-helmet]') ||
-                                (window.__REACT_DEVTOOLS_GLOBAL_HOOK__ !== undefined) ||
-                                Array.from(document.querySelectorAll('script')).some(s => 
-                                    s.src && s.src.includes('react') || 
-                                    s.textContent && s.textContent.includes('React')
-                                );
-                
-                // Check for other SPA frameworks
-                const hasVue = window.Vue || document.querySelector('[data-v-]');
-                const hasAngular = window.angular || document.querySelector('[ng-app]');
-                const hasNextJS = window.__NEXT_DATA__ !== undefined;
-                
-                // Check if content is dynamically loaded (SPA indicator)
-                const hasDynamicContent = document.querySelector('[data-reactroot]') || 
-                                         document.querySelector('[id^="__next"]') ||
-                                         document.querySelector('[id^="root"]');
-                
-                return {
-                    isReact: !!hasReact || !!hasNextJS,
-                    isSPA: !!(hasReact || hasVue || hasAngular || hasNextJS || hasDynamicContent),
-                    isSSR: !hasReact && !hasVue && !hasAngular && !hasNextJS && !hasDynamicContent,
-                    framework: hasNextJS ? 'nextjs' : hasReact ? 'react' : hasVue ? 'vue' : hasAngular ? 'angular' : 'unknown'
-                };
-            };
-
             // Inject our selection script
             const selectionScript = `
                 <script id="element-selector-script">

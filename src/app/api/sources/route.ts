@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { name, base_url, enabled, crawl_strategy, crawl_params, crawl_interval } = body;
+        const { name, base_url, enabled, crawl_strategy, crawl_params, crawl_interval, typ_id, obec_id, okres_id, kraj_id } = body;
 
         // Basic server-side validation
         if (!name || !base_url) {
@@ -24,8 +24,11 @@ export async function POST(request: Request) {
                     crawl_strategy,
                     crawl_params, // Expecting valid JSON object
                     crawl_interval,
-                    updated_at: new Date().toISOString(), // Assuming Supabase doesn't auto-update this on insert, but usually triggers do. Let's include it to be safe or rely on defaults. 
-                    // created_at is usually default now()
+                    typ_id: typ_id || null,
+                    obec_id: obec_id || null,
+                    okres_id: okres_id || null,
+                    kraj_id: kraj_id || null,
+                    updated_at: new Date().toISOString(),
                 },
             ])
             .select()

@@ -1,0 +1,134 @@
+// Types for crawler configuration
+
+export interface PageType {
+    isReact: boolean;
+    isSPA: boolean;
+    isSSR: boolean;
+    framework: 'react' | 'nextjs' | 'vue' | 'angular' | 'unknown';
+    requiresPlaywright: boolean;
+}
+
+export interface ElementSelector {
+    selector: string;
+    tagName: string;
+    textContent?: string;
+    isList: boolean;
+    listItemCount?: number;
+    parentSelector?: string;
+}
+
+export interface SelectStep {
+    type: 'select';
+    selector: string;
+    waitForSelector?: boolean;
+    waitTimeout?: number;
+    multiple?: boolean;
+}
+
+export interface ExtractStep {
+    type: 'extract';
+    selector: string;
+    attribute?: string; // 'text', 'html', 'href', 'src', etc.
+    fieldName: string;
+    required?: boolean;
+}
+
+export interface ClickStep {
+    type: 'click';
+    selector: string;
+    waitForNavigation?: boolean;
+    waitTimeout?: number;
+}
+
+export interface PaginationStep {
+    type: 'pagination';
+    nextButtonSelector?: string;
+    nextLinkSelector?: string;
+    maxPages?: number;
+    waitForSelector?: boolean;
+}
+
+export interface SourceStep {
+    type: 'source';
+    url: string;
+    method?: 'GET' | 'POST';
+    headers?: Record<string, string>;
+    body?: string;
+}
+
+export type CrawlerStep = SelectStep | ExtractStep | ClickStep | PaginationStep | SourceStep;
+
+export interface CrawlerConfig {
+    // Page detection
+    pageType: PageType;
+    
+    // Crawler type
+    crawlerType: 'scrapy' | 'playwright';
+    
+    // Base configuration
+    baseUrl: string;
+    startUrl?: string;
+    
+    // Workflow steps
+    steps: CrawlerStep[];
+    
+    // Advanced options
+    waitForSelector?: string;
+    waitTimeout?: number;
+    headers?: Record<string, string>;
+    cookies?: Record<string, string>;
+    userAgent?: string;
+    
+    // Output configuration
+    outputFormat?: 'json' | 'csv' | 'xml';
+    outputFields?: string[];
+}
+
+// Export format for Scrapy
+export interface ScrapyConfig {
+    name: string;
+    allowed_domains: string[];
+    start_urls: string[];
+    custom_settings: {
+        DOWNLOAD_DELAY?: number;
+        RANDOMIZE_DOWNLOAD_DELAY?: boolean;
+        USER_AGENT?: string;
+        ROBOTSTXT_OBEY?: boolean;
+    };
+    rules?: Array<{
+        allow?: string[];
+        deny?: string[];
+        callback?: string;
+        follow?: boolean;
+    }>;
+    parse?: {
+        selectors: Array<{
+            selector: string;
+            field: string;
+            attribute?: string;
+        }>;
+    };
+}
+
+// Export format for Playwright
+export interface PlaywrightConfig {
+    name: string;
+    baseUrl: string;
+    steps: Array<{
+        action: 'goto' | 'click' | 'select' | 'extract' | 'wait' | 'pagination';
+        selector?: string;
+        url?: string;
+        waitForSelector?: string;
+        waitTimeout?: number;
+        extract?: {
+            selector: string;
+            attribute?: string;
+            field: string;
+        };
+    }>;
+    output: {
+        format: 'json' | 'csv';
+        fields: string[];
+    };
+}
+

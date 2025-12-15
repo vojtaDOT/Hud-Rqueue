@@ -22,11 +22,20 @@ interface DistrictItem {
     kraj: string;
 }
 
+interface MunicipalityItem {
+    id: string;
+    kod: string;
+    nazev: { cs: string };
+    okres: string;
+}
+
 export function DataSeeder() {
     const [regionsJson, setRegionsJson] = useState('');
     const [districtsJson, setDistrictsJson] = useState('');
+    const [municipalitiesJson, setMunicipalitiesJson] = useState('');
     const [isImportingRegions, setIsImportingRegions] = useState(false);
     const [isImportingDistricts, setIsImportingDistricts] = useState(false);
+    const [isImportingMunicipalities, setIsImportingMunicipalities] = useState(false);
 
     const handleImportRegions = async () => {
         if (!regionsJson.trim()) {
@@ -111,6 +120,56 @@ export function DataSeeder() {
         }
     };
 
+    const handleImportMunicipalities = async () => {
+        if (!municipalitiesJson.trim()) {
+            toast.error('Please paste JSON data for municipalities');
+            return;
+        }
+
+        setIsImportingMunicipalities(true);
+        try {
+            const parsed = JSON.parse(municipalitiesJson);
+            const items: MunicipalityItem[] = parsed.polozky;
+
+            if (!items || !Array.isArray(items)) {
+                throw new Error('Invalid JSON structure. Expected { "polozky": [...] }');
+            }
+
+            const mappedData = items.map((item) => ({
+                id: item.id,
+                kod: item.kod,
+                nazev: item.nazev,
+                okres_id: item.okres,
+            }));
+
+            const { error } = await supabase
+                .from('cz_regions_obec')
+                .upsert(mappedData, { onConflict: 'id' });
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            toast.success(`Successfully imported ${mappedData.length} municipalities`);
+            setMunicipalitiesJson('');
+        } catch (error) {
+            console.error('Import error:', error);
+
+            let description = error instanceof Error ? error.message : 'Unknown error';
+
+            // Check for Foreign Key violation (missing dependent record)
+            if (description.includes('foreign key constraint')) {
+                description = 'Referenced District (Okres) does not exist. Please import Districts first.';
+            }
+
+            toast.error('Error importing municipalities', {
+                description,
+            });
+        } finally {
+            setIsImportingMunicipalities(false);
+        }
+    };
+
     return (
         <div className="w-full max-w-4xl mx-auto space-y-8">
             {/* Regions Card */}
@@ -179,6 +238,42 @@ export function DataSeeder() {
                             <>
                                 <Upload className="mr-2 h-4 w-4" />
                                 Import Districts
+                            </>
+                        )}
+                    </Button>
+                </CardContent>
+            </Card>
+
+            {/* Municipalities Card */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Import Municipalities (Obce)</CardTitle>
+                    <CardDescription>
+                        Paste JSON data with the structure: {`{ "polozky": [{ "id", "kod", "nazev", "okres" }] }`}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <textarea
+                        className="w-full h-48 p-3 rounded-md border bg-background text-foreground font-mono text-sm resize-y"
+                        placeholder='{ "polozky": [...] }'
+                        value={municipalitiesJson}
+                        onChange={(e) => setMunicipalitiesJson(e.target.value)}
+                        disabled={isImportingMunicipalities}
+                    />
+                    <Button
+                        onClick={handleImportMunicipalities}
+                        disabled={isImportingMunicipalities || !municipalitiesJson.trim()}
+                        className="w-full"
+                    >
+                        {isImportingMunicipalities ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Importing...
+                            </>
+                        ) : (
+                            <>
+                                <Upload className="mr-2 h-4 w-4" />
+                                Import Municipalities
                             </>
                         )}
                     </Button>

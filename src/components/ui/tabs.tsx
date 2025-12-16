@@ -53,13 +53,24 @@ const TabsTrigger = React.forwardRef<
     <button
       ref={ref}
       className={cn(
-        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 relative",
         isActive && "bg-background text-foreground shadow-sm",
         className
       )}
       onClick={() => context.onValueChange(triggerValue)}
       {...props}
-    />
+    >
+      <span className="relative z-10">{props.children}</span>
+      <span
+        className={cn(
+          "pointer-events-none absolute left-2 right-2 bottom-1 h-0.5 rounded-full bg-primary transition-all duration-200",
+          isActive
+            ? "scale-x-100 opacity-100"
+            : "scale-x-0 opacity-0 group-hover:opacity-100 group-hover:scale-x-100",
+          "origin-left"
+        )}
+      />
+    </button>
   )
 })
 TabsTrigger.displayName = "TabsTrigger"

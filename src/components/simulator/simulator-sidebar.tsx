@@ -195,7 +195,7 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
             },
         },
     ]);
-    const [activeTab, setActiveTab] = useState<'mainloop' | 'sources'>('sources');
+    const [activeTab, setActiveTab] = useState<'mainloop' | 'sources'>('mainloop');
     const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
     const [activeSourceId, setActiveSourceId] = useState<string>('source-1');
 
@@ -338,41 +338,34 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
     // Configuration Handler
     const handleConfigChange = (id: string, newConfig: any) => {
         if (activeTab === 'mainloop') {
-            setMainLoopBlocks((prev) => {
-                const updated = prev.map((block) =>
+            setMainLoopBlocks((prev) =>
+                prev.map((block) =>
                     block.id === id ? { ...block, config: newConfig } : block
-                );
-                notifyWorkflowChange(updated, sources);
-                return updated;
-            });
+                )
+            );
         } else {
-            setSources((prevSources) => {
-                const updated = prevSources.map((source) => {
+            setSources((prevSources) =>
+                prevSources.map((source) => {
                     if (source.id === activeSourceId) {
-                        const updatedSteps = source.steps.map((block) =>
-                            block.id === id ? { ...block, config: newConfig } : block
-                        );
-                        const updatedSource = { ...source, steps: updatedSteps };
-                        notifyWorkflowChange(mainLoopBlocks, prevSources.map(s => 
-                            s.id === activeSourceId ? updatedSource : s
-                        ));
-                        return updatedSource;
+                        return {
+                            ...source,
+                            steps: source.steps.map((block) =>
+                                block.id === id ? { ...block, config: newConfig } : block
+                            ),
+                        };
                     }
                     return source;
-                });
-                return updated;
-            });
+                })
+            );
         }
     };
 
     const handleSourceConfigChange = (sourceId: string, updates: Partial<SourceData>) => {
-        setSources((prevSources) => {
-            const updated = prevSources.map((source) =>
+        setSources((prevSources) =>
+            prevSources.map((source) =>
                 source.id === sourceId ? { ...source, ...updates } : source
-            );
-            notifyWorkflowChange(mainLoopBlocks, updated);
-            return updated;
-        });
+            )
+        );
     };
 
     const notifyWorkflowChange = (mainLoop: BlockData[], sourcesList: SourceData[]) => {
@@ -514,8 +507,8 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
 
 
                 {/* Tabs for Main Loop and Sources */}
-                <div className="flex-1 flex flex-col overflow-hidden">
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'mainloop' | 'sources')}>
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'mainloop' | 'sources')} className="flex-1 flex flex-col min-h-0 overflow-hidden">
                         <div className="px-4 pt-4 border-b border-white/10">
                             <TabsList className="bg-transparent border-0 p-0 h-auto">
                                 <TabsTrigger 
@@ -571,47 +564,51 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                         </div>
 
                         {/* Main Loop Content */}
-                        <TabsContent value="mainloop" className="flex-1 overflow-auto p-4 m-0">
-                            <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3 flex items-center justify-between">
-                                <span>Main Loop Steps</span>
-                                <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-white/40">
-                                    {mainLoopBlocks.length}
-                                </span>
-                            </h3>
+                        <TabsContent value="mainloop" className="flex-1 flex flex-col overflow-hidden m-0 min-h-0">
+                            <div className="p-4 border-b border-white/10 shrink-0">
+                                <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
+                                    <span>Main Loop Steps</span>
+                                    <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-white/40">
+                                        {mainLoopBlocks.length}
+                                    </span>
+                                </h3>
+                            </div>
 
-                            <SortableContext
-                                items={mainLoopBlocks}
-                                strategy={verticalListSortingStrategy}
-                            >
-                                <div className="space-y-2 relative">
-                                    {mainLoopBlocks.length > 1 && (
-                                        <div
-                                            className="absolute left-16 top-7 bottom-7 w-0.5 bg-gradient-to-b from-purple-500/50 via-purple-500/20 to-purple-500/5 -z-10"
-                                        />
-                                    )}
+                            <div className="flex-1 overflow-auto p-4 min-h-0">
+                                <SortableContext
+                                    items={mainLoopBlocks}
+                                    strategy={verticalListSortingStrategy}
+                                >
+                                    <div className="space-y-2 relative pb-2">
+                                        {mainLoopBlocks.length > 1 && (
+                                            <div
+                                                className="absolute left-16 top-7 bottom-7 w-0.5 bg-gradient-to-b from-purple-500/50 via-purple-500/20 to-purple-500/5 -z-10"
+                                            />
+                                        )}
 
-                                    {mainLoopBlocks.map((block) => (
-                                        <SortableBlock
-                                            key={block.id}
-                                            block={block}
-                                            onRemove={handleRemoveBlock}
-                                            onConfigure={setConfiguringBlockId}
-                                        />
-                                    ))}
+                                        {mainLoopBlocks.map((block) => (
+                                            <SortableBlock
+                                                key={block.id}
+                                                block={block}
+                                                onRemove={handleRemoveBlock}
+                                                onConfigure={setConfiguringBlockId}
+                                            />
+                                        ))}
 
-                                    {mainLoopBlocks.length === 0 && (
-                                        <div className="text-center py-12 border-2 border-dashed border-white/10 rounded-lg">
-                                            <p className="text-sm text-white/30">
-                                                Add steps to main loop
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </SortableContext>
+                                        {mainLoopBlocks.length === 0 && (
+                                            <div className="text-center py-12 border-2 border-dashed border-white/10 rounded-lg">
+                                                <p className="text-sm text-white/30">
+                                                    Add steps to main loop
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </SortableContext>
+                            </div>
                         </TabsContent>
 
                         {/* Sources Content */}
-                        <TabsContent value="sources" className="flex-1 flex flex-col overflow-hidden m-0">
+                        <TabsContent value="sources" className="flex-1 flex flex-col overflow-hidden m-0 min-h-0">
                             {/* Source List */}
                             <div className="p-4 border-b border-white/10 shrink-0">
                                 <div className="flex items-center justify-between mb-3">
@@ -632,7 +629,6 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                                             key={source.id}
                                             onClick={() => {
                                                 setActiveSourceId(source.id);
-                                                setConfiguringSourceId(source.id);
                                             }}
                                             className={cn(
                                                 "w-full text-left px-3 py-2 rounded-lg border transition-all cursor-pointer",
@@ -650,17 +646,30 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                                                         {source.url || 'No URL'}
                                                     </div>
                                                 </div>
-                                                {sources.length > 1 && (
+                                                <div className="flex items-center gap-1">
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            handleRemoveSource(source.id);
+                                                            setConfiguringSourceId(source.id);
                                                         }}
-                                                        className="ml-2 p-1 text-white/20 hover:text-red-400 transition-colors"
+                                                        className="p-1 text-white/20 hover:text-purple-400 transition-colors"
+                                                        aria-label="Configure source"
                                                     >
-                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        <Settings className="w-3.5 h-3.5" />
                                                     </button>
-                                                )}
+                                                    {sources.length > 1 && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveSource(source.id);
+                                                            }}
+                                                            className="p-1 text-white/20 hover:text-red-400 transition-colors"
+                                                            aria-label="Remove source"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -668,7 +677,7 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                             </div>
 
                             {/* Selected Source Steps */}
-                            <div className="flex-1 overflow-auto p-4">
+                            <div className="flex-1 overflow-auto p-4 min-h-0">
                                 <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3 flex items-center justify-between">
                                     <span>{sources.find(s => s.id === activeSourceId)?.label || 'Source'} Steps</span>
                                     <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-white/40">
@@ -680,7 +689,7 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                                     items={currentBlocks.map(b => b.id)}
                                     strategy={verticalListSortingStrategy}
                                 >
-                                    <div className="space-y-2 relative">
+                                    <div className="space-y-2 relative pb-2">
                                         {currentBlocks.length > 1 && (
                                             <div
                                                 className="absolute left-16 top-7 bottom-7 w-0.5 bg-gradient-to-b from-purple-500/50 via-purple-500/20 to-purple-500/5 -z-10"

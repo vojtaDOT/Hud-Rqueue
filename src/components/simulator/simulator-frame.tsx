@@ -206,7 +206,7 @@ export function SimulatorFrame({
                         src={proxyUrl}
                         className="w-full h-full border-0 bg-white"
                         onLoad={handleLoad}
-                        sandbox="allow-scripts allow-same-origin allow-forms"
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
                         title="Page Simulator"
                     />
                 </div>

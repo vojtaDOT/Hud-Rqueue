@@ -865,12 +865,15 @@ export async function GET(request: NextRequest) {
                 html += selectionScript;
             }
 
-            // Return proxied HTML with security headers stripped to allow iframe embedding
+            // Return proxied HTML with security headers that ALLOW iframe embedding
             return new NextResponse(html, {
                 headers: {
                     'Content-Type': 'text/html; charset=utf-8',
-                    // Don't set X-Frame-Options - we want to allow iframe embedding
-                    // Add CORS headers
+                    // Explicitly allow iframe embedding from anywhere
+                    'X-Frame-Options': 'ALLOWALL',
+                    // CSP that allows everything (needed for proxied content)
+                    'Content-Security-Policy': "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;",
+                    // CORS headers
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',

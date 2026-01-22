@@ -10,7 +10,8 @@ async function getPlaywright(): Promise<any> {
     if (!chromium) {
         try {
             // Dynamic import - Playwright may not be installed
-            const playwright = await import('playwright');
+            // @ts-expect-error - playwright is an optional dependency
+            const playwright = await import(/* webpackIgnore: true */ 'playwright');
             chromium = playwright.chromium;
         } catch {
             return null;

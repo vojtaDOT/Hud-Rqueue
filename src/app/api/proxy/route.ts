@@ -1,5 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// User agents to rotate
+const USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+];
+
+// Get a consistent user agent for a domain (so resources load correctly)
+function getUserAgentForDomain(domain: string): string {
+    const hash = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return USER_AGENTS[hash % USER_AGENTS.length];
+}
+
 // Helper function to return HTML error page
 function htmlErrorResponse(message: string, status: number = 500) {
     const html = `
@@ -35,12 +49,27 @@ function htmlErrorResponse(message: string, status: number = 500) {
                     color: #666;
                     margin-bottom: 1rem;
                 }
+                .retry-btn {
+                    background: #7c3aed;
+                    color: white;
+                    border: none;
+                    padding: 0.5rem 1rem;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 0.875rem;
+                }
+                .retry-btn:hover {
+                    background: #6d28d9;
+                }
             </style>
         </head>
         <body>
             <div class="error-container">
                 <div class="error-title">Chyba načítání stránky</div>
                 <div class="error-message">${message}</div>
+                <button class="retry-btn" onclick="window.parent.postMessage({type:'proxy-error',message:'${message.replace(/'/g, "\\'")}'},'*')">
+                    Zkusit s Playwright
+                </button>
             </div>
         </body>
         </html>
@@ -77,20 +106,21 @@ export async function GET(request: NextRequest) {
 
         // Create AbortController for timeout
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        const userAgent = getUserAgentForDomain(url.hostname);
 
         try {
             // Fetch the content with timeout - use modern browser headers
             const response = await fetch(targetUrl, {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'User-Agent': userAgent,
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
                     'Accept-Language': 'cs-CZ,cs;q=0.9,en-US;q=0.8,en;q=0.7',
                     'Accept-Encoding': 'gzip, deflate, br',
                     'Cache-Control': 'no-cache',
                     'DNT': '1',
                     'Pragma': 'no-cache',
-                    'Referer': url.origin,
                     'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
                     'Sec-Ch-Ua-Mobile': '?0',
                     'Sec-Ch-Ua-Platform': '"Windows"',
@@ -112,15 +142,12 @@ export async function GET(request: NextRequest) {
             if (!response.ok) {
                 console.error(`Proxy fetch failed: ${response.status} ${response.statusText} for ${targetUrl}`);
                 
-                // Only show HTML error page for HTML content
-                // For other resources (CSS, JS, images), return empty response
                 if (isHtml) {
                     return htmlErrorResponse(
                         `Nepodařilo se načíst stránku: ${response.statusText} (${response.status})`,
                         response.status
                     );
                 } else {
-                    // For non-HTML resources, return empty response with proper status
                     return new NextResponse('', {
                         status: response.status,
                         headers: {
@@ -130,11 +157,10 @@ export async function GET(request: NextRequest) {
                 }
             }
         
-        // If it's HTML, we need to rewrite URLs
         if (isHtml) {
             let html = await response.text();
             
-            // Strip Content-Security-Policy meta tags that might block our injected scripts
+            // Strip Content-Security-Policy meta tags
             html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
             
             // Strip X-Frame-Options meta tags
@@ -143,14 +169,11 @@ export async function GET(request: NextRequest) {
             // Strip existing base tags to avoid conflicts
             html = html.replace(/<base[^>]*>/gi, '');
             
-            // Use the full original URL (including path) as base for relative URLs
-            // This ensures relative URLs like ./style.css resolve correctly
-            const baseUrlForRelative = url.href; // Full URL including path
+            const baseUrlForRelative = url.href;
             const proxyBase = `/api/proxy?url=`;
             
-            // Prevent infinite loops - don't rewrite URLs that are already proxied
+            // Prevent infinite loops
             const isAlreadyProxied = (urlValue: string) => {
-                // Check if URL already contains proxy path (both encoded and decoded)
                 return urlValue.includes('/api/proxy?url=') || 
                        urlValue.includes('/api/proxy?url%3D') ||
                        urlValue.startsWith('/api/proxy') ||
@@ -163,12 +186,10 @@ export async function GET(request: NextRequest) {
                 
                 const trimmedUrl = urlValue.trim();
                 
-                // Skip data URLs, javascript:, mailto:, tel:, anchors, blob URLs
                 if (/^(data:|javascript:|mailto:|tel:|#|blob:)/i.test(trimmedUrl)) {
                     return urlValue;
                 }
                 
-                // Skip if already proxied
                 if (isAlreadyProxied(trimmedUrl)) {
                     return urlValue;
                 }
@@ -176,22 +197,16 @@ export async function GET(request: NextRequest) {
                 try {
                     let absoluteUrl: string;
                     
-                    // Handle protocol-relative URLs (//example.com/path)
                     if (trimmedUrl.startsWith('//')) {
                         absoluteUrl = url.protocol + trimmedUrl;
-                    }
-                    // Handle absolute URLs
-                    else if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
+                    } else if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
                         absoluteUrl = trimmedUrl;
-                    }
-                    // Relative URL - make it absolute first using the full base URL
-                    else {
+                    } else {
                         absoluteUrl = new URL(trimmedUrl, baseUrlForRelative).href;
                     }
                     
                     return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
-                } catch (e) {
-                    // URL parsing failed - try simple concatenation as fallback
+                } catch {
                     try {
                         if (trimmedUrl.startsWith('/')) {
                             return `${proxyBase}${encodeURIComponent(url.origin + trimmedUrl)}`;
@@ -203,39 +218,121 @@ export async function GET(request: NextRequest) {
                 }
             };
             
-            // Frame-buster prevention script - must be injected FIRST before any other scripts run
-            const frameBusterPrevention = `<script id="frame-buster-init">
+            // Frame-buster prevention + AJAX/Fetch interception script
+            const injectedScripts = `
+                <script id="proxy-init-scripts">
                 (function(){
-                    // Prevent frame-busting scripts from breaking out of iframe
+                    // === FRAME BUSTER PREVENTION ===
                     try {
-                        var _top = window.self;
-                        Object.defineProperty(window, 'top', { get: function() { return _top; }, configurable: false });
+                        var _self = window.self;
+                        Object.defineProperty(window, 'top', { get: function() { return _self; }, configurable: false });
+                        Object.defineProperty(window, 'parent', { get: function() { return _self; }, configurable: false });
                     } catch(e) {}
-                    try {
-                        var _parent = window.self;
-                        Object.defineProperty(window, 'parent', { get: function() { return _parent; }, configurable: false });
-                    } catch(e) {}
-                    // Block location.replace and location.href changes that try to break out
-                    var originalLocation = window.location;
-                    // Override common frame-breaking patterns
-                    window.addEventListener('beforeunload', function(e) {
-                        // Allow navigation within the iframe
-                    });
+                    
+                    // === FETCH/XHR INTERCEPTION ===
+                    var PROXY_BASE = '/api/proxy?url=';
+                    var ORIGINAL_ORIGIN = '${url.origin}';
+                    var ORIGINAL_HREF = '${url.href}';
+                    
+                    function shouldProxy(urlStr) {
+                        if (!urlStr) return false;
+                        if (urlStr.startsWith('data:') || urlStr.startsWith('blob:') || urlStr.startsWith('javascript:')) return false;
+                        if (urlStr.includes('/api/proxy')) return false;
+                        return true;
+                    }
+                    
+                    function makeAbsolute(urlStr) {
+                        if (urlStr.startsWith('//')) return '${url.protocol}' + urlStr;
+                        if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
+                        if (urlStr.startsWith('/')) return ORIGINAL_ORIGIN + urlStr;
+                        // Relative URL
+                        try {
+                            return new URL(urlStr, ORIGINAL_HREF).href;
+                        } catch(e) {
+                            return ORIGINAL_ORIGIN + '/' + urlStr;
+                        }
+                    }
+                    
+                    function proxyUrl(urlStr) {
+                        if (!shouldProxy(urlStr)) return urlStr;
+                        var absolute = makeAbsolute(urlStr);
+                        return PROXY_BASE + encodeURIComponent(absolute);
+                    }
+                    
+                    // Override fetch
+                    var originalFetch = window.fetch;
+                    window.fetch = function(input, init) {
+                        var url = input;
+                        if (typeof input === 'string') {
+                            url = proxyUrl(input);
+                        } else if (input instanceof Request) {
+                            url = new Request(proxyUrl(input.url), input);
+                        } else if (input && input.url) {
+                            input.url = proxyUrl(input.url);
+                        }
+                        return originalFetch.call(this, url, init);
+                    };
+                    
+                    // Override XMLHttpRequest
+                    var originalXHROpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+                        var proxiedUrl = proxyUrl(url);
+                        return originalXHROpen.call(this, method, proxiedUrl, async !== false, user, password);
+                    };
+                    
+                    // Override Image src
+                    var originalImageDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+                    if (originalImageDescriptor && originalImageDescriptor.set) {
+                        Object.defineProperty(HTMLImageElement.prototype, 'src', {
+                            set: function(value) {
+                                originalImageDescriptor.set.call(this, proxyUrl(value));
+                            },
+                            get: originalImageDescriptor.get
+                        });
+                    }
+                    
+                    // Override dynamic script loading
+                    var originalScriptDescriptor = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+                    if (originalScriptDescriptor && originalScriptDescriptor.set) {
+                        Object.defineProperty(HTMLScriptElement.prototype, 'src', {
+                            set: function(value) {
+                                originalScriptDescriptor.set.call(this, proxyUrl(value));
+                            },
+                            get: originalScriptDescriptor.get
+                        });
+                    }
+                    
+                    // Override link href for stylesheets
+                    var originalLinkDescriptor = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, 'href');
+                    if (originalLinkDescriptor && originalLinkDescriptor.set) {
+                        Object.defineProperty(HTMLLinkElement.prototype, 'href', {
+                            set: function(value) {
+                                originalLinkDescriptor.set.call(this, proxyUrl(value));
+                            },
+                            get: originalLinkDescriptor.get
+                        });
+                    }
+                    
+                    // Override window.location for some frame-busting scripts
+                    // (This is tricky - we can't fully override location, but we can catch some patterns)
+                    
+                    console.log('[Proxy] Interception scripts loaded for:', ORIGINAL_ORIGIN);
                 })();
-            </script>`;
+                </script>`;
             
-            // Inject <base> tag for better relative URL handling (fallback for any URLs we miss)
+            // Inject base tag and scripts
             const baseTag = `<base href="${baseUrlForRelative}">`;
             if (html.includes('<head>')) {
-                html = html.replace('<head>', `<head>${frameBusterPrevention}${baseTag}`);
+                html = html.replace('<head>', `<head>${injectedScripts}${baseTag}`);
             } else if (html.includes('<HEAD>')) {
-                html = html.replace('<HEAD>', `<HEAD>${frameBusterPrevention}${baseTag}`);
-            } else if (html.includes('<html>') || html.includes('<HTML>')) {
-                // No head tag - inject at start of html
-                html = html.replace(/<html[^>]*>/i, `$&<head>${frameBusterPrevention}${baseTag}</head>`);
+                html = html.replace('<HEAD>', `<HEAD>${injectedScripts}${baseTag}`);
+            } else if (/<html[^>]*>/i.test(html)) {
+                html = html.replace(/<html[^>]*>/i, `$&<head>${injectedScripts}${baseTag}</head>`);
+            } else {
+                html = `${injectedScripts}${baseTag}${html}`;
             }
             
-            // Rewrite href, src, action attributes
+            // Rewrite static URLs in HTML
             html = html.replace(
                 /(href|src|action)=["']([^"']+)["']/gi,
                 (match, attr, urlValue) => {
@@ -244,12 +341,11 @@ export async function GET(request: NextRequest) {
                 }
             );
             
-            // Handle srcset attributes for responsive images
+            // Handle srcset
             html = html.replace(
                 /srcset=["']([^"']+)["']/gi,
                 (match, srcsetValue) => {
                     try {
-                        // srcset format: "url1 1x, url2 2x" or "url1 100w, url2 200w"
                         const parts = srcsetValue.split(',').map((part: string) => {
                             const trimmed = part.trim();
                             const [imgUrl, descriptor] = trimmed.split(/\s+/);
@@ -260,14 +356,13 @@ export async function GET(request: NextRequest) {
                             return trimmed;
                         });
                         return `srcset="${parts.join(', ')}"`;
-                    } catch (e) {
-                        console.warn(`Failed to rewrite srcset: ${srcsetValue}`, e);
+                    } catch {
                         return match;
                     }
                 }
             );
             
-            // Handle inline style attributes with url() references
+            // Handle inline styles with url()
             html = html.replace(
                 /style=["']([^"']*url\([^)]+\)[^"']*)["']/gi,
                 (match, styleValue) => {
@@ -277,26 +372,28 @@ export async function GET(request: NextRequest) {
                             (_: string, cssUrl: string) => `url("${proxyUrl(cssUrl)}")`
                         );
                         return `style="${rewrittenStyle}"`;
-                    } catch (e) {
-                        console.warn(`Failed to rewrite inline style: ${styleValue}`, e);
+                    } catch {
                         return match;
                     }
                 }
             );
 
-            // Handle CSS url() references in <style> tags
+            // Handle CSS url() in style tags
             html = html.replace(
-                /url\(["']?([^"')]+)["']?\)/gi,
-                (match, urlValue) => {
-                    // Skip data URLs
-                    if (/^data:/i.test(urlValue.trim())) {
-                        return match;
-                    }
-                    return `url("${proxyUrl(urlValue)}")`;
+                /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
+                (match, openTag, cssContent, closeTag) => {
+                    const rewrittenCss = cssContent.replace(
+                        /url\(["']?([^"')]+)["']?\)/gi,
+                        (_: string, cssUrl: string) => {
+                            if (/^data:/i.test(cssUrl.trim())) return `url("${cssUrl}")`;
+                            return `url("${proxyUrl(cssUrl)}")`;
+                        }
+                    );
+                    return `${openTag}${rewrittenCss}${closeTag}`;
                 }
             );
 
-            // Inject selection script
+            // Inject element selector script
             const selectionScript = `
                 <script id="element-selector-script">
                     (function() {
@@ -330,11 +427,9 @@ export async function GET(request: NextRequest) {
                                 if (highlightDiv) highlightDiv.style.display = 'none';
                                 return;
                             }
-
                             const rect = element.getBoundingClientRect();
                             const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
                             const scrollY = window.pageYOffset || document.documentElement.scrollTop;
-
                             const highlight = createHighlight();
                             highlight.style.display = 'block';
                             highlight.style.left = (rect.left + scrollX) + 'px';
@@ -384,27 +479,15 @@ export async function GET(request: NextRequest) {
                         function detectListPattern(el) {
                             const parent = el.parentElement;
                             if (!parent) return { isList: false };
-
-                            const siblings = Array.from(parent.children).filter(
-                                e => e.tagName === el.tagName
-                            );
-
+                            const siblings = Array.from(parent.children).filter(e => e.tagName === el.tagName);
                             if (siblings.length >= 2) {
-                                let container = parent;
-                                const containerChildren = Array.from(container.children);
-                                const similarChildren = containerChildren.filter(
-                                    e => e.tagName === el.tagName
-                                );
-                                if (similarChildren.length >= 2) {
-                                    const containerSelector = getElementSelector(container);
-                                    return {
-                                        isList: true,
-                                        listSelector: containerSelector + ' > ' + el.tagName.toLowerCase(),
-                                        count: similarChildren.length
-                                    };
-                                }
+                                const containerSelector = getElementSelector(parent);
+                                return {
+                                    isList: true,
+                                    listSelector: containerSelector + ' > ' + el.tagName.toLowerCase(),
+                                    count: siblings.length
+                                };
                             }
-
                             if (['UL', 'OL', 'DL'].includes(parent.tagName)) {
                                 const parentSelector = getElementSelector(parent);
                                 return {
@@ -413,173 +496,40 @@ export async function GET(request: NextRequest) {
                                     count: parent.children.length
                                 };
                             }
-
                             return { isList: false };
                         }
 
-                        // Get the actual element (not text node) from event target
                         function getElementFromEvent(e) {
                             let target = e.target;
-                            
-                            // If target is a text node, get its parent element
-                            if (target.nodeType === 3) { // TEXT_NODE
-                                target = target.parentElement;
-                            }
-                            
-                            // Ensure we have an element
-                            while (target && target.nodeType !== 1) { // ELEMENT_NODE
-                                target = target.parentElement;
-                            }
-                            
+                            if (target.nodeType === 3) target = target.parentElement;
+                            while (target && target.nodeType !== 1) target = target.parentElement;
                             return target;
                         }
 
                         function handleMouseMove(e) {
                             if (!isSelectionMode) return;
-
                             const target = getElementFromEvent(e);
                             if (!target || target === highlightDiv || target === selectedEl) return;
-
-                            // Skip highlighting iframe elements
-                            if (target.tagName === 'IFRAME') {
-                                // Try to get element from iframe content for hover
-                                try {
-                                    const iframe = target;
-                                    const iframeWindow = iframe.contentWindow;
-                                    
-                                    if (iframeWindow) {
-                                        const iframeRect = iframe.getBoundingClientRect();
-                                        const mouseX = e.clientX - iframeRect.left;
-                                        const mouseY = e.clientY - iframeRect.top;
-                                        
-                                        // Request hover element from iframe
-                                        iframeWindow.postMessage({
-                                            type: 'get-element-at-point',
-                                            x: mouseX,
-                                            y: mouseY
-                                        }, '*');
-                                    }
-                                } catch (err) {
-                                    // CORS or other error - ignore
-                                }
-                                return;
-                            }
-
+                            if (target.tagName === 'IFRAME') return;
                             hoveredEl = target;
                             updateHighlight(target);
-
-                            const rect = target.getBoundingClientRect();
-                            const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
-                            const scrollY = window.pageYOffset || document.documentElement.scrollTop;
-
-                            window.parent.postMessage({
-                                type: 'element-hover',
-                                selector: getElementSelector(target),
-                                bounds: {
-                                    left: rect.left + scrollX,
-                                    top: rect.top + scrollY,
-                                    width: rect.width,
-                                    height: rect.height
-                                }
-                            }, '*');
                         }
 
                         function handleClick(e) {
                             if (!isSelectionMode) return;
-                            
                             const target = getElementFromEvent(e);
                             if (!target || target === highlightDiv) return;
-
-                            // Ignore iframe elements - try to get element from iframe content instead
-                            if (target.tagName === 'IFRAME') {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                e.stopImmediatePropagation();
-                                
-                                // Try to communicate with iframe content
-                                try {
-                                    const iframe = target;
-                                    const iframeWindow = iframe.contentWindow;
-                                    
-                                    if (iframeWindow) {
-                                        // Calculate click position relative to iframe
-                                        const iframeRect = iframe.getBoundingClientRect();
-                                        const clickX = e.clientX - iframeRect.left;
-                                        const clickY = e.clientY - iframeRect.top;
-                                        
-                                        // Store iframe reference for response handling
-                                        const iframeId = 'iframe_' + Date.now() + '_' + Math.random();
-                                        window._pendingIframeSelections = window._pendingIframeSelections || {};
-                                        window._pendingIframeSelections[iframeId] = {
-                                            iframe: iframe,
-                                            timestamp: Date.now()
-                                        };
-                                        
-                                        // Request element from iframe at click position
-                                        iframeWindow.postMessage({
-                                            type: 'get-element-at-point',
-                                            x: clickX,
-                                            y: clickY,
-                                            iframeId: iframeId
-                                        }, '*');
-                                        
-                                        // Set timeout - if iframe doesn't respond, ignore the click
-                                        setTimeout(() => {
-                                            if (window._pendingIframeSelections && window._pendingIframeSelections[iframeId]) {
-                                                delete window._pendingIframeSelections[iframeId];
-                                            }
-                                        }, 1000);
-                                        
-                                        // Don't select iframe itself
-                                        return;
-                                    }
-                                } catch (err) {
-                                    // CORS or other error - ignore iframe
-                                    console.log('Cannot access iframe content:', err);
-                                    return;
-                                }
-                            }
+                            if (target.tagName === 'IFRAME') return;
                             
-                            // Normal element selection (not iframe)
                             e.preventDefault();
                             e.stopPropagation();
                             e.stopImmediatePropagation();
 
-                            // If clicking on a label, try to find the associated input/select/textarea
                             let elementToSelect = target;
                             if (target.tagName === 'LABEL' && target.htmlFor) {
-                                const associatedElement = document.getElementById(target.htmlFor);
-                                if (associatedElement && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(associatedElement.tagName)) {
-                                    elementToSelect = associatedElement;
-                                }
-                            } else if (target.tagName === 'LABEL' && !target.htmlFor) {
-                                // Label without 'for' attribute - find first input/select/textarea inside
-                                const inputInside = target.querySelector('input, select, textarea, button');
-                                if (inputInside) {
-                                    elementToSelect = inputInside;
-                                }
-                            } else {
-                                // Prefer interactive elements over their containers
-                                // If we clicked on a container (DIV, SPAN, etc.) that contains an interactive element,
-                                // and the interactive element is small/close to click point, select it instead
-                                const interactiveElements = ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A', 'TEXTAREA'];
-                                if (!interactiveElements.includes(target.tagName)) {
-                                    // Check if there's an interactive element at or near the click point
-                                    const clickX = e.clientX;
-                                    const clickY = e.clientY;
-                                    const elementsAtPoint = document.elementsFromPoint(clickX, clickY);
-                                    
-                                    // Find the first interactive element in the stack
-                                    for (let i = 0; i < elementsAtPoint.length; i++) {
-                                        const el = elementsAtPoint[i];
-                                        if (el === target) break; // Stop at the clicked element
-                                        // Skip iframes in the stack
-                                        if (el.tagName === 'IFRAME') continue;
-                                        if (interactiveElements.includes(el.tagName) && target.contains(el)) {
-                                            elementToSelect = el;
-                                            break;
-                                        }
-                                    }
+                                const associated = document.getElementById(target.htmlFor);
+                                if (associated && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(associated.tagName)) {
+                                    elementToSelect = associated;
                                 }
                             }
 
@@ -598,32 +548,10 @@ export async function GET(request: NextRequest) {
                                 parentSelector: listInfo.isList ? getElementSelector(elementToSelect.parentElement) : undefined
                             };
 
-                            // Send to top-level parent (not just immediate parent)
-                            // This ensures messages from nested iframes reach the main frame
                             try {
-                                // Try to send to top window first
-                                if (window.top && window.top !== window) {
-                                    window.top.postMessage({
-                                        type: 'element-select',
-                                        elementInfo: elementInfo
-                                    }, '*');
-                                } else {
-                                    // Fallback: send to immediate parent
-                                    window.parent.postMessage({
-                                        type: 'element-select',
-                                        elementInfo: elementInfo
-                                    }, '*');
-                                }
+                                window.parent.postMessage({ type: 'element-select', elementInfo: elementInfo }, '*');
                             } catch (err) {
-                                // If top is not accessible, try parent
-                                try {
-                                    window.parent.postMessage({
-                                        type: 'element-select',
-                                        elementInfo: elementInfo
-                                    }, '*');
-                                } catch (parentErr) {
-                                    console.error('Cannot send message to parent:', parentErr);
-                                }
+                                console.error('Cannot send message:', err);
                             }
                         }
 
@@ -645,182 +573,30 @@ export async function GET(request: NextRequest) {
                         }
 
                         window.addEventListener('message', function(event) {
-                            if (event.data.type === 'enable-selection') {
-                                enableSelection();
-                                // Forward to all iframes in this document
-                                try {
-                                    const iframes = document.querySelectorAll('iframe');
-                                    iframes.forEach(function(iframe) {
-                                        try {
-                                            if (iframe.contentWindow) {
-                                                iframe.contentWindow.postMessage({
-                                                    type: 'enable-selection'
-                                                }, '*');
-                                            }
-                                        } catch (err) {
-                                            // Cannot access iframe
-                                        }
-                                    });
-                                } catch (err) {
-                                    // Ignore
-                                }
-                            } else if (event.data.type === 'disable-selection') {
-                                disableSelection();
-                                // Forward to all iframes in this document
-                                try {
-                                    const iframes = document.querySelectorAll('iframe');
-                                    iframes.forEach(function(iframe) {
-                                        try {
-                                            if (iframe.contentWindow) {
-                                                iframe.contentWindow.postMessage({
-                                                    type: 'disable-selection'
-                                                }, '*');
-                                            }
-                                        } catch (err) {
-                                            // Cannot access iframe
-                                        }
-                                    });
-                                } catch (err) {
-                                    // Ignore
-                                }
-                            } else if (event.data.type === 'get-element-at-point') {
-                                // Request from parent frame to get element at point (for iframe handling)
-                                if (!isSelectionMode) return;
-                                
-                                const x = event.data.x;
-                                const y = event.data.y;
-                                const iframeId = event.data.iframeId;
-                                
-                                // Get element at point - use viewport coordinates
-                                const elementAtPoint = document.elementFromPoint(x, y);
-                                if (elementAtPoint) {
-                                    const target = getElementFromEvent({ target: elementAtPoint });
-                                    if (target && target !== highlightDiv) {
-                                        // If element is another iframe, recursively get element from that iframe
-                                        if (target.tagName === 'IFRAME') {
-                                            try {
-                                                const nestedIframe = target;
-                                                const nestedIframeWindow = nestedIframe.contentWindow;
-                                                if (nestedIframeWindow) {
-                                                    // Calculate position relative to nested iframe
-                                                    const nestedIframeRect = nestedIframe.getBoundingClientRect();
-                                                    const nestedX = x - nestedIframeRect.left;
-                                                    const nestedY = y - nestedIframeRect.top;
-                                                    
-                                                    // Recursively request element from nested iframe
-                                                    nestedIframeWindow.postMessage({
-                                                        type: 'get-element-at-point',
-                                                        x: nestedX,
-                                                        y: nestedY,
-                                                        iframeId: iframeId
-                                                    }, '*');
-                                                    return;
-                                                }
-                                            } catch (err) {
-                                                // Cannot access nested iframe - fall through to select iframe itself
-                                                console.log('Cannot access nested iframe:', err);
-                                            }
-                                        }
-                                        
-                                        // Normal element selection
-                                        const selector = getElementSelector(target);
-                                        const listInfo = detectListPattern(target);
-                                        
-                                        const elementInfo = {
-                                            selector: listInfo.isList ? listInfo.listSelector : selector,
-                                            tagName: target.tagName.toLowerCase(),
-                                            textContent: target.textContent?.substring(0, 100) || '',
-                                            isList: listInfo.isList,
-                                            listItemCount: listInfo.count,
-                                            parentSelector: listInfo.isList ? getElementSelector(target.parentElement) : undefined
-                                        };
-                                        
-                                        // Send back to original requester (parent frame)
-                                        if (event.source && typeof event.source.postMessage === 'function') {
-                                            try {
-                                                event.source.postMessage({
-                                                    type: 'element-select-from-iframe',
-                                                    elementInfo: elementInfo,
-                                                    iframeId: iframeId
-                                                }, '*');
-                                            } catch (err) {
-                                                // If cannot send to source, try parent
-                                                window.parent.postMessage({
-                                                    type: 'element-select',
-                                                    elementInfo: elementInfo
-                                                }, '*');
-                                            }
-                                        } else {
-                                            // Fallback: send to parent
-                                            window.parent.postMessage({
-                                                type: 'element-select',
-                                                elementInfo: elementInfo
-                                            }, '*');
-                                        }
-                                    }
-                                }
-                            } else if (event.data.type === 'element-select-from-iframe') {
-                                // Element selected from nested iframe - forward to top parent
-                                const elementInfo = event.data.elementInfo;
-                                const iframeId = event.data.iframeId;
-                                
-                                // Clear pending selection if exists
-                                if (window._pendingIframeSelections && iframeId && window._pendingIframeSelections[iframeId]) {
-                                    delete window._pendingIframeSelections[iframeId];
-                                }
-                                
-                                // Forward to top parent (not just immediate parent)
-                                try {
-                                    // Try to send to top window first
-                                    if (window.top && window.top !== window) {
-                                        window.top.postMessage({
-                                            type: 'element-select',
-                                            elementInfo: elementInfo
-                                        }, '*');
-                                    } else {
-                                        // Fallback: send to immediate parent
-                                        window.parent.postMessage({
-                                            type: 'element-select',
-                                            elementInfo: elementInfo
-                                        }, '*');
-                                    }
-                                } catch (err) {
-                                    // If top is not accessible, try parent
-                                    try {
-                                        window.parent.postMessage({
-                                            type: 'element-select',
-                                            elementInfo: elementInfo
-                                        }, '*');
-                                    } catch (parentErr) {
-                                        console.error('Cannot send message to parent:', parentErr);
-                                    }
-                                }
-                            }
+                            if (event.data.type === 'enable-selection') enableSelection();
+                            else if (event.data.type === 'disable-selection') disableSelection();
                         });
 
-                        // Detect page type on load
+                        // Detect page type
                         function detectPageType() {
                             if (pageTypeDetected) return pageType;
                             
-                            // Check for React
                             const hasReact = window.React || 
-                                            document.querySelector('[data-reactroot]') ||
-                                            document.querySelector('[data-react-helmet]') ||
-                                            (window.__REACT_DEVTOOLS_GLOBAL_HOOK__ !== undefined) ||
-                                            Array.from(document.querySelectorAll('script')).some(s => 
-                                                (s.src && s.src.includes('react')) || 
-                                                (s.textContent && s.textContent.includes('React'))
-                                            );
+                                document.querySelector('[data-reactroot]') ||
+                                document.querySelector('[data-react-helmet]') ||
+                                (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ !== 'undefined') ||
+                                Array.from(document.querySelectorAll('script')).some(s => 
+                                    (s.src && s.src.includes('react')) || 
+                                    (s.textContent && s.textContent.includes('React'))
+                                );
                             
-                            // Check for other SPA frameworks
                             const hasVue = window.Vue || document.querySelector('[data-v-]');
                             const hasAngular = window.angular || document.querySelector('[ng-app]');
-                            const hasNextJS = window.__NEXT_DATA__ !== undefined;
+                            const hasNextJS = typeof window.__NEXT_DATA__ !== 'undefined';
                             
-                            // Check if content is dynamically loaded (SPA indicator)
                             const hasDynamicContent = document.querySelector('[data-reactroot]') || 
-                                                     document.querySelector('[id^="__next"]') ||
-                                                     document.querySelector('[id^="root"]');
+                                document.querySelector('[id^="__next"]') ||
+                                document.querySelector('[id^="root"]');
                             
                             pageType = {
                                 isReact: !!hasReact || !!hasNextJS,
@@ -831,21 +607,17 @@ export async function GET(request: NextRequest) {
                             };
                             
                             pageTypeDetected = true;
+                            window.parent.postMessage({ type: 'page-type-detected', pageType: pageType }, '*');
                             
-                            // Send page type to parent
-                            window.parent.postMessage({
-                                type: 'page-type-detected',
-                                pageType: pageType
-                            }, '*');
+                            // Notify that proxy loaded successfully
+                            window.parent.postMessage({ type: 'proxy-loaded', url: '${targetUrl}' }, '*');
                             
                             return pageType;
                         }
 
-                        // Detect on DOM ready
                         if (document.readyState === 'loading') {
                             document.addEventListener('DOMContentLoaded', detectPageType);
                         } else {
-                            // DOM already loaded, detect immediately
                             setTimeout(detectPageType, 100);
                         }
 
@@ -856,7 +628,6 @@ export async function GET(request: NextRequest) {
                 </script>
             `;
 
-            // Inject script before closing body tag, or at end of head if no body
             if (html.includes('</body>')) {
                 html = html.replace('</body>', selectionScript + '</body>');
             } else if (html.includes('</head>')) {
@@ -865,15 +636,11 @@ export async function GET(request: NextRequest) {
                 html += selectionScript;
             }
 
-            // Return proxied HTML with security headers that ALLOW iframe embedding
             return new NextResponse(html, {
                 headers: {
                     'Content-Type': 'text/html; charset=utf-8',
-                    // Explicitly allow iframe embedding from anywhere
                     'X-Frame-Options': 'ALLOWALL',
-                    // CSP that allows everything (needed for proxied content)
                     'Content-Security-Policy': "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;",
-                    // CORS headers
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',
@@ -881,48 +648,42 @@ export async function GET(request: NextRequest) {
             });
         }
 
-            // For non-HTML content (CSS, JS, images, etc.), proxy as-is
-            // But handle errors gracefully - don't show error page for missing resources
+            // For non-HTML content
             try {
                 const buffer = await response.arrayBuffer();
                 return new NextResponse(buffer, {
                     headers: {
                         'Content-Type': contentType,
-                        // Add CORS headers for resources loaded in iframe
                         'Access-Control-Allow-Origin': '*',
                         'Access-Control-Allow-Methods': 'GET',
+                        'Cache-Control': 'public, max-age=3600',
                     },
                 });
-            } catch (bufferError) {
-                console.error(`Error reading response buffer for ${targetUrl}:`, bufferError);
-                // For non-HTML, return empty response instead of error page
+            } catch {
                 return new NextResponse('', {
                     status: response.status,
-                    headers: {
-                        'Content-Type': contentType,
-                    },
+                    headers: { 'Content-Type': contentType },
                 });
             }
-        } catch (fetchError: any) {
+        } catch (fetchError: unknown) {
             clearTimeout(timeoutId);
             
-            if (fetchError.name === 'AbortError') {
-                console.error(`Proxy timeout for ${targetUrl}`);
+            const error = fetchError as { name?: string; message?: string };
+            
+            if (error.name === 'AbortError') {
                 return htmlErrorResponse('Timeout při načítání stránky (přes 30 sekund)', 504);
             }
             
-            console.error(`Proxy fetch error for ${targetUrl}:`, fetchError);
             return htmlErrorResponse(
-                `Chyba při načítání stránky: ${fetchError.message || 'Neznámá chyba'}`,
+                `Chyba při načítání stránky: ${error.message || 'Neznámá chyba'}`,
                 500
             );
         }
-    } catch (error: any) {
-        console.error('Proxy error:', error);
+    } catch (error: unknown) {
+        const err = error as { message?: string };
         return htmlErrorResponse(
-            `Chyba proxy serveru: ${error.message || 'Neznámá chyba'}`,
+            `Chyba proxy serveru: ${err.message || 'Neznámá chyba'}`,
             500
         );
     }
 }
-

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Loader2, Globe, MousePointer2, X } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Loader2, Globe, MousePointer2, X, RefreshCw, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageType, ElementSelector } from '@/lib/crawler-types';
 
@@ -23,6 +23,8 @@ interface ElementInfo {
     parentSelector?: string;
 }
 
+type RenderMode = 'proxy' | 'playwright' | 'loading';
+
 export function SimulatorFrame({
     url,
     onLoad,
@@ -36,22 +38,53 @@ export function SimulatorFrame({
     const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
     const [hoveredElement, setHoveredElement] = useState<{ selector: string; bounds: DOMRect } | null>(null);
     const [pageType, setPageType] = useState<PageType | null>(null);
+    const [renderMode, setRenderMode] = useState<RenderMode>('proxy');
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [retryCount, setRetryCount] = useState(0);
     const iframeRef = useRef<HTMLIFrameElement>(null);
-
-    const handleLoad = () => {
-        setIframeLoaded(true);
-        onLoad?.();
-    };
+    const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
     
-    // Generate proxy URL for same-origin access
-    const proxyUrl = isValidUrl ? `/api/proxy?url=${encodeURIComponent(url)}` : '';
+    // Generate URL based on render mode
+    const getIframeSrc = useCallback(() => {
+        if (!isValidUrl) return '';
+        if (renderMode === 'playwright') {
+            return `/api/render?url=${encodeURIComponent(url)}`;
+        }
+        return `/api/proxy?url=${encodeURIComponent(url)}`;
+    }, [isValidUrl, url, renderMode]);
 
+    const handleLoad = useCallback(() => {
+        // Clear any pending timeout
+        if (loadTimeoutRef.current) {
+            clearTimeout(loadTimeoutRef.current);
+            loadTimeoutRef.current = null;
+        }
+        setIframeLoaded(true);
+        setLoadError(null);
+        onLoad?.();
+    }, [onLoad]);
+
+    const switchToPlaywright = useCallback(() => {
+        console.log('[SimulatorFrame] Switching to Playwright mode');
+        setRenderMode('playwright');
+        setIframeLoaded(false);
+        setLoadError(null);
+    }, []);
+
+    const retryWithProxy = useCallback(() => {
+        console.log('[SimulatorFrame] Retrying with proxy');
+        setRenderMode('proxy');
+        setIframeLoaded(false);
+        setLoadError(null);
+        setRetryCount(prev => prev + 1);
+    }, []);
 
     // Handle messages from iframe
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
+            // Handle element hover
             if (event.data.type === 'element-hover') {
                 setHoveredElement({
                     selector: event.data.selector,
@@ -62,11 +95,12 @@ export function SimulatorFrame({
                         height: event.data.bounds.height
                     } as DOMRect
                 });
-            } else if (event.data.type === 'element-select') {
+            } 
+            // Handle element selection
+            else if (event.data.type === 'element-select') {
                 const elementInfo = event.data.elementInfo as ElementInfo;
                 setSelectedElement(elementInfo);
                 
-                // Convert to ElementSelector format
                 const selectorInfo: ElementSelector = {
                     selector: elementInfo.selector,
                     tagName: elementInfo.tagName,
@@ -77,23 +111,42 @@ export function SimulatorFrame({
                 };
                 
                 onElementSelect?.(elementInfo.selector, selectorInfo);
-            } else if (event.data.type === 'page-type-detected') {
+            } 
+            // Handle page type detection
+            else if (event.data.type === 'page-type-detected') {
                 const detectedPageType = event.data.pageType as PageType;
                 setPageType(detectedPageType);
                 onPageTypeDetected?.(detectedPageType);
+            }
+            // Handle proxy success
+            else if (event.data.type === 'proxy-loaded') {
+                console.log('[SimulatorFrame] Proxy loaded successfully:', event.data.url);
+                setLoadError(null);
+            }
+            // Handle Playwright success
+            else if (event.data.type === 'playwright-loaded') {
+                console.log('[SimulatorFrame] Playwright loaded successfully:', event.data.url);
+                setLoadError(null);
+            }
+            // Handle proxy error - switch to Playwright
+            else if (event.data.type === 'proxy-error') {
+                console.log('[SimulatorFrame] Proxy error, switching to Playwright:', event.data.message);
+                setLoadError(event.data.message);
+                if (renderMode === 'proxy') {
+                    switchToPlaywright();
+                }
             }
         };
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onElementSelect, onPageTypeDetected]);
+    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright]);
 
     // Enable/disable selection mode in iframe
     useEffect(() => {
         const iframe = iframeRef.current;
         if (!iframe || !iframe.contentWindow || !iframeLoaded) return;
 
-        // Wait a bit for the script to be ready
         setTimeout(() => {
             try {
                 iframe.contentWindow?.postMessage(
@@ -106,35 +159,109 @@ export function SimulatorFrame({
         }, 100);
     }, [selectionMode, iframeLoaded]);
 
-    // Reset selection when URL changes
+    // Reset state when URL changes
     useEffect(() => {
         setSelectedElement(null);
         setHoveredElement(null);
         setPageType(null);
-    }, [url]);
+        setIframeLoaded(false);
+        setLoadError(null);
+        setRenderMode('proxy'); // Always start with proxy
+        setRetryCount(0);
+        
+        // Set a timeout to detect if the page doesn't load
+        if (loadTimeoutRef.current) {
+            clearTimeout(loadTimeoutRef.current);
+        }
+        
+        if (isValidUrl) {
+            loadTimeoutRef.current = setTimeout(() => {
+                if (!iframeLoaded && renderMode === 'proxy') {
+                    console.log('[SimulatorFrame] Load timeout, considering Playwright fallback');
+                    // Don't auto-switch, let user decide
+                }
+            }, 15000);
+        }
+        
+        return () => {
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+            }
+        };
+    }, [url, isValidUrl]);
 
     const handleClearSelection = () => {
         setSelectedElement(null);
         setHoveredElement(null);
     };
 
+    const iframeSrc = getIframeSrc();
+
     return (
         <div className={cn("relative flex-1 bg-zinc-950 flex flex-col", className)}>
             {/* Toolbar Overlay */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-2">
+                {/* Selection Mode Button */}
                 <div className={cn(
                     "px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-2 transition-all",
                     selectionMode ? "bg-purple-500/20 border-purple-500/50" : "hover:bg-black/70"
                 )}>
                     <button
                         onClick={() => setSelectionMode(!selectionMode)}
-                        className={cn("text-xs font-medium flex items-center gap-1.5", selectionMode ? "text-purple-900" : "text-white/70")}
+                        className={cn("text-xs font-medium flex items-center gap-1.5", selectionMode ? "text-purple-300" : "text-white/70")}
                     >
                         <MousePointer2 className="w-3.5 h-3.5" />
-                        {selectionMode ? 'Klikněte na element pro výběr' : 'Vybrat element'}
+                        {selectionMode ? 'Klikněte na element' : 'Vybrat element'}
                     </button>
                 </div>
+
+                {/* Render Mode Switcher */}
+                {isValidUrl && (
+                    <div className="px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-2">
+                        <button
+                            onClick={renderMode === 'proxy' ? switchToPlaywright : retryWithProxy}
+                            className="text-xs font-medium flex items-center gap-1.5 text-white/70 hover:text-white transition-colors"
+                            title={renderMode === 'proxy' ? 'Použít Playwright (pro složité stránky)' : 'Použít proxy (rychlejší)'}
+                        >
+                            {renderMode === 'playwright' ? (
+                                <>
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    Zkusit proxy
+                                </>
+                            ) : (
+                                <>
+                                    <Zap className="w-3.5 h-3.5" />
+                                    Playwright
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
             </div>
+
+            {/* Render Mode Badge */}
+            {isValidUrl && iframeLoaded && (
+                <div className="absolute top-4 left-4 z-20">
+                    <div className={cn(
+                        "px-2 py-1 rounded-full text-[10px] font-medium flex items-center gap-1",
+                        renderMode === 'playwright' 
+                            ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                            : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                    )}>
+                        {renderMode === 'playwright' ? (
+                            <>
+                                <Zap className="w-3 h-3" />
+                                Playwright
+                            </>
+                        ) : (
+                            <>
+                                <Globe className="w-3 h-3" />
+                                Proxy
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Selected Element Info Panel */}
             {selectedElement && (
@@ -194,16 +321,31 @@ export function SimulatorFrame({
                             <div className="flex flex-col items-center gap-3">
                                 <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
                                 <span className="text-sm text-white/50">
-                                    {loading ? 'Inicializace...' : 'Načítání stránky...'}
+                                    {loading ? 'Inicializace...' : renderMode === 'playwright' ? 'Renderování pomocí Playwright...' : 'Načítání stránky...'}
                                 </span>
+                                {renderMode === 'proxy' && !iframeLoaded && (
+                                    <button 
+                                        onClick={switchToPlaywright}
+                                        className="mt-2 text-xs text-purple-400 hover:text-purple-300 underline"
+                                    >
+                                        Stránka se nenačítá? Zkusit Playwright
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}
 
+                    {/* Error Message */}
+                    {loadError && (
+                        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-red-500/20 border border-red-500/50 rounded-lg px-4 py-2 text-xs text-red-300">
+                            {loadError}
+                        </div>
+                    )}
 
                     <iframe
+                        key={`${url}-${renderMode}-${retryCount}`}
                         ref={iframeRef}
-                        src={proxyUrl}
+                        src={iframeSrc}
                         className="w-full h-full border-0 bg-white"
                         onLoad={handleLoad}
                         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"

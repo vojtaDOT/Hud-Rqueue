@@ -135,10 +135,13 @@ export async function GET(request: NextRequest) {
             let html = await response.text();
             
             // Strip Content-Security-Policy meta tags that might block our injected scripts
-            html = html.replace(/<meta[^>]*http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, '');
+            html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
             
             // Strip X-Frame-Options meta tags
-            html = html.replace(/<meta[^>]*http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, '');
+            html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?X-Frame-Options["']?[^>]*>/gi, '');
+            
+            // Strip existing base tags to avoid conflicts
+            html = html.replace(/<base[^>]*>/gi, '');
             
             // Use the full original URL (including path) as base for relative URLs
             // This ensures relative URLs like ./style.css resolve correctly
@@ -158,43 +161,78 @@ export async function GET(request: NextRequest) {
             const proxyUrl = (urlValue: string): string => {
                 if (!urlValue || urlValue.trim() === '') return urlValue;
                 
-                // Skip data URLs, javascript:, mailto:, tel:, anchors
-                if (/^(data:|javascript:|mailto:|tel:|#)/i.test(urlValue.trim())) {
+                const trimmedUrl = urlValue.trim();
+                
+                // Skip data URLs, javascript:, mailto:, tel:, anchors, blob URLs
+                if (/^(data:|javascript:|mailto:|tel:|#|blob:)/i.test(trimmedUrl)) {
                     return urlValue;
                 }
                 
                 // Skip if already proxied
-                if (isAlreadyProxied(urlValue)) {
+                if (isAlreadyProxied(trimmedUrl)) {
                     return urlValue;
                 }
                 
                 try {
+                    let absoluteUrl: string;
+                    
                     // Handle protocol-relative URLs (//example.com/path)
-                    if (urlValue.startsWith('//')) {
-                        const absoluteUrl = url.protocol + urlValue;
-                        return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
+                    if (trimmedUrl.startsWith('//')) {
+                        absoluteUrl = url.protocol + trimmedUrl;
                     }
-                    
                     // Handle absolute URLs
-                    if (urlValue.startsWith('http://') || urlValue.startsWith('https://')) {
-                        return `${proxyBase}${encodeURIComponent(urlValue)}`;
+                    else if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
+                        absoluteUrl = trimmedUrl;
+                    }
+                    // Relative URL - make it absolute first using the full base URL
+                    else {
+                        absoluteUrl = new URL(trimmedUrl, baseUrlForRelative).href;
                     }
                     
-                    // Relative URL - make it absolute first using the full base URL
-                    const absoluteUrl = new URL(urlValue, baseUrlForRelative).href;
                     return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
                 } catch (e) {
-                    console.warn(`Failed to proxy URL: ${urlValue}`, e);
-                    return urlValue;
+                    // URL parsing failed - try simple concatenation as fallback
+                    try {
+                        if (trimmedUrl.startsWith('/')) {
+                            return `${proxyBase}${encodeURIComponent(url.origin + trimmedUrl)}`;
+                        }
+                        return urlValue;
+                    } catch {
+                        return urlValue;
+                    }
                 }
             };
+            
+            // Frame-buster prevention script - must be injected FIRST before any other scripts run
+            const frameBusterPrevention = `<script id="frame-buster-init">
+                (function(){
+                    // Prevent frame-busting scripts from breaking out of iframe
+                    try {
+                        var _top = window.self;
+                        Object.defineProperty(window, 'top', { get: function() { return _top; }, configurable: false });
+                    } catch(e) {}
+                    try {
+                        var _parent = window.self;
+                        Object.defineProperty(window, 'parent', { get: function() { return _parent; }, configurable: false });
+                    } catch(e) {}
+                    // Block location.replace and location.href changes that try to break out
+                    var originalLocation = window.location;
+                    // Override common frame-breaking patterns
+                    window.addEventListener('beforeunload', function(e) {
+                        // Allow navigation within the iframe
+                    });
+                })();
+            </script>`;
             
             // Inject <base> tag for better relative URL handling (fallback for any URLs we miss)
             const baseTag = `<base href="${baseUrlForRelative}">`;
             if (html.includes('<head>')) {
-                html = html.replace('<head>', `<head>${baseTag}`);
+                html = html.replace('<head>', `<head>${frameBusterPrevention}${baseTag}`);
             } else if (html.includes('<HEAD>')) {
-                html = html.replace('<HEAD>', `<HEAD>${baseTag}`);
+                html = html.replace('<HEAD>', `<HEAD>${frameBusterPrevention}${baseTag}`);
+            } else if (html.includes('<html>') || html.includes('<HTML>')) {
+                // No head tag - inject at start of html
+                html = html.replace(/<html[^>]*>/i, `$&<head>${frameBusterPrevention}${baseTag}</head>`);
             }
             
             // Rewrite href, src, action attributes
@@ -258,7 +296,7 @@ export async function GET(request: NextRequest) {
                 }
             );
 
-            // Inject our selection script
+            // Inject selection script
             const selectionScript = `
                 <script id="element-selector-script">
                     (function() {

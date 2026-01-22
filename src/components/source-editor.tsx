@@ -5,8 +5,8 @@ import { toast } from 'sonner';
 import { Search, Globe, ChevronRight, FolderTree, Loader2 } from 'lucide-react';
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import { SimulatorSidebar } from '@/components/simulator/simulator-sidebar';
-import { PageType } from '@/lib/crawler-types';
-import { generateCrawlerConfig, exportConfigToJSON } from '@/lib/crawler-export';
+import { PageType, WorkflowData } from '@/lib/crawler-types';
+import { generateHierarchicalConfig, exportHierarchicalJSON } from '@/lib/crawler-export';
 import {
     ResizableHandle,
     ResizablePanel,
@@ -60,7 +60,7 @@ export function SourceEditor() {
     
     // Crawler configuration
     const [pageType, setPageType] = useState<PageType | null>(null);
-    const [workflowSteps, setWorkflowSteps] = useState<any[]>([]);
+    const [workflowData, setWorkflowData] = useState<WorkflowData | null>(null);
 
     // Refs
     const obecDropdownRef = useRef<HTMLDivElement>(null);
@@ -152,15 +152,16 @@ export function SourceEditor() {
 
         setSubmitting(true);
         try {
-            // Generate crawler config from workflow
+            // Generate hierarchical crawler config from workflow
             let crawlParams = {};
-            if (pageType && workflowSteps.length > 0) {
-                const crawlerConfig = generateCrawlerConfig(baseUrl, pageType, workflowSteps);
+            if (pageType && workflowData) {
+                const hierarchicalConfig = generateHierarchicalConfig(workflowData, pageType);
                 crawlParams = {
-                    crawlerType: crawlerConfig.crawlerType,
-                    pageType: crawlerConfig.pageType,
-                    steps: crawlerConfig.steps,
-                    configJson: exportConfigToJSON(crawlerConfig),
+                    crawlerType: hierarchicalConfig.metadata.pageType,
+                    pageType: hierarchicalConfig.metadata,
+                    mainLoop: hierarchicalConfig.mainLoop,
+                    sources: hierarchicalConfig.sources,
+                    configJson: exportHierarchicalJSON(hierarchicalConfig),
                 };
             }
 
@@ -195,7 +196,7 @@ export function SourceEditor() {
             setObecSearch('');
             setBaseUrl('');
             setPageType(null);
-            setWorkflowSteps([]);
+            setWorkflowData(null);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Neznámá chyba');
         } finally {
@@ -359,7 +360,7 @@ export function SourceEditor() {
 
                     <ResizablePanel defaultSize={25} minSize={15} maxSize={50}>
                         <SimulatorSidebar 
-                            onWorkflowChange={setWorkflowSteps}
+                            onWorkflowChange={setWorkflowData}
                             pageType={pageType}
                         />
                     </ResizablePanel>

@@ -173,7 +173,7 @@ function SortableBlock({ block, onRemove, onConfigure }: SortableBlockProps) {
 // --- Sidebar Component ---
 
 interface SimulatorSidebarProps {
-    onWorkflowChange?: (steps: Array<{ type: string; config: any }>) => void;
+    onWorkflowChange?: (workflowData: WorkflowData) => void;
     pageType?: { requiresPlaywright: boolean; framework: string } | null;
 }
 
@@ -370,14 +370,28 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
 
     const notifyWorkflowChange = (mainLoop: BlockData[], sourcesList: SourceData[]) => {
         if (onWorkflowChange) {
-            // Combine main loop and all source steps
-            const allSteps = [
-                ...mainLoop.map(b => ({ type: b.type, config: b.config })),
-                ...sourcesList.flatMap(source => 
-                    source.steps.map(b => ({ type: b.type, config: { ...b.config, sourceId: source.id, sourceUrl: source.url } }))
-                )
-            ];
-            onWorkflowChange(allSteps);
+            // Pass the full hierarchical workflow data
+            const workflowData: WorkflowData = {
+                mainLoop: mainLoop.map(b => ({
+                    id: b.id,
+                    type: b.type,
+                    label: b.label,
+                    config: b.config,
+                })),
+                sources: sourcesList.map(source => ({
+                    id: source.id,
+                    url: source.url,
+                    label: source.label,
+                    steps: source.steps.map(s => ({
+                        id: s.id,
+                        type: s.type,
+                        label: s.label,
+                        config: s.config,
+                    })),
+                    loopConfig: source.loopConfig,
+                })),
+            };
+            onWorkflowChange(workflowData);
         }
     };
 

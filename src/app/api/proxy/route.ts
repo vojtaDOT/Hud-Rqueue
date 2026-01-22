@@ -80,13 +80,25 @@ export async function GET(request: NextRequest) {
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         try {
-            // Fetch the content with timeout
+            // Fetch the content with timeout - use modern browser headers
             const response = await fetch(targetUrl, {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
                     'Accept-Language': 'cs-CZ,cs;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'no-cache',
+                    'DNT': '1',
+                    'Pragma': 'no-cache',
                     'Referer': url.origin,
+                    'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
                 },
                 signal: controller.signal,
                 redirect: 'follow',
@@ -122,6 +134,12 @@ export async function GET(request: NextRequest) {
         if (isHtml) {
             let html = await response.text();
             
+            // Strip Content-Security-Policy meta tags that might block our injected scripts
+            html = html.replace(/<meta[^>]*http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, '');
+            
+            // Strip X-Frame-Options meta tags
+            html = html.replace(/<meta[^>]*http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, '');
+            
             // Use the full original URL (including path) as base for relative URLs
             // This ensures relative URLs like ./style.css resolve correctly
             const baseUrlForRelative = url.href; // Full URL including path
@@ -136,67 +154,107 @@ export async function GET(request: NextRequest) {
                        decodeURIComponent(urlValue).includes('/api/proxy?url=');
             };
             
-            // Rewrite relative URLs and some absolute URLs
+            // Helper function to proxy a single URL
+            const proxyUrl = (urlValue: string): string => {
+                if (!urlValue || urlValue.trim() === '') return urlValue;
+                
+                // Skip data URLs, javascript:, mailto:, tel:, anchors
+                if (/^(data:|javascript:|mailto:|tel:|#)/i.test(urlValue.trim())) {
+                    return urlValue;
+                }
+                
+                // Skip if already proxied
+                if (isAlreadyProxied(urlValue)) {
+                    return urlValue;
+                }
+                
+                try {
+                    // Handle protocol-relative URLs (//example.com/path)
+                    if (urlValue.startsWith('//')) {
+                        const absoluteUrl = url.protocol + urlValue;
+                        return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
+                    }
+                    
+                    // Handle absolute URLs
+                    if (urlValue.startsWith('http://') || urlValue.startsWith('https://')) {
+                        return `${proxyBase}${encodeURIComponent(urlValue)}`;
+                    }
+                    
+                    // Relative URL - make it absolute first using the full base URL
+                    const absoluteUrl = new URL(urlValue, baseUrlForRelative).href;
+                    return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
+                } catch (e) {
+                    console.warn(`Failed to proxy URL: ${urlValue}`, e);
+                    return urlValue;
+                }
+            };
+            
+            // Inject <base> tag for better relative URL handling (fallback for any URLs we miss)
+            const baseTag = `<base href="${baseUrlForRelative}">`;
+            if (html.includes('<head>')) {
+                html = html.replace('<head>', `<head>${baseTag}`);
+            } else if (html.includes('<HEAD>')) {
+                html = html.replace('<HEAD>', `<HEAD>${baseTag}`);
+            }
+            
+            // Rewrite href, src, action attributes
             html = html.replace(
                 /(href|src|action)=["']([^"']+)["']/gi,
                 (match, attr, urlValue) => {
+                    const proxiedUrl = proxyUrl(urlValue);
+                    return `${attr}="${proxiedUrl}"`;
+                }
+            );
+            
+            // Handle srcset attributes for responsive images
+            html = html.replace(
+                /srcset=["']([^"']+)["']/gi,
+                (match, srcsetValue) => {
                     try {
-                        // Skip data URLs, javascript:, mailto:, etc.
-                        if (/^(data|javascript|mailto|tel|#|\/\/)/i.test(urlValue)) {
-                            return match;
-                        }
-                        
-                        // Skip URLs that are already proxied (including iframe src that's already proxied)
-                        if (isAlreadyProxied(urlValue)) {
-                            return match;
-                        }
-                        
-                        // Note: iframe src attributes are handled by the general logic above
-                        // If iframe src is already proxied, it will be skipped by isAlreadyProxied check
-                        // If not proxied, it will be proxied, and selection script will be injected into the iframe content
-                        
-                        // If it's already absolute, keep it but proxy it
-                        if (urlValue.startsWith('http://') || urlValue.startsWith('https://')) {
-                            return `${attr}="${proxyBase}${encodeURIComponent(urlValue)}"`;
-                        }
-                        
-                        // Relative URL - make it absolute first using the full base URL
-                        // This handles ./style.css, ../assets/img.png, style.css correctly
-                        const absoluteUrl = new URL(urlValue, baseUrlForRelative).href;
-                        return `${attr}="${proxyBase}${encodeURIComponent(absoluteUrl)}"`;
+                        // srcset format: "url1 1x, url2 2x" or "url1 100w, url2 200w"
+                        const parts = srcsetValue.split(',').map((part: string) => {
+                            const trimmed = part.trim();
+                            const [imgUrl, descriptor] = trimmed.split(/\s+/);
+                            if (imgUrl) {
+                                const proxiedUrl = proxyUrl(imgUrl);
+                                return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
+                            }
+                            return trimmed;
+                        });
+                        return `srcset="${parts.join(', ')}"`;
                     } catch (e) {
-                        // If URL construction fails, return original to avoid breaking the page
-                        console.warn(`Failed to rewrite URL: ${urlValue}`, e);
+                        console.warn(`Failed to rewrite srcset: ${srcsetValue}`, e);
+                        return match;
+                    }
+                }
+            );
+            
+            // Handle inline style attributes with url() references
+            html = html.replace(
+                /style=["']([^"']*url\([^)]+\)[^"']*)["']/gi,
+                (match, styleValue) => {
+                    try {
+                        const rewrittenStyle = styleValue.replace(
+                            /url\(["']?([^"')]+)["']?\)/gi,
+                            (_: string, cssUrl: string) => `url("${proxyUrl(cssUrl)}")`
+                        );
+                        return `style="${rewrittenStyle}"`;
+                    } catch (e) {
+                        console.warn(`Failed to rewrite inline style: ${styleValue}`, e);
                         return match;
                     }
                 }
             );
 
-            // Also handle CSS url() references
+            // Handle CSS url() references in <style> tags
             html = html.replace(
                 /url\(["']?([^"')]+)["']?\)/gi,
                 (match, urlValue) => {
-                    try {
-                        // Skip if already proxied
-                        if (isAlreadyProxied(urlValue)) {
-                            return match;
-                        }
-                        
-                        // Skip data URLs and protocol-relative URLs
-                        if (/^(data|http|https|\/\/):/i.test(urlValue)) {
-                            if (urlValue.startsWith('http://') || urlValue.startsWith('https://')) {
-                                return `url("${proxyBase}${encodeURIComponent(urlValue)}")`;
-                            }
-                            return match;
-                        }
-                        // Relative URL in CSS - use full base URL
-                        const absoluteUrl = new URL(urlValue, baseUrlForRelative).href;
-                        return `url("${proxyBase}${encodeURIComponent(absoluteUrl)}")`;
-                    } catch (e) {
-                        // If URL construction fails, return original
-                        console.warn(`Failed to rewrite CSS URL: ${urlValue}`, e);
+                    // Skip data URLs
+                    if (/^data:/i.test(urlValue.trim())) {
                         return match;
                     }
+                    return `url("${proxyUrl(urlValue)}")`;
                 }
             );
 
@@ -769,10 +827,15 @@ export async function GET(request: NextRequest) {
                 html += selectionScript;
             }
 
+            // Return proxied HTML with security headers stripped to allow iframe embedding
             return new NextResponse(html, {
                 headers: {
                     'Content-Type': 'text/html; charset=utf-8',
-                    'X-Frame-Options': 'SAMEORIGIN',
+                    // Don't set X-Frame-Options - we want to allow iframe embedding
+                    // Add CORS headers
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type',
                 },
             });
         }

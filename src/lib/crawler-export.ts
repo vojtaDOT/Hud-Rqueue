@@ -1,6 +1,19 @@
 // Functions for exporting crawler configuration
 
-import { CrawlerConfig, ScrapyConfig, PlaywrightConfig, CrawlerStep, ExtractStep, SelectStep, ClickStep, PaginationStep } from './crawler-types';
+import { 
+    CrawlerConfig, 
+    ScrapyConfig, 
+    PlaywrightConfig, 
+    CrawlerStep, 
+    ExtractStep, 
+    SelectStep, 
+    ClickStep, 
+    PaginationStep,
+    HierarchicalCrawlerConfig,
+    HierarchicalStep,
+    HierarchicalSource,
+    WorkflowData
+} from './crawler-types';
 
 /**
  * Convert CrawlerConfig to Scrapy JSON format
@@ -216,3 +229,115 @@ export function exportConfigToJSON(config: CrawlerConfig): string {
     }
 }
 
+/**
+ * Convert a block config to HierarchicalStep format
+ */
+function blockToHierarchicalStep(block: { type: string; config?: Record<string, any> }): HierarchicalStep {
+    const config = block.config || {};
+    
+    switch (block.type) {
+        case 'select':
+            return {
+                type: 'select',
+                selector: config.selector || '',
+                waitForSelector: config.waitForSelector !== false,
+                waitTimeout: config.waitTimeout || 30000,
+                multiple: config.multiple || false,
+            };
+        
+        case 'extract':
+            return {
+                type: 'extract',
+                selector: config.selector || '',
+                attribute: config.attribute || 'text',
+                fieldName: config.fieldName || 'value',
+                required: config.required !== false,
+            };
+        
+        case 'click':
+            return {
+                type: 'click',
+                selector: config.selector || '',
+                waitForNavigation: config.waitForNavigation !== false,
+                waitTimeout: config.waitTimeout || 30000,
+            };
+        
+        case 'pagination':
+            return {
+                type: 'pagination',
+                nextButtonSelector: config.nextButtonSelector,
+                nextLinkSelector: config.nextLinkSelector,
+                maxPages: config.maxPages || 10,
+                waitForSelector: config.waitForSelector !== false,
+                waitTimeout: config.waitTimeout || 30000,
+            };
+        
+        case 'source':
+            return {
+                type: 'source',
+                url: config.url || '',
+                method: config.method || 'GET',
+                headers: config.headers || {},
+                body: config.body,
+            };
+        
+        default:
+            // Return a basic step for unknown types
+            return {
+                type: 'select',
+                selector: config.selector || '',
+            };
+    }
+}
+
+/**
+ * Generate hierarchical crawler configuration from workflow data
+ */
+export function generateHierarchicalConfig(
+    workflowData: WorkflowData,
+    pageType: { requiresPlaywright: boolean; framework: string }
+): HierarchicalCrawlerConfig {
+    // Convert main loop blocks to hierarchical steps
+    const mainLoopSteps: HierarchicalStep[] = workflowData.mainLoop.map(block => 
+        blockToHierarchicalStep(block)
+    );
+    
+    // Convert sources to hierarchical format
+    const sources: HierarchicalSource[] = workflowData.sources.map(source => ({
+        id: source.id,
+        url: source.url,
+        label: source.label,
+        loopConfig: source.loopConfig,
+        steps: source.steps.map(block => blockToHierarchicalStep(block)),
+    }));
+    
+    return {
+        mainLoop: {
+            steps: mainLoopSteps,
+        },
+        sources,
+        metadata: {
+            pageType: pageType.requiresPlaywright ? 'playwright' : 'scrapy',
+            framework: pageType.framework as 'react' | 'nextjs' | 'vue' | 'angular' | 'unknown',
+            requiresPlaywright: pageType.requiresPlaywright,
+        },
+    };
+}
+
+/**
+ * Export hierarchical configuration to JSON string
+ */
+export function exportHierarchicalJSON(config: HierarchicalCrawlerConfig): string {
+    return JSON.stringify(config, null, 2);
+}
+
+/**
+ * Generate hierarchical config and export to JSON in one step
+ */
+export function workflowToJSON(
+    workflowData: WorkflowData,
+    pageType: { requiresPlaywright: boolean; framework: string }
+): string {
+    const config = generateHierarchicalConfig(workflowData, pageType);
+    return exportHierarchicalJSON(config);
+}

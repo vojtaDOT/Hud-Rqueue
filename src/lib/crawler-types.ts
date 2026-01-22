@@ -134,3 +134,75 @@ export interface PlaywrightConfig {
     };
 }
 
+
+// Hierarchical step configuration (matching BlockData from simulator)
+export interface HierarchicalStep {
+    type: 'select' | 'extract' | 'click' | 'pagination' | 'source';
+    selector?: string;
+    fieldName?: string;
+    attribute?: string;
+    waitForSelector?: boolean;
+    waitTimeout?: number;
+    waitForNavigation?: boolean;
+    multiple?: boolean;
+    required?: boolean;
+    nextButtonSelector?: string;
+    nextLinkSelector?: string;
+    maxPages?: number;
+    url?: string;
+    method?: 'GET' | 'POST';
+    headers?: Record<string, string>;
+    body?: string;
+}
+
+// Hierarchical source configuration
+export interface HierarchicalSource {
+    id: string;
+    url: string;
+    label: string;
+    loopConfig?: {
+        enabled: boolean;
+        maxIterations?: number;
+        waitBetweenIterations?: number;
+    };
+    steps: HierarchicalStep[];
+}
+
+// Hierarchical crawler configuration - matches the workflow structure
+export interface HierarchicalCrawlerConfig {
+    mainLoop: {
+        steps: HierarchicalStep[];
+    };
+    sources: HierarchicalSource[];
+    metadata: {
+        pageType: 'scrapy' | 'playwright';
+        framework: 'react' | 'nextjs' | 'vue' | 'angular' | 'unknown';
+        requiresPlaywright: boolean;
+    };
+}
+
+// Workflow data passed from SimulatorSidebar (matches types.ts in simulator)
+export interface WorkflowData {
+    mainLoop: Array<{
+        id: string;
+        type: string;
+        label: string;
+        config?: Record<string, unknown>;
+    }>;
+    sources: Array<{
+        id: string;
+        url: string;
+        label: string;
+        steps: Array<{
+            id: string;
+            type: string;
+            label: string;
+            config?: Record<string, unknown>;
+        }>;
+        loopConfig?: {
+            enabled: boolean;
+            maxIterations?: number;
+            waitBetweenIterations?: number;
+        };
+    }>;
+}

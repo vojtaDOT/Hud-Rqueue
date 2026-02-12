@@ -138,10 +138,10 @@ export async function GET(request: NextRequest) {
 
             const contentType = response.headers.get('content-type') || '';
             const isHtml = contentType.includes('text/html');
-            
+
             if (!response.ok) {
                 console.error(`Proxy fetch failed: ${response.status} ${response.statusText} for ${targetUrl}`);
-                
+
                 if (isHtml) {
                     return htmlErrorResponse(
                         `Nepodařilo se načíst stránku: ${response.statusText} (${response.status})`,
@@ -156,70 +156,70 @@ export async function GET(request: NextRequest) {
                     });
                 }
             }
-        
-        if (isHtml) {
-            let html = await response.text();
-            
-            // Strip Content-Security-Policy meta tags
-            html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
-            
-            // Strip X-Frame-Options meta tags
-            html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?X-Frame-Options["']?[^>]*>/gi, '');
-            
-            // Strip existing base tags to avoid conflicts
-            html = html.replace(/<base[^>]*>/gi, '');
-            
-            const baseUrlForRelative = url.href;
-            const proxyBase = `/api/proxy?url=`;
-            
-            // Prevent infinite loops
-            const isAlreadyProxied = (urlValue: string) => {
-                return urlValue.includes('/api/proxy?url=') || 
-                       urlValue.includes('/api/proxy?url%3D') ||
-                       urlValue.startsWith('/api/proxy') ||
-                       decodeURIComponent(urlValue).includes('/api/proxy?url=');
-            };
-            
-            // Helper function to proxy a single URL
-            const proxyUrl = (urlValue: string): string => {
-                if (!urlValue || urlValue.trim() === '') return urlValue;
-                
-                const trimmedUrl = urlValue.trim();
-                
-                if (/^(data:|javascript:|mailto:|tel:|#|blob:)/i.test(trimmedUrl)) {
-                    return urlValue;
-                }
-                
-                if (isAlreadyProxied(trimmedUrl)) {
-                    return urlValue;
-                }
-                
-                try {
-                    let absoluteUrl: string;
-                    
-                    if (trimmedUrl.startsWith('//')) {
-                        absoluteUrl = url.protocol + trimmedUrl;
-                    } else if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
-                        absoluteUrl = trimmedUrl;
-                    } else {
-                        absoluteUrl = new URL(trimmedUrl, baseUrlForRelative).href;
+
+            if (isHtml) {
+                let html = await response.text();
+
+                // Strip Content-Security-Policy meta tags
+                html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
+
+                // Strip X-Frame-Options meta tags
+                html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?X-Frame-Options["']?[^>]*>/gi, '');
+
+                // Strip existing base tags to avoid conflicts
+                html = html.replace(/<base[^>]*>/gi, '');
+
+                const baseUrlForRelative = url.href;
+                const proxyBase = `/api/proxy?url=`;
+
+                // Prevent infinite loops
+                const isAlreadyProxied = (urlValue: string) => {
+                    return urlValue.includes('/api/proxy?url=') ||
+                        urlValue.includes('/api/proxy?url%3D') ||
+                        urlValue.startsWith('/api/proxy') ||
+                        decodeURIComponent(urlValue).includes('/api/proxy?url=');
+                };
+
+                // Helper function to proxy a single URL
+                const proxyUrl = (urlValue: string): string => {
+                    if (!urlValue || urlValue.trim() === '') return urlValue;
+
+                    const trimmedUrl = urlValue.trim();
+
+                    if (/^(data:|javascript:|mailto:|tel:|#|blob:)/i.test(trimmedUrl)) {
+                        return urlValue;
                     }
-                    
-                    return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
-                } catch {
+
+                    if (isAlreadyProxied(trimmedUrl)) {
+                        return urlValue;
+                    }
+
                     try {
-                        if (trimmedUrl.startsWith('/')) {
-                            return `${proxyBase}${encodeURIComponent(url.origin + trimmedUrl)}`;
+                        let absoluteUrl: string;
+
+                        if (trimmedUrl.startsWith('//')) {
+                            absoluteUrl = url.protocol + trimmedUrl;
+                        } else if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
+                            absoluteUrl = trimmedUrl;
+                        } else {
+                            absoluteUrl = new URL(trimmedUrl, baseUrlForRelative).href;
                         }
-                        return urlValue;
+
+                        return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
                     } catch {
-                        return urlValue;
+                        try {
+                            if (trimmedUrl.startsWith('/')) {
+                                return `${proxyBase}${encodeURIComponent(url.origin + trimmedUrl)}`;
+                            }
+                            return urlValue;
+                        } catch {
+                            return urlValue;
+                        }
                     }
-                }
-            };
-            
-            // Frame-buster prevention + AJAX/Fetch interception script
-            const injectedScripts = `
+                };
+
+                // Frame-buster prevention + AJAX/Fetch interception script
+                const injectedScripts = `
                 <script id="proxy-init-scripts">
                 (function(){
                     // === FRAME BUSTER PREVENTION ===
@@ -319,82 +319,82 @@ export async function GET(request: NextRequest) {
                     console.log('[Proxy] Interception scripts loaded for:', ORIGINAL_ORIGIN);
                 })();
                 </script>`;
-            
-            // Inject base tag and scripts
-            const baseTag = `<base href="${baseUrlForRelative}">`;
-            if (html.includes('<head>')) {
-                html = html.replace('<head>', `<head>${injectedScripts}${baseTag}`);
-            } else if (html.includes('<HEAD>')) {
-                html = html.replace('<HEAD>', `<HEAD>${injectedScripts}${baseTag}`);
-            } else if (/<html[^>]*>/i.test(html)) {
-                html = html.replace(/<html[^>]*>/i, `$&<head>${injectedScripts}${baseTag}</head>`);
-            } else {
-                html = `${injectedScripts}${baseTag}${html}`;
-            }
-            
-            // Rewrite static URLs in HTML
-            html = html.replace(
-                /(href|src|action)=["']([^"']+)["']/gi,
-                (match, attr, urlValue) => {
-                    const proxiedUrl = proxyUrl(urlValue);
-                    return `${attr}="${proxiedUrl}"`;
-                }
-            );
-            
-            // Handle srcset
-            html = html.replace(
-                /srcset=["']([^"']+)["']/gi,
-                (match, srcsetValue) => {
-                    try {
-                        const parts = srcsetValue.split(',').map((part: string) => {
-                            const trimmed = part.trim();
-                            const [imgUrl, descriptor] = trimmed.split(/\s+/);
-                            if (imgUrl) {
-                                const proxiedUrl = proxyUrl(imgUrl);
-                                return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
-                            }
-                            return trimmed;
-                        });
-                        return `srcset="${parts.join(', ')}"`;
-                    } catch {
-                        return match;
-                    }
-                }
-            );
-            
-            // Handle inline styles with url()
-            html = html.replace(
-                /style=["']([^"']*url\([^)]+\)[^"']*)["']/gi,
-                (match, styleValue) => {
-                    try {
-                        const rewrittenStyle = styleValue.replace(
-                            /url\(["']?([^"')]+)["']?\)/gi,
-                            (_: string, cssUrl: string) => `url("${proxyUrl(cssUrl)}")`
-                        );
-                        return `style="${rewrittenStyle}"`;
-                    } catch {
-                        return match;
-                    }
-                }
-            );
 
-            // Handle CSS url() in style tags
-            html = html.replace(
-                /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
-                (match, openTag, cssContent, closeTag) => {
-                    const rewrittenCss = cssContent.replace(
-                        /url\(["']?([^"')]+)["']?\)/gi,
-                        (_: string, cssUrl: string) => {
-                            if (/^data:/i.test(cssUrl.trim())) return `url("${cssUrl}")`;
-                            return `url("${proxyUrl(cssUrl)}")`;
+                // Inject base tag and scripts
+                const baseTag = `<base href="${baseUrlForRelative}">`;
+                if (html.includes('<head>')) {
+                    html = html.replace('<head>', `<head>${injectedScripts}${baseTag}`);
+                } else if (html.includes('<HEAD>')) {
+                    html = html.replace('<HEAD>', `<HEAD>${injectedScripts}${baseTag}`);
+                } else if (/<html[^>]*>/i.test(html)) {
+                    html = html.replace(/<html[^>]*>/i, `$&<head>${injectedScripts}${baseTag}</head>`);
+                } else {
+                    html = `${injectedScripts}${baseTag}${html}`;
+                }
+
+                // Rewrite static URLs in HTML
+                html = html.replace(
+                    /(href|src|action)=["']([^"']+)["']/gi,
+                    (match, attr, urlValue) => {
+                        const proxiedUrl = proxyUrl(urlValue);
+                        return `${attr}="${proxiedUrl}"`;
+                    }
+                );
+
+                // Handle srcset
+                html = html.replace(
+                    /srcset=["']([^"']+)["']/gi,
+                    (match, srcsetValue) => {
+                        try {
+                            const parts = srcsetValue.split(',').map((part: string) => {
+                                const trimmed = part.trim();
+                                const [imgUrl, descriptor] = trimmed.split(/\s+/);
+                                if (imgUrl) {
+                                    const proxiedUrl = proxyUrl(imgUrl);
+                                    return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
+                                }
+                                return trimmed;
+                            });
+                            return `srcset="${parts.join(', ')}"`;
+                        } catch {
+                            return match;
                         }
-                    );
-                    return `${openTag}${rewrittenCss}${closeTag}`;
-                }
-            );
+                    }
+                );
 
-            // Inject element selector script
-            const selectionScript = `
+                // Handle inline styles with url()
+                html = html.replace(
+                    /style=["']([^"']*url\([^)]+\)[^"']*)["']/gi,
+                    (match, styleValue) => {
+                        try {
+                            const rewrittenStyle = styleValue.replace(
+                                /url\(["']?([^"')]+)["']?\)/gi,
+                                (_: string, cssUrl: string) => `url("${proxyUrl(cssUrl)}")`
+                            );
+                            return `style="${rewrittenStyle}"`;
+                        } catch {
+                            return match;
+                        }
+                    }
+                );
+
+                // Handle CSS url() in style tags
+                html = html.replace(
+                    /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
+                    (match, openTag, cssContent, closeTag) => {
+                        const rewrittenCss = cssContent.replace(
+                            /url\(["']?([^"')]+)["']?\)/gi,
+                            (_: string, cssUrl: string) => {
+                                if (/^data:/i.test(cssUrl.trim())) return `url("${cssUrl}")`;
+                                return `url("${proxyUrl(cssUrl)}")`;
+                            }
+                        );
+                        return `${openTag}${rewrittenCss}${closeTag}`;
+                    }
+                );
+
+                // Inject element selector script
+                const selectionScript = `
                 <script id="element-selector-script">
                     (function() {
                         let hoveredEl = null;
@@ -575,6 +575,98 @@ export async function GET(request: NextRequest) {
                         window.addEventListener('message', function(event) {
                             if (event.data.type === 'enable-selection') enableSelection();
                             else if (event.data.type === 'disable-selection') disableSelection();
+                            else if (event.data.type === 'remove-element') {
+                                try {
+                                    const selector = event.data.localSelector || event.data.selector;
+                                    let el = document.querySelector(selector);
+                                    
+                                    // If not found, try to find by partial selector match (for dynamic selectors)
+                                    if (!el && selector) {
+                                        // Try simpler selector patterns
+                                        const parts = selector.split(' > ');
+                                        for (let i = parts.length - 1; i >= 0 && !el; i--) {
+                                            try {
+                                                const partialSelector = parts.slice(i).join(' > ');
+                                                el = document.querySelector(partialSelector);
+                                            } catch {}
+                                        }
+                                    }
+                                    
+                                    if (el) {
+                                        // Check if this is part of a cookie/consent modal and find the root overlay
+                                        const cookiePatterns = /cookie|consent|gdpr|privacy|cc-|cmp-|onetrust|cookiebot|trustarc|quantcast|cookie-notice|cookie-banner|cookie-popup|cookie-modal|cookie-overlay|cookie-dialog/i;
+                                        let targetEl = el;
+                                        let current = el;
+                                        
+                                        // Walk up to find the root overlay container
+                                        while (current && current !== document.body) {
+                                            const id = current.id || '';
+                                            const cls = typeof current.className === 'string' ? current.className : '';
+                                            const role = current.getAttribute('role') || '';
+                                            
+                                            if (cookiePatterns.test(id) || cookiePatterns.test(cls) || role === 'dialog') {
+                                                targetEl = current;
+                                            }
+                                            
+                                            // Also check for fixed/absolute overlays with high z-index
+                                            const style = window.getComputedStyle(current);
+                                            if ((style.position === 'fixed' || style.position === 'absolute') && 
+                                                parseInt(style.zIndex) > 9999) {
+                                                targetEl = current;
+                                            }
+                                            
+                                            current = current.parentElement;
+                                        }
+                                        
+                                        // Remove the target element
+                                        targetEl.remove();
+                                        
+                                        // Also try to remove common overlay/backdrop siblings
+                                        const overlaySelectors = [
+                                            '.cookie-overlay', '.consent-overlay', '.gdpr-overlay',
+                                            '.cc-overlay', '.cmp-overlay', '.modal-backdrop',
+                                            '[class*="overlay"]', '[class*="backdrop"]',
+                                            '[id*="cookie"][id*="overlay"]', '[id*="consent"][id*="overlay"]'
+                                        ];
+                                        overlaySelectors.forEach(function(sel) {
+                                            try {
+                                                document.querySelectorAll(sel).forEach(function(overlay) {
+                                                    const style = window.getComputedStyle(overlay);
+                                                    if (style.position === 'fixed' && parseInt(style.zIndex) > 1000) {
+                                                        overlay.remove();
+                                                    }
+                                                });
+                                            } catch {}
+                                        });
+                                        
+                                        // Remove any remaining fixed overlays with very high z-index that might be backdrops
+                                        document.querySelectorAll('div, aside, section').forEach(function(elem) {
+                                            try {
+                                                const style = window.getComputedStyle(elem);
+                                                if (style.position === 'fixed' && parseInt(style.zIndex) > 10000) {
+                                                    const rect = elem.getBoundingClientRect();
+                                                    // If it covers most of the viewport, it's likely a backdrop
+                                                    if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.8) {
+                                                        elem.remove();
+                                                    }
+                                                }
+                                            } catch {}
+                                        });
+                                        
+                                        if (highlightDiv) highlightDiv.style.display = 'none';
+                                        selectedEl = null;
+                                        hoveredEl = null;
+                                    }
+                                    
+                                    // Forward to all iframes
+                                    document.querySelectorAll('iframe').forEach(function(iframe) {
+                                        try {
+                                            iframe.contentWindow?.postMessage(event.data, '*');
+                                        } catch {}
+                                    });
+                                } catch (e) { console.error('Error removing element:', e); }
+                            }
+
                         });
 
                         // Detect page type
@@ -628,25 +720,25 @@ export async function GET(request: NextRequest) {
                 </script>
             `;
 
-            if (html.includes('</body>')) {
-                html = html.replace('</body>', selectionScript + '</body>');
-            } else if (html.includes('</head>')) {
-                html = html.replace('</head>', selectionScript + '</head>');
-            } else {
-                html += selectionScript;
-            }
+                if (html.includes('</body>')) {
+                    html = html.replace('</body>', selectionScript + '</body>');
+                } else if (html.includes('</head>')) {
+                    html = html.replace('</head>', selectionScript + '</head>');
+                } else {
+                    html += selectionScript;
+                }
 
-            return new NextResponse(html, {
-                headers: {
-                    'Content-Type': 'text/html; charset=utf-8',
-                    'X-Frame-Options': 'ALLOWALL',
-                    'Content-Security-Policy': "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;",
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                },
-            });
-        }
+                return new NextResponse(html, {
+                    headers: {
+                        'Content-Type': 'text/html; charset=utf-8',
+                        'X-Frame-Options': 'ALLOWALL',
+                        'Content-Security-Policy': "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;",
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                    },
+                });
+            }
 
             // For non-HTML content
             try {
@@ -667,13 +759,13 @@ export async function GET(request: NextRequest) {
             }
         } catch (fetchError: unknown) {
             clearTimeout(timeoutId);
-            
+
             const error = fetchError as { name?: string; message?: string };
-            
+
             if (error.name === 'AbortError') {
                 return htmlErrorResponse('Timeout při načítání stránky (přes 30 sekund)', 504);
             }
-            
+
             return htmlErrorResponse(
                 `Chyba při načítání stránky: ${error.message || 'Neznámá chyba'}`,
                 500

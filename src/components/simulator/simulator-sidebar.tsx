@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useId, useEffect } from 'react';
+import { useState, useId, useEffect, forwardRef, useImperativeHandle } from 'react';
 import {
     DndContext,
+    // ... (omitting unchanged imports, but I need to make sure I don't break them)
+
     DragOverlay,
     closestCorners,
     KeyboardSensor,
@@ -34,7 +36,9 @@ import {
     Settings,
     RefreshCw,
     Globe,
+    Eraser,
 } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,6 +61,8 @@ import { ExtractConfig } from './steps/extract-config';
 import { SourceConfig } from './steps/source-config';
 import { ClickConfig } from './steps/click-config';
 import { PaginationConfig } from './steps/pagination-config';
+import { RemoveElementConfig } from './steps/remove-element-config';
+
 
 // --- Icons & Primitives ---
 
@@ -67,14 +73,18 @@ const BLOCK_ICONS: Record<BlockType, React.ElementType> = {
     pagination: ArrowDown,
     source: CloudDownload,
     mainloop: RefreshCw,
+    remove_element: Eraser,
 };
+
 
 const PRIMITIVES: { type: BlockType; label: string }[] = [
     { type: 'select', label: 'Select' },
     { type: 'extract', label: 'Extract' },
     { type: 'click', label: 'Click' },
     { type: 'pagination', label: 'Paginate' },
+    { type: 'remove_element', label: 'Remove El.' },
 ];
+
 
 const MAIN_PRIMITIVES: { type: 'mainloop' | 'source'; label: string; icon: React.ElementType }[] = [
     { type: 'mainloop', label: 'Main Loop', icon: RefreshCw },
@@ -172,16 +182,21 @@ function SortableBlock({ block, onRemove, onConfigure }: SortableBlockProps) {
 
 // --- Sidebar Component ---
 
+export interface SimulatorSidebarRef {
+    addBlock: (type: BlockType, config?: any) => void;
+}
+
 interface SimulatorSidebarProps {
     onWorkflowChange?: (workflowData: WorkflowData) => void;
     pageType?: { requiresPlaywright: boolean; framework: string } | null;
 }
 
-export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSidebarProps = {}) {
+export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebarProps>(({ onWorkflowChange, pageType }, ref) => {
     const dndContextId = useId();
 
     // Workflow state - Main loop and Sources
     const [mainLoopBlocks, setMainLoopBlocks] = useState<BlockData[]>([]);
+
     const [sources, setSources] = useState<SourceData[]>([
         {
             id: 'source-1',
@@ -279,14 +294,14 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
         if (configuringBlockId === id) setConfiguringBlockId(null);
     };
 
-    const handleAddBlock = (type: BlockType, label: string) => {
+    const handleAddBlock = (type: BlockType, label: string, initialConfig: any = {}) => {
         const newBlock: BlockData = {
             id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             type,
             label,
-            config: {},
+            config: initialConfig,
         };
-        
+
         if (activeTab === 'mainloop') {
             setMainLoopBlocks((prev) => [...prev, newBlock]);
         } else {
@@ -303,6 +318,14 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
             });
         }
     };
+
+    useImperativeHandle(ref, () => ({
+        addBlock: (type: BlockType, config: any = {}) => {
+            const label = PRIMITIVES.find(p => p.type === type)?.label || 'Unknown Step';
+            handleAddBlock(type, label, config);
+        }
+    }));
+
 
     const handleAddSource = () => {
         const newSource: SourceData = {
@@ -400,9 +423,9 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
         notifyWorkflowChange(mainLoopBlocks, sources);
     }, [mainLoopBlocks, sources]);
 
-    const currentBlocks = activeTab === 'mainloop' ? mainLoopBlocks : 
+    const currentBlocks = activeTab === 'mainloop' ? mainLoopBlocks :
         sources.find(s => s.id === activeSourceId)?.steps || [];
-    
+
     const activeBlock = activeId ? currentBlocks.find((b) => b.id === activeId) : null;
     const configuringBlock = configuringBlockId ? currentBlocks.find(b => b.id === configuringBlockId) : null;
     const configuringSource = configuringSourceId ? sources.find(s => s.id === configuringSourceId) : null;
@@ -414,8 +437,10 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
             case 'source': return <SourceConfig block={block} onChange={handleConfigChange} />;
             case 'click': return <ClickConfig block={block} onChange={handleConfigChange} />;
             case 'pagination': return <PaginationConfig block={block} onChange={handleConfigChange} />;
+            case 'remove_element': return <RemoveElementConfig block={block} onChange={handleConfigChange} />;
             case 'mainloop': return <div className="p-4 text-white/50">Main loop configuration will be available here.</div>;
             default: return <div className="p-4 text-white/50">No configuration available for this step type.</div>;
+
         }
     };
 
@@ -461,7 +486,7 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                                     placeholder="10"
                                     value={source.loopConfig?.maxIterations || 10}
                                     onChange={(e) => handleSourceConfigChange(source.id, {
-                                        loopConfig: { 
+                                        loopConfig: {
                                             enabled: source.loopConfig?.enabled || false,
                                             maxIterations: parseInt(e.target.value) || 10,
                                             waitBetweenIterations: source.loopConfig?.waitBetweenIterations || 1000
@@ -477,10 +502,10 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                                     placeholder="1000"
                                     value={source.loopConfig?.waitBetweenIterations || 1000}
                                     onChange={(e) => handleSourceConfigChange(source.id, {
-                                        loopConfig: { 
+                                        loopConfig: {
                                             enabled: source.loopConfig?.enabled || false,
                                             maxIterations: source.loopConfig?.maxIterations || 10,
-                                            waitBetweenIterations: parseInt(e.target.value) || 1000 
+                                            waitBetweenIterations: parseInt(e.target.value) || 1000
                                         }
                                     })}
                                 />
@@ -525,13 +550,13 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'mainloop' | 'sources')} className="flex-1 flex flex-col min-h-0 overflow-hidden">
                         <div className="px-4 pt-4 border-b border-white/10">
                             <TabsList className="bg-transparent border-0 p-0 h-auto">
-                                <TabsTrigger 
-                                    value="mainloop" 
+                                <TabsTrigger
+                                    value="mainloop"
                                     className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/60"
                                 >
                                     Main Loop
                                 </TabsTrigger>
-                                <TabsTrigger 
+                                <TabsTrigger
                                     value="sources"
                                     className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/60"
                                 >
@@ -739,8 +764,8 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
                 {activeBlock ? (
                     <div className={cn(
                         "flex items-center gap-3 p-3 rounded-lg border bg-zinc-900 shadow-2xl",
-                        activeBlock.type === 'source' 
-                            ? "border-lime-500" 
+                        activeBlock.type === 'source'
+                            ? "border-lime-500"
                             : "border-purple-500"
                     )}>
                         <GripVertical className="w-4 h-4 text-white/30" />
@@ -801,4 +826,7 @@ export function SimulatorSidebar({ onWorkflowChange, pageType }: SimulatorSideba
 
         </DndContext>
     );
-}
+});
+
+SimulatorSidebar.displayName = 'SimulatorSidebar';
+

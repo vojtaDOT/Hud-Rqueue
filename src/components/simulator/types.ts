@@ -1,4 +1,4 @@
-export type BlockType = 'select' | 'extract' | 'source' | 'click' | 'pagination' | 'mainloop';
+export type BlockType = 'select' | 'extract' | 'source' | 'click' | 'pagination' | 'mainloop' | 'remove_element';
 
 export interface BlockData {
     id: string;

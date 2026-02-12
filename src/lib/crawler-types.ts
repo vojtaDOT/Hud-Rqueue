@@ -134,7 +134,6 @@ export interface PlaywrightConfig {
     };
 }
 
-
 // Hierarchical step configuration (matching BlockData from simulator)
 export interface HierarchicalStep {
     type: 'select' | 'extract' | 'click' | 'pagination' | 'source';
@@ -187,7 +186,7 @@ export interface WorkflowData {
         id: string;
         type: string;
         label: string;
-        config?: Record<string, unknown>;
+        config?: Record<string, any>;
     }>;
     sources: Array<{
         id: string;
@@ -197,7 +196,7 @@ export interface WorkflowData {
             id: string;
             type: string;
             label: string;
-            config?: Record<string, unknown>;
+            config?: Record<string, any>;
         }>;
         loopConfig?: {
             enabled: boolean;
@@ -205,4 +204,49 @@ export interface WorkflowData {
             waitBetweenIterations?: number;
         };
     }>;
+}
+
+// Worker Runtime Config - matches worker-runtime-minimal-template.json
+export interface WorkerRuntimePayloadTemplate {
+    [key: string]: string | number;
+}
+
+export interface WorkerRuntimeEnqueueConfig {
+    required_fields: string[];
+    payload_template: WorkerRuntimePayloadTemplate;
+}
+
+export interface WorkerRuntimeStepConfig {
+    task: string;
+    required_task_fields_after_claim: string[];
+    controller_api_enqueue: WorkerRuntimeEnqueueConfig;
+    redis_enqueue: WorkerRuntimeEnqueueConfig;
+    workflow: {
+        steps: HierarchicalStep[];
+        sources?: HierarchicalSource[];
+    };
+}
+
+export interface WorkerRuntimeConfig {
+    schema_version: string;
+    runtime_contract: string;
+    flow: string[];
+    worker_preconditions: {
+        database: { source_exists: boolean; source_enabled: boolean };
+        download: { source_url_exists: boolean; source_url_enabled: boolean };
+    };
+    steps: {
+        source: WorkerRuntimeStepConfig;
+        source_urls: WorkerRuntimeStepConfig;
+    };
+    optional_tasks: {
+        ocr: WorkerRuntimeStepConfig;
+    };
+    metadata: {
+        pageType: 'scrapy' | 'playwright';
+        framework: string;
+        requiresPlaywright: boolean;
+        baseUrl: string;
+        createdAt: string;
+    };
 }

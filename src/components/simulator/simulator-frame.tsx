@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Loader2, Globe, MousePointer2, X, RefreshCw, Zap } from 'lucide-react';
+import { Loader2, Globe, MousePointer2, X, RefreshCw, Zap, Eraser } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
 import { PageType, ElementSelector } from '@/lib/crawler-types';
 
@@ -12,7 +13,9 @@ interface SimulatorFrameProps {
     className?: string;
     onElementSelect?: (selector: string, elementInfo?: ElementSelector) => void;
     onPageTypeDetected?: (pageType: PageType) => void;
+    onElementRemove?: (selector: string) => void;
 }
+
 
 interface ElementInfo {
     selector: string;
@@ -31,21 +34,25 @@ export function SimulatorFrame({
     loading = false,
     className,
     onElementSelect,
-    onPageTypeDetected
+    onPageTypeDetected,
+    onElementRemove
 }: SimulatorFrameProps) {
+
     const [iframeLoaded, setIframeLoaded] = useState(false);
-    const [selectionMode, setSelectionMode] = useState(false);
+    const [interactionMode, setInteractionMode] = useState<'select' | 'remove' | null>(null);
     const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
     const [hoveredElement, setHoveredElement] = useState<{ selector: string; bounds: DOMRect } | null>(null);
     const [pageType, setPageType] = useState<PageType | null>(null);
     const [renderMode, setRenderMode] = useState<RenderMode>('proxy');
     const [loadError, setLoadError] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
+    const [reloadKey, setReloadKey] = useState(0);
+
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
-    
+
     // Generate URL based on render mode
     const getIframeSrc = useCallback(() => {
         if (!isValidUrl) return '';
@@ -81,6 +88,13 @@ export function SimulatorFrame({
         setRetryCount(prev => prev + 1);
     }, []);
 
+    const handleReload = useCallback(() => {
+        setReloadKey(prev => prev + 1);
+        setIframeLoaded(false);
+        setLoadError(null);
+    }, []);
+
+
     // Handle messages from iframe
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
@@ -95,12 +109,25 @@ export function SimulatorFrame({
                         height: event.data.bounds.height
                     } as DOMRect
                 });
-            } 
+            }
             // Handle element selection
             else if (event.data.type === 'element-select') {
                 const elementInfo = event.data.elementInfo as ElementInfo;
+
+                if (interactionMode === 'remove') {
+                    // Immediate removal mode
+                    iframeRef.current?.contentWindow?.postMessage({
+                        type: 'remove-element',
+                        selector: elementInfo.selector
+                    }, '*');
+                    onElementRemove?.(elementInfo.selector);
+                    // Don't select it
+                    return;
+                }
+
+                // Default selection mode
                 setSelectedElement(elementInfo);
-                
+
                 const selectorInfo: ElementSelector = {
                     selector: elementInfo.selector,
                     tagName: elementInfo.tagName,
@@ -109,9 +136,10 @@ export function SimulatorFrame({
                     listItemCount: elementInfo.listItemCount,
                     parentSelector: elementInfo.parentSelector
                 };
-                
+
                 onElementSelect?.(elementInfo.selector, selectorInfo);
-            } 
+            }
+
             // Handle page type detection
             else if (event.data.type === 'page-type-detected') {
                 const detectedPageType = event.data.pageType as PageType;
@@ -140,7 +168,8 @@ export function SimulatorFrame({
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright]);
+    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright, interactionMode, onElementRemove]);
+
 
     // Enable/disable selection mode in iframe
     useEffect(() => {
@@ -149,15 +178,19 @@ export function SimulatorFrame({
 
         setTimeout(() => {
             try {
+                // Ensure selection mode is synced
+                // We enable selection for both modes, but handle the result differently
+
                 iframe.contentWindow?.postMessage(
-                    { type: selectionMode ? 'enable-selection' : 'disable-selection' },
+                    { type: interactionMode !== null ? 'enable-selection' : 'disable-selection' },
                     '*'
                 );
             } catch (error) {
                 console.warn('Could not communicate with iframe:', error);
             }
         }, 100);
-    }, [selectionMode, iframeLoaded]);
+    }, [interactionMode, iframeLoaded]);
+
 
     // Reset state when URL changes
     useEffect(() => {
@@ -168,12 +201,12 @@ export function SimulatorFrame({
         setLoadError(null);
         setRenderMode('proxy'); // Always start with proxy
         setRetryCount(0);
-        
+
         // Set a timeout to detect if the page doesn't load
         if (loadTimeoutRef.current) {
             clearTimeout(loadTimeoutRef.current);
         }
-        
+
         if (isValidUrl) {
             loadTimeoutRef.current = setTimeout(() => {
                 if (!iframeLoaded && renderMode === 'proxy') {
@@ -182,7 +215,7 @@ export function SimulatorFrame({
                 }
             }, 15000);
         }
-        
+
         return () => {
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
@@ -195,25 +228,66 @@ export function SimulatorFrame({
         setHoveredElement(null);
     };
 
+    const handleRemoveElement = () => {
+        if (!selectedElement || !iframeRef.current?.contentWindow) return;
+
+        iframeRef.current.contentWindow.postMessage({
+            type: 'remove-element',
+            selector: selectedElement.selector
+        }, '*');
+
+        onElementRemove?.(selectedElement.selector);
+
+        setSelectedElement(null);
+        setHoveredElement(null);
+    };
+
     const iframeSrc = getIframeSrc();
+
 
     return (
         <div className={cn("relative flex-1 bg-zinc-950 flex flex-col", className)}>
             {/* Toolbar Overlay */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-2">
-                {/* Selection Mode Button */}
+                {/* Select Element Button */}
                 <div className={cn(
-                    "px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-2 transition-all",
-                    selectionMode ? "bg-purple-500/20 border-purple-500/50" : "hover:bg-black/70"
+                    "px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-1 transition-all",
+                    interactionMode === 'select' ? "bg-purple-500/20 border-purple-500/50" : "hover:bg-black/70"
                 )}>
                     <button
-                        onClick={() => setSelectionMode(!selectionMode)}
-                        className={cn("text-xs font-medium flex items-center gap-1.5", selectionMode ? "text-purple-300" : "text-white/70")}
+                        onClick={() => setInteractionMode(interactionMode === 'select' ? null : 'select')}
+                        className={cn("text-xs font-medium flex items-center gap-1.5", interactionMode === 'select' ? "text-purple-300" : "text-white/70")}
                     >
                         <MousePointer2 className="w-3.5 h-3.5" />
-                        {selectionMode ? 'Klikněte na element' : 'Vybrat element'}
+                        {interactionMode === 'select' ? 'Vybrat element' : 'Vybrat'}
                     </button>
                 </div>
+
+                {/* Remove Element Button */}
+                <div className={cn(
+                    "px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-1 transition-all",
+                    interactionMode === 'remove' ? "bg-red-500/20 border-red-500/50" : "hover:bg-black/70"
+                )}>
+                    <button
+                        onClick={() => setInteractionMode(interactionMode === 'remove' ? null : 'remove')}
+                        className={cn("text-xs font-medium flex items-center gap-1.5", interactionMode === 'remove' ? "text-red-300" : "text-white/70")}
+                    >
+                        <Eraser className="w-3.5 h-3.5" />
+                        {interactionMode === 'remove' ? 'Odebrat element' : 'Odebrat'}
+                    </button>
+                </div>
+
+                {/* Reload Button */}
+                <div className="px-2 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center transition-all hover:bg-black/70">
+                    <button
+                        onClick={handleReload}
+                        className="text-white/70 hover:text-white transition-colors"
+                        title="Načíst znovu"
+                    >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+
 
                 {/* Render Mode Switcher */}
                 {isValidUrl && (
@@ -244,7 +318,7 @@ export function SimulatorFrame({
                 <div className="absolute top-4 left-4 z-20">
                     <div className={cn(
                         "px-2 py-1 rounded-full text-[10px] font-medium flex items-center gap-1",
-                        renderMode === 'playwright' 
+                        renderMode === 'playwright'
                             ? "bg-green-500/20 text-green-400 border border-green-500/30"
                             : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
                     )}>
@@ -279,11 +353,20 @@ export function SimulatorFrame({
                             )}
                         </div>
                         <button
+                            onClick={handleRemoveElement}
+                            className="text-white/50 hover:text-red-400 transition-colors mr-2"
+                            title="Odstranit element z DOM"
+                        >
+                            <Eraser className="w-4 h-4" />
+                        </button>
+                        <button
                             onClick={handleClearSelection}
                             className="text-white/50 hover:text-white transition-colors"
                         >
                             <X className="w-4 h-4" />
                         </button>
+
+
                     </div>
                     <div className="text-xs text-white/60 mt-2 pt-2 border-t border-white/10">
                         <div>Tag: <span className="text-white/80">{selectedElement.tagName}</span></div>
@@ -324,7 +407,7 @@ export function SimulatorFrame({
                                     {loading ? 'Inicializace...' : renderMode === 'playwright' ? 'Renderování pomocí Playwright...' : 'Načítání stránky...'}
                                 </span>
                                 {renderMode === 'proxy' && !iframeLoaded && (
-                                    <button 
+                                    <button
                                         onClick={switchToPlaywright}
                                         className="mt-2 text-xs text-purple-400 hover:text-purple-300 underline"
                                     >
@@ -343,8 +426,9 @@ export function SimulatorFrame({
                     )}
 
                     <iframe
-                        key={`${url}-${renderMode}-${retryCount}`}
+                        key={`${url}-${renderMode}-${retryCount}-${reloadKey}`}
                         ref={iframeRef}
+
                         src={iframeSrc}
                         className="w-full h-full border-0 bg-white"
                         onLoad={handleLoad}

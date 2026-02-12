@@ -5,10 +5,18 @@ import { z } from 'zod';
 const TaskSchema = z.object({
     document_id: z.string().optional(),
     source_id: z.string().optional(),
+    source_url_id: z.string().optional(),
     task: z.string().min(1, 'Task type is required'),
     max_attempts: z.number().int().default(3),
     cron_time: z.string().optional(),
     count: z.number().int().min(1).max(1000).optional().default(1),
+    // Scrapy-specific
+    method: z.string().optional(),
+    source_url: z.string().optional(),
+    // OCR-specific
+    ocr_language: z.string().optional(),
+    ocr_psm: z.number().int().min(0).max(13).optional(),
+    ocr_oem: z.number().int().min(0).max(3).optional(),
 });
 
 export async function POST(request: Request) {
@@ -23,7 +31,10 @@ export async function POST(request: Request) {
             );
         }
 
-        const { document_id, source_id, task, max_attempts, cron_time, count } = result.data;
+        const {
+            document_id, source_id, source_url_id, task, max_attempts, cron_time, count,
+            method, source_url, ocr_language, ocr_psm, ocr_oem,
+        } = result.data;
 
         // Validate connection string availability
         if (!process.env.REDIS_URL) {
@@ -48,6 +59,7 @@ export async function POST(request: Request) {
                 id,
                 document_id: document_id || '',
                 source_id: source_id || '',
+                source_url_id: source_url_id || '',
                 status: 'pending',
                 attempts: 0,
                 max_attempts: max_attempts,
@@ -58,6 +70,11 @@ export async function POST(request: Request) {
                 worker: '',
                 task: task,
                 cron_time: cron_time || '',
+                method: method || '',
+                source_url: source_url || '',
+                ocr_language: ocr_language || '',
+                ocr_psm: ocr_psm ?? '',
+                ocr_oem: ocr_oem ?? '',
             };
 
             // Store hash

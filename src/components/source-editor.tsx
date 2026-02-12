@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Search, Globe, ChevronRight, FolderTree, Loader2 } from 'lucide-react';
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
-import { SimulatorSidebar } from '@/components/simulator/simulator-sidebar';
+import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
 import { PageType, WorkflowData } from '@/lib/crawler-types';
-import { generateHierarchicalConfig, exportHierarchicalJSON } from '@/lib/crawler-export';
+
+import { generateWorkerRuntimeConfig } from '@/lib/crawler-export';
 import {
     ResizableHandle,
     ResizablePanel,
@@ -57,7 +58,7 @@ export function SourceEditor() {
     const [searchingObec, setSearchingObec] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [simulatorLoading, setSimulatorLoading] = useState(false);
-    
+
     // Crawler configuration
     const [pageType, setPageType] = useState<PageType | null>(null);
     const [workflowData, setWorkflowData] = useState<WorkflowData | null>(null);
@@ -65,6 +66,13 @@ export function SourceEditor() {
     // Refs
     const obecDropdownRef = useRef<HTMLDivElement>(null);
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const sidebarRef = useRef<SimulatorSidebarRef>(null);
+
+    const handleElementRemove = (selector: string) => {
+        sidebarRef.current?.addBlock('remove_element', { selector });
+        toast.success('Remove Element step added to workflow');
+    };
+
 
     // Fetch source types on mount
     useEffect(() => {
@@ -152,17 +160,10 @@ export function SourceEditor() {
 
         setSubmitting(true);
         try {
-            // Generate hierarchical crawler config from workflow
+            // Generate worker runtime config from workflow
             let crawlParams = {};
             if (pageType && workflowData) {
-                const hierarchicalConfig = generateHierarchicalConfig(workflowData, pageType);
-                crawlParams = {
-                    crawlerType: hierarchicalConfig.metadata.pageType,
-                    pageType: hierarchicalConfig.metadata,
-                    mainLoop: hierarchicalConfig.mainLoop,
-                    sources: hierarchicalConfig.sources,
-                    configJson: exportHierarchicalJSON(hierarchicalConfig),
-                };
+                crawlParams = generateWorkerRuntimeConfig(workflowData, pageType, baseUrl);
             }
 
             const response = await fetch('/api/sources', {
@@ -353,20 +354,24 @@ export function SourceEditor() {
                             onLoad={handleIframeLoad}
                             className="h-full"
                             onPageTypeDetected={setPageType}
+                            onElementRemove={handleElementRemove}
                         />
                     </ResizablePanel>
 
                     <ResizableHandle />
 
                     <ResizablePanel defaultSize={25} minSize={15} maxSize={50}>
-                        <SimulatorSidebar 
+                        <SimulatorSidebar
+                            ref={sidebarRef}
                             onWorkflowChange={setWorkflowData}
                             pageType={pageType}
                         />
+
                     </ResizablePanel>
                 </ResizablePanelGroup>
             </div>
         </div>
     );
 }
+
 

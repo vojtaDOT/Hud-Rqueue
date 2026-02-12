@@ -1,18 +1,19 @@
 // Functions for exporting crawler configuration
 
-import { 
-    CrawlerConfig, 
-    ScrapyConfig, 
-    PlaywrightConfig, 
-    CrawlerStep, 
-    ExtractStep, 
-    SelectStep, 
-    ClickStep, 
+import {
+    CrawlerConfig,
+    ScrapyConfig,
+    PlaywrightConfig,
+    CrawlerStep,
+    ExtractStep,
+    SelectStep,
+    ClickStep,
     PaginationStep,
     HierarchicalCrawlerConfig,
     HierarchicalStep,
     HierarchicalSource,
-    WorkflowData
+    WorkflowData,
+    WorkerRuntimeConfig,
 } from './crawler-types';
 
 /**
@@ -280,9 +281,14 @@ function blockToHierarchicalStep(block: { type: string; config?: Record<string, 
                 headers: config.headers || {},
                 body: config.body,
             };
-        
+
+        case 'remove_element':
+            return {
+                type: 'select',
+                selector: config.selector || '',
+            };
+
         default:
-            // Return a basic step for unknown types
             return {
                 type: 'select',
                 selector: config.selector || '',
@@ -340,4 +346,168 @@ export function workflowToJSON(
 ): string {
     const config = generateHierarchicalConfig(workflowData, pageType);
     return exportHierarchicalJSON(config);
+}
+
+/**
+ * Generate full worker runtime config from workflow data.
+ * Matches the worker-runtime-minimal-template.json structure.
+ *
+ * - mainLoop blocks → steps.source.workflow (discover source_urls)
+ * - sources with their steps → steps.source_urls.workflow (download documents)
+ */
+export function generateWorkerRuntimeConfig(
+    workflowData: WorkflowData,
+    pageType: { requiresPlaywright: boolean; framework: string },
+    baseUrl: string,
+): WorkerRuntimeConfig {
+    const discoverSteps: HierarchicalStep[] = workflowData.mainLoop.map(block =>
+        blockToHierarchicalStep(block)
+    );
+
+    const downloadSources: HierarchicalSource[] = workflowData.sources.map(source => ({
+        id: source.id,
+        url: source.url,
+        label: source.label,
+        loopConfig: source.loopConfig,
+        steps: source.steps.map(block => blockToHierarchicalStep(block)),
+    }));
+
+    const downloadSteps: HierarchicalStep[] = workflowData.sources.flatMap(source =>
+        source.steps.map(block => blockToHierarchicalStep(block))
+    );
+
+    return {
+        schema_version: '1.0',
+        runtime_contract: 'scrapy-worker.runtime.minimal.v1',
+        flow: ['source', 'source_urls'],
+        worker_preconditions: {
+            database: {
+                source_exists: true,
+                source_enabled: true,
+            },
+            download: {
+                source_url_exists: true,
+                source_url_enabled: true,
+            },
+        },
+        steps: {
+            source: {
+                task: 'discover',
+                required_task_fields_after_claim: ['id', 'source_id', 'task'],
+                controller_api_enqueue: {
+                    required_fields: ['source_id', 'task'],
+                    payload_template: {
+                        source_id: '<SOURCE_ID:int>',
+                        task: 'discover',
+                        max_attempts: 3,
+                        idempotency_key: 'discover-<SOURCE_ID>-<YYYY-MM-DD>',
+                    },
+                },
+                redis_enqueue: {
+                    required_fields: ['id', 'source_id', 'task'],
+                    payload_template: {
+                        id: 'discover-<SOURCE_ID>-<UUID>',
+                        source_id: '<SOURCE_ID>',
+                        task: 'discover',
+                        source_url_id: '',
+                        document_id: 'None',
+                        status: 'pending',
+                        attempts: '0',
+                        max_attempts: '3',
+                        created_at: '<ISO8601_UTC>',
+                        error_message: '',
+                        worker: '',
+                        started_at: '',
+                        completed_at: '',
+                        cron_time: '',
+                    },
+                },
+                workflow: {
+                    steps: discoverSteps,
+                },
+            },
+            source_urls: {
+                task: 'download',
+                required_task_fields_after_claim: ['id', 'source_id', 'source_url_id', 'task'],
+                controller_api_enqueue: {
+                    required_fields: ['source_id', 'source_url_id', 'task'],
+                    payload_template: {
+                        source_id: '<SOURCE_ID:int>',
+                        source_url_id: '<SOURCE_URL_ID:int>',
+                        task: 'download',
+                        max_attempts: 3,
+                        idempotency_key: 'download-<SOURCE_ID>-<SOURCE_URL_ID>-<YYYY-MM-DD>',
+                    },
+                },
+                redis_enqueue: {
+                    required_fields: ['id', 'source_id', 'source_url_id', 'task'],
+                    payload_template: {
+                        id: 'download-<SOURCE_ID>-<SOURCE_URL_ID>-<UUID>',
+                        source_id: '<SOURCE_ID>',
+                        source_url_id: '<SOURCE_URL_ID>',
+                        task: 'download',
+                        document_id: 'None',
+                        status: 'pending',
+                        attempts: '0',
+                        max_attempts: '3',
+                        created_at: '<ISO8601_UTC>',
+                        error_message: '',
+                        worker: '',
+                        started_at: '',
+                        completed_at: '',
+                        cron_time: '',
+                    },
+                },
+                workflow: {
+                    steps: downloadSteps,
+                    sources: downloadSources,
+                },
+            },
+        },
+        optional_tasks: {
+            ocr: {
+                task: 'ocr',
+                required_task_fields_after_claim: ['id', 'source_id', 'document_id', 'task'],
+                controller_api_enqueue: {
+                    required_fields: ['source_id', 'document_id', 'task'],
+                    payload_template: {
+                        source_id: '<SOURCE_ID:int>',
+                        document_id: '<DOCUMENT_ID:int>',
+                        task: 'ocr',
+                        max_attempts: 3,
+                        idempotency_key: 'ocr-<DOCUMENT_ID>-<YYYY-MM-DD>',
+                    },
+                },
+                redis_enqueue: {
+                    required_fields: ['id', 'source_id', 'document_id', 'task'],
+                    payload_template: {
+                        id: 'ocr-<DOCUMENT_ID>-<UUID>',
+                        source_id: '<SOURCE_ID>',
+                        source_url_id: '',
+                        task: 'ocr',
+                        document_id: '<DOCUMENT_ID>',
+                        status: 'pending',
+                        attempts: '0',
+                        max_attempts: '3',
+                        created_at: '<ISO8601_UTC>',
+                        error_message: '',
+                        worker: '',
+                        started_at: '',
+                        completed_at: '',
+                        cron_time: '',
+                    },
+                },
+                workflow: {
+                    steps: [],
+                },
+            },
+        },
+        metadata: {
+            pageType: pageType.requiresPlaywright ? 'playwright' : 'scrapy',
+            framework: pageType.framework,
+            requiresPlaywright: pageType.requiresPlaywright,
+            baseUrl,
+            createdAt: new Date().toISOString(),
+        },
+    };
 }

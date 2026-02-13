@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HUD Queue
 
-## Getting Started
+Internal web scraping automation platform. Visual workflow builder, Redis job queue, Supabase (PostgreSQL/Citus) database management, real-time monitoring.
 
-First, run the development server:
+## Tech Stack
+
+- **Frontend:** Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui, dnd-kit
+- **Queue:** Redis (ioredis)
+- **Database:** PostgreSQL/Citus via Supabase
+- **Rendering:** Playwright (optional, for JS-heavy pages)
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — Redis queue stats, worker performance, database metrics |
+| `/tasks` | Task Wizard — create Scrapy/OCR jobs (single or bulk) |
+| `/sources` | Source Editor — visual workflow builder with iframe simulator |
+| `/database` | Database Manager — full CRUD for all tables |
+| `/data` | Data Seeder — seed reference data |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `REDIS_URL` | Redis connection string |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
+
+## Setup — Localhost
 
 ```bash
+# 1. Install dependencies
+npm install
+
+# 2. Copy env template and fill in values
+cp .env.example .env.local
+
+# 3. Start dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup — Docker
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# 1. Copy env and fill in values
+cp .env.example .env.local
 
-## Learn More
+# 2. Build and run
+docker compose up --build -d
+```
 
-To learn more about Next.js, take a look at the following resources:
+The app runs on port `3000`. Redis and Supabase are external services — configure their URLs in `.env.local`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Setup — Portainer Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. In Portainer, go to **Stacks → Add stack**.
+2. Use **Repository** method pointing to this repo, or paste the compose file below.
+3. Add environment variables in the **Environment variables** section:
 
-## Deploy on Vercel
+   | Name | Value |
+   |------|-------|
+   | `REDIS_URL` | `redis://...` |
+   | `NEXT_PUBLIC_SUPABASE_URL` | `https://your-project.supabase.co` |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `your-anon-key` |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+4. Click **Deploy the stack**.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Stack compose file
+
+```yaml
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    restart: unless-stopped
+```
+
+> **Note:** If deploying from a pre-built image (e.g. pushed to a registry), replace the `build` section with `image: your-registry/hud-queue:latest` and pass the `NEXT_PUBLIC_*` vars at runtime.
+
+## Build
+
+```bash
+npm run build    # Production build
+npm start        # Start production server
+```

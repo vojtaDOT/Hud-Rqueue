@@ -10,11 +10,11 @@ function getSupabase() {
     return createClient(url, key);
 }
 
-async function rpc<T>(supabase: ReturnType<typeof createClient>, sql: string): Promise<T | null> {
+async function rpc<T>(supabase: any, sql: string): Promise<T | null> {
     // Supabase exposes raw SQL via pg_net or rpc; we use the postgres extension
     // "supabase-js" doesn't support raw SQL out of the box, so we use rpc with a helper function
     // or the REST endpoint. We'll try the common pattern.
-    const { data, error } = await supabase.rpc('exec_sql', { query: sql }).single();
+    const { data, error } = await (supabase as any).rpc('exec_sql', { query: sql }).single();
     if (error) {
         // fallback: try via rest / edge function — return null so the caller can skip
         return null;
@@ -22,10 +22,10 @@ async function rpc<T>(supabase: ReturnType<typeof createClient>, sql: string): P
     return data as T;
 }
 
-async function queryRows(supabase: ReturnType<typeof createClient>, sql: string) {
+async function queryRows(supabase: any, sql: string) {
     // Try using supabase.rpc or a raw fetch to the PostgREST RPC endpoint
     // If exec_sql doesn't exist, we fall back to direct pg fetch
-    const { data, error } = await supabase.rpc('exec_sql', { query: sql });
+    const { data, error } = await (supabase as any).rpc('exec_sql', { query: sql });
     if (!error && data) return data;
 
     // Fallback: use the Supabase Management API or direct postgres connection

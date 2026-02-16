@@ -7,7 +7,7 @@ import { ChevronRight, Globe, Loader2, Search } from 'lucide-react';
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
 import { generateWorkerRuntimeConfig } from '@/lib/crawler-export';
-import { PageType, ScrapingWorkflow } from '@/lib/crawler-types';
+import { PageType, PhaseConfig, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
 import {
     ResizableHandle,
     ResizablePanel,
@@ -39,12 +39,28 @@ interface Obec {
     kraj_nazev: string;
 }
 
+function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
+    const output: ScopeModule[] = [];
+    const walk = (items: ScopeModule[]) => {
+        for (const scope of items) {
+            output.push(scope);
+            walk(scope.children);
+        }
+    };
+    walk(scopes);
+    return output;
+}
+
+function getPhaseFields(phase: PhaseConfig) {
+    return flattenScopes(phase.chain).flatMap((scope) => scope.repeater?.fields ?? []);
+}
+
 function validateWorkflow(workflow: ScrapingWorkflow): string | null {
     if (workflow.url_types.length < 1) {
         return 'Musí existovat alespoň jeden URL Type.';
     }
 
-    const sourceUrlFields = workflow.discovery.fields.filter(
+    const sourceUrlFields = getPhaseFields(workflow.discovery).filter(
         (field) => field.is_source_url && field.css_selector.trim().length > 0,
     );
     if (sourceUrlFields.length < 1) {
@@ -53,7 +69,20 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
 
     const allPhases = [workflow.discovery, ...workflow.url_types.map((item) => item.processing)];
     for (const phase of allPhases) {
-        for (const field of phase.fields) {
+        const scopes = flattenScopes(phase.chain);
+        for (const scope of scopes) {
+            if (!scope.css_selector.trim()) {
+                return 'Každý Scope musí mít CSS selector.';
+            }
+            if (scope.repeater && !scope.repeater.css_selector.trim()) {
+                return 'Každý Repeater musí mít CSS selector.';
+            }
+            if (scope.pagination && !scope.pagination.css_selector.trim()) {
+                return 'Pagination musí mít CSS selector.';
+            }
+        }
+
+        for (const field of getPhaseFields(phase)) {
             if (!field.name.trim() || !field.css_selector.trim() || !field.extract_type) {
                 return 'Každé pole musí mít name, css_selector a extract_type.';
             }
@@ -62,7 +91,13 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
             }
         }
 
-        for (const action of phase.pre_actions) {
+        for (const action of phase.before_actions) {
+            if (action.type === 'remove_element' && !action.css_selector.trim()) {
+                return 'Remove Element vyžaduje CSS selector.';
+            }
+        }
+
+        for (const action of phase.playwright_actions) {
             if (action.type === 'wait_selector' && !action.css_selector.trim()) {
                 return 'Wait for Selector vyžaduje CSS selector.';
             }
@@ -187,21 +222,17 @@ export function SourceEditor() {
     };
 
     const handleElementRemove = (selector: string) => {
-        if (!playwrightEnabled) {
-            toast.warning('Odebrání prvku je provedeno jen vizuálně. Pro uložení kroku zapněte Playwright.');
-            return;
-        }
-        sidebarRef.current?.appendRemoveElementPreAction(selector);
-        toast.success('Přidán Playwright pre-action: Evaluate (hide element).');
+        sidebarRef.current?.appendRemoveElementBeforeAction(selector);
+        toast.success('Přidán Before step: Remove Element.');
     };
 
     const handlePlaywrightToggleRequest = (nextEnabled: boolean) => {
-        if (!nextEnabled && sidebarRef.current?.hasAnyPreActions()) {
+        if (!nextEnabled && sidebarRef.current?.hasAnyPlaywrightActions()) {
             const confirmed = window.confirm(
-                'Vypnutí Playwright odstraní všechny pre-actions ve Phase 1 i Phase 2. Pokračovat?',
+                'Vypnutí Playwright odstraní Playwright kroky ve Phase 1 i Phase 2. Pokračovat?',
             );
             if (!confirmed) return false;
-            sidebarRef.current.clearAllPreActions();
+            sidebarRef.current.clearAllPlaywrightActions();
         }
         setPlaywrightEnabled(nextEnabled);
         return true;

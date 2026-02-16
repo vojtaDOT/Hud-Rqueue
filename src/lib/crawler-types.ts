@@ -218,17 +218,8 @@ export interface WorkerRuntimeEnqueueConfig {
 
 export type ExtractType = 'text' | 'href' | 'src' | 'attribute' | 'html';
 
-export interface ScopeConfig {
-    css_selector: string;
-    label: string;
-}
-
-export interface RepeaterConfig {
-    css_selector: string;
-    label: string;
-}
-
 export interface FieldConfig {
+    id?: string;
     name: string;
     css_selector: string;
     extract_type: ExtractType;
@@ -242,10 +233,13 @@ export interface PaginationConfig {
     max_pages: number;
 }
 
+export type BeforeAction =
+    | { type: 'remove_element'; css_selector: string }
+    | { type: 'wait_timeout'; ms: number };
+
 export type PlaywrightAction =
     | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
     | { type: 'wait_network'; state: 'networkidle' | 'domcontentloaded' | 'load' }
-    | { type: 'wait_timeout'; ms: number }
     | { type: 'click'; css_selector: string; wait_after_ms?: number }
     | { type: 'scroll'; count: number; delay_ms: number }
     | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
@@ -253,12 +247,26 @@ export type PlaywrightAction =
     | { type: 'evaluate'; script: string }
     | { type: 'screenshot'; filename: string };
 
-export interface PhaseConfig {
-    pre_actions: PlaywrightAction[];
-    scope: ScopeConfig | null;
-    repeater: RepeaterConfig | null;
+export interface RepeaterNode {
+    id: string;
+    css_selector: string;
+    label: string;
     fields: FieldConfig[];
+}
+
+export interface ScopeModule {
+    id: string;
+    css_selector: string;
+    label: string;
+    repeater: RepeaterNode | null;
     pagination: PaginationConfig | null;
+    children: ScopeModule[];
+}
+
+export interface PhaseConfig {
+    before_actions: BeforeAction[];
+    playwright_actions: PlaywrightAction[];
+    chain: ScopeModule[];
 }
 
 export interface SourceUrlType {
@@ -274,7 +282,7 @@ export interface ScrapingWorkflow {
 }
 
 export interface WorkerRuntimePhaseWorkflow {
-    version: 'scoped_selectors.v1';
+    version: 'scoped_chain.v2.1';
     phase: 'discovery' | 'processing';
     playwright_enabled: boolean;
     config?: PhaseConfig;

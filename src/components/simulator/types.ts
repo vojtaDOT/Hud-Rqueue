@@ -29,8 +29,9 @@ export type {
     PhaseConfig,
     SourceUrlType,
     FieldConfig,
+    BeforeAction,
     PlaywrightAction,
-    ScopeConfig,
-    RepeaterConfig,
+    ScopeModule,
+    RepeaterNode,
     PaginationConfig,
 } from '@/lib/crawler-types';

@@ -430,7 +430,7 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    version: 'scoped_selectors.v1',
+                    version: 'scoped_chain.v2.1',
                     phase: 'discovery',
                     playwright_enabled: playwrightEnabled,
                     config: workflowData.discovery,
@@ -469,7 +469,7 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    version: 'scoped_selectors.v1',
+                    version: 'scoped_chain.v2.1',
                     phase: 'processing',
                     playwright_enabled: playwrightEnabled,
                     url_types: workflowData.url_types,
@@ -510,7 +510,7 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    version: 'scoped_selectors.v1',
+                    version: 'scoped_chain.v2.1',
                     phase: 'processing',
                     playwright_enabled: playwrightEnabled,
                     url_types: [],

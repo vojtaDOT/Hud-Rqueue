@@ -115,20 +115,21 @@ export async function GET(request: NextRequest) {
             const response = await fetch(targetUrl, {
                 headers: {
                     'User-Agent': userAgent,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'cs-CZ,cs;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Cache-Control': 'no-cache',
-                    'DNT': '1',
-                    'Pragma': 'no-cache',
-                    'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                    'Upgrade-Insecure-Requests': '1',
+                    'Accept': request.headers.get('accept') || '*/*',
+                    'Accept-Language': request.headers.get('accept-language') || 'cs-CZ,cs;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Encoding': request.headers.get('accept-encoding') || 'gzip, deflate, br',
+                    'Cache-Control': request.headers.get('cache-control') || 'no-cache',
+                    'Pragma': request.headers.get('pragma') || 'no-cache',
+                    'DNT': request.headers.get('dnt') || '1',
+                    'Sec-Ch-Ua': request.headers.get('sec-ch-ua') || '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+                    'Sec-Ch-Ua-Mobile': request.headers.get('sec-ch-ua-mobile') || '?0',
+                    'Sec-Ch-Ua-Platform': request.headers.get('sec-ch-ua-platform') || '"Windows"',
+                    'Sec-Fetch-Dest': request.headers.get('sec-fetch-dest') || 'empty',
+                    'Sec-Fetch-Mode': request.headers.get('sec-fetch-mode') || 'cors',
+                    'Sec-Fetch-Site': request.headers.get('sec-fetch-site') || 'cross-site',
+                    ...(request.headers.get('sec-fetch-user') ? { 'Sec-Fetch-User': request.headers.get('sec-fetch-user')! } : {}),
+                    ...(request.headers.get('upgrade-insecure-requests') ? { 'Upgrade-Insecure-Requests': request.headers.get('upgrade-insecure-requests')! } : {}),
+                    'Referer': url.origin + '/',
                 },
                 signal: controller.signal,
                 redirect: 'follow',
@@ -159,6 +160,12 @@ export async function GET(request: NextRequest) {
 
             if (isHtml) {
                 let html = await response.text();
+
+                // Remove 3rd-party chat widget assets that often break preview rendering and overlays.
+                html = html.replace(/<script[^>]+demos\.telma\.ai[^>]*>\s*<\/script>/gi, '');
+                html = html.replace(/<link[^>]+demos\.telma\.ai[^>]*>/gi, '');
+                html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*demos\.telma\.ai\/mchats(?:(?!<\/script>)[\s\S])*<\/script>/gi, '');
+                html = html.replace(/<script[^>]+(?:cookie-consent|cookies\.min\.js|cookiebot|onetrust)[^>]*>\s*<\/script>/gi, '');
 
                 // Strip Content-Security-Policy meta tags
                 html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
@@ -222,13 +229,6 @@ export async function GET(request: NextRequest) {
                 const injectedScripts = `
                 <script id="proxy-init-scripts">
                 (function(){
-                    // === FRAME BUSTER PREVENTION ===
-                    try {
-                        var _self = window.self;
-                        Object.defineProperty(window, 'top', { get: function() { return _self; }, configurable: false });
-                        Object.defineProperty(window, 'parent', { get: function() { return _self; }, configurable: false });
-                    } catch(e) {}
-                    
                     // === FETCH/XHR INTERCEPTION ===
                     var PROXY_BASE = '${request.nextUrl.origin}/api/proxy?url=';
                     var ORIGINAL_ORIGIN = '${url.origin}';
@@ -335,7 +335,12 @@ export async function GET(request: NextRequest) {
                 // Rewrite static URLs in HTML
                 html = html.replace(
                     /(href|src|action)=["']([^"']+)["']/gi,
-                    (match, attr, urlValue) => {
+                    (match: string, attr: string, urlValue: string, offset: number, fullHtml: string) => {
+                        const tagStart = fullHtml.lastIndexOf('<', offset);
+                        const tagPrefix = tagStart >= 0 ? fullHtml.slice(tagStart, offset).toLowerCase() : '';
+                        if (tagPrefix.startsWith('<base')) {
+                            return match;
+                        }
                         const proxiedUrl = proxyUrl(urlValue);
                         return `${attr}="${proxiedUrl}"`;
                     }
@@ -948,7 +953,43 @@ export async function GET(request: NextRequest) {
                 });
             }
 
-            // For non-HTML content
+            // Rewrite CSS assets so relative url(...) references stay in proxy space.
+            if (contentType.includes('text/css')) {
+                const css = await response.text();
+                const proxyBase = `${request.nextUrl.origin}/api/proxy?url=`;
+                const resolveCssUrl = (cssUrl: string) => {
+                    const trimmed = cssUrl.trim();
+                    if (!trimmed || /^(data:|blob:|javascript:|#)/i.test(trimmed)) {
+                        return cssUrl;
+                    }
+                    try {
+                        const absolute = new URL(trimmed, url.href).href;
+                        return `${proxyBase}${encodeURIComponent(absolute)}`;
+                    } catch {
+                        return cssUrl;
+                    }
+                };
+                const rewrittenCss = css
+                    .replace(
+                        /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
+                        (_match: string, quote: string, assetUrl: string) => `url(${quote}${resolveCssUrl(assetUrl)}${quote})`
+                    )
+                    .replace(
+                        /@import\s+(?:url\()?['"]([^'"]+)['"]\)?/gi,
+                        (_match: string, importUrl: string) => `@import url("${resolveCssUrl(importUrl)}")`
+                    );
+
+                return new NextResponse(rewrittenCss, {
+                    headers: {
+                        'Content-Type': contentType.includes('charset') ? contentType : 'text/css; charset=utf-8',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET',
+                        'Cache-Control': 'public, max-age=3600',
+                    },
+                });
+            }
+
+            // For non-HTML/non-CSS content
             try {
                 const buffer = await response.arrayBuffer();
                 return new NextResponse(buffer, {

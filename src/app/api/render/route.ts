@@ -136,6 +136,12 @@ export async function GET(request: NextRequest) {
         let html = await page.content();
         await browser.close();
 
+        // Remove 3rd-party chat widget assets that frequently break preview overlays/interactions.
+        html = html.replace(/<script[^>]+demos\.telma\.ai[^>]*>\s*<\/script>/gi, '');
+        html = html.replace(/<link[^>]+demos\.telma\.ai[^>]*>/gi, '');
+        html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*demos\.telma\.ai\/mchats(?:(?!<\/script>)[\s\S])*<\/script>/gi, '');
+        html = html.replace(/<script[^>]+(?:cookie-consent|cookies\.min\.js|cookiebot|onetrust)[^>]*>\s*<\/script>/gi, '');
+
         // Rewrite iframe src to proxy through our endpoint (fixes cross-origin)
         const renderBaseUrl = request.nextUrl.origin + '/api/render?url=';
 
@@ -211,7 +217,7 @@ export async function GET(request: NextRequest) {
                     let selectorMatchEntries = [];
                     let isSelectionMode = false;
                     let selectionMode = 'select';
-                    
+
                     // Watch for frame path updates
                     window.addEventListener('message', function(e) {
                         if (e.data.type === 'set-frame-path' && Array.isArray(e.data.framePath)) {
@@ -448,6 +454,7 @@ export async function GET(request: NextRequest) {
 
                     document.addEventListener('click', function(e) {
                         if (isSelectionMode) return;
+                        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                         let t = e.target;
                         if (t && t.nodeType === 3) t = t.parentElement;
                         if (!t) return;
@@ -457,6 +464,18 @@ export async function GET(request: NextRequest) {
 
                         const href = anchor.getAttribute('href') || '';
                         if (!href || href.startsWith('#') || /^(javascript:|mailto:|tel:|data:)/i.test(href)) return;
+
+                        const renderPrefix = APP_ORIGIN + '/api/render?url=';
+                        const directHref = anchor.href || href;
+                        if (directHref && directHref.startsWith(renderPrefix)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (typeof e.stopImmediatePropagation === 'function') {
+                                e.stopImmediatePropagation();
+                            }
+                            window.location.assign(directHref);
+                            return;
+                        }
 
                         let absoluteHref = '';
                         try {
@@ -471,7 +490,6 @@ export async function GET(request: NextRequest) {
                         if (typeof e.stopImmediatePropagation === 'function') {
                             e.stopImmediatePropagation();
                         }
-                        const renderPrefix = APP_ORIGIN + '/api/render?url=';
                         let targetHref = absoluteHref;
                         try {
                             const parsed = new URL(absoluteHref);

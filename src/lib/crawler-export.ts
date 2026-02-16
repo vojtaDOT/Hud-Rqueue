@@ -14,7 +14,27 @@ import {
     HierarchicalSource,
     WorkflowData,
     WorkerRuntimeConfig,
+    ScrapingWorkflow,
 } from './crawler-types';
+
+function getConfigRecord(value: unknown): Record<string, unknown> {
+    if (value && typeof value === 'object') {
+        return value as Record<string, unknown>;
+    }
+    return {};
+}
+
+function getString(value: unknown, fallback = ''): string {
+    return typeof value === 'string' ? value : fallback;
+}
+
+function getBoolean(value: unknown, fallback = false): boolean {
+    return typeof value === 'boolean' ? value : fallback;
+}
+
+function getNumber(value: unknown, fallback = 0): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
 
 /**
  * Convert CrawlerConfig to Scrapy JSON format
@@ -151,52 +171,53 @@ export function exportToPlaywright(config: CrawlerConfig): PlaywrightConfig {
 export function generateCrawlerConfig(
     baseUrl: string,
     pageType: { requiresPlaywright: boolean; framework: string },
-    steps: Array<{ type: string; config: any }>
+    steps: Array<{ type: string; config: Record<string, unknown> }>
 ): CrawlerConfig {
     const crawlerSteps: CrawlerStep[] = steps.map(step => {
+        const config = getConfigRecord(step.config);
         switch (step.type) {
             case 'select':
                 return {
                     type: 'select',
-                    selector: step.config.selector || '',
-                    waitForSelector: step.config.waitForSelector !== false,
-                    waitTimeout: step.config.waitTimeout || 30000,
-                    multiple: step.config.multiple || false,
+                    selector: getString(config.selector),
+                    waitForSelector: config.waitForSelector !== false,
+                    waitTimeout: getNumber(config.waitTimeout, 30000),
+                    multiple: getBoolean(config.multiple, false),
                 };
 
             case 'extract':
                 return {
                     type: 'extract',
-                    selector: step.config.selector || '',
-                    attribute: step.config.attribute || 'text',
-                    fieldName: step.config.fieldName || 'value',
-                    required: step.config.required !== false,
+                    selector: getString(config.selector),
+                    attribute: getString(config.attribute, 'text'),
+                    fieldName: getString(config.fieldName, 'value'),
+                    required: config.required !== false,
                 };
 
             case 'click':
                 return {
                     type: 'click',
-                    selector: step.config.selector || '',
-                    waitForNavigation: step.config.waitForNavigation !== false,
-                    waitTimeout: step.config.waitTimeout || 30000,
+                    selector: getString(config.selector),
+                    waitForNavigation: config.waitForNavigation !== false,
+                    waitTimeout: getNumber(config.waitTimeout, 30000),
                 };
 
             case 'pagination':
                 return {
                     type: 'pagination',
-                    nextButtonSelector: step.config.nextButtonSelector,
-                    nextLinkSelector: step.config.nextLinkSelector,
-                    maxPages: step.config.maxPages || 10,
-                    waitForSelector: step.config.waitForSelector !== false,
+                    nextButtonSelector: getString(config.nextButtonSelector, undefined),
+                    nextLinkSelector: getString(config.nextLinkSelector, undefined),
+                    maxPages: getNumber(config.maxPages, 10),
+                    waitForSelector: config.waitForSelector !== false,
                 };
 
             case 'source':
                 return {
                     type: 'source',
-                    url: step.config.url || baseUrl,
-                    method: step.config.method || 'GET',
-                    headers: step.config.headers || {},
-                    body: step.config.body,
+                    url: getString(config.url, baseUrl),
+                    method: getString(config.method, 'GET') as 'GET' | 'POST',
+                    headers: getConfigRecord(config.headers) as Record<string, string>,
+                    body: getString(config.body, undefined),
                 };
 
             default:
@@ -209,7 +230,7 @@ export function generateCrawlerConfig(
             isReact: pageType.framework === 'react' || pageType.framework === 'nextjs',
             isSPA: pageType.requiresPlaywright,
             isSSR: !pageType.requiresPlaywright,
-            framework: pageType.framework as any,
+            framework: pageType.framework as 'react' | 'nextjs' | 'vue' | 'angular' | 'unknown',
             requiresPlaywright: pageType.requiresPlaywright,
         },
         crawlerType: pageType.requiresPlaywright ? 'playwright' : 'scrapy',
@@ -233,65 +254,65 @@ export function exportConfigToJSON(config: CrawlerConfig): string {
 /**
  * Convert a block config to HierarchicalStep format
  */
-function blockToHierarchicalStep(block: { type: string; config?: Record<string, any> }): HierarchicalStep {
-    const config = block.config || {};
+function blockToHierarchicalStep(block: { type: string; config?: Record<string, unknown> }): HierarchicalStep {
+    const config = getConfigRecord(block.config);
     
     switch (block.type) {
         case 'select':
             return {
                 type: 'select',
-                selector: config.selector || '',
+                selector: getString(config.selector),
                 waitForSelector: config.waitForSelector !== false,
-                waitTimeout: config.waitTimeout || 30000,
-                multiple: config.multiple || false,
+                waitTimeout: getNumber(config.waitTimeout, 30000),
+                multiple: getBoolean(config.multiple, false),
             };
         
         case 'extract':
             return {
                 type: 'extract',
-                selector: config.selector || '',
-                attribute: config.attribute || 'text',
-                fieldName: config.fieldName || 'value',
+                selector: getString(config.selector),
+                attribute: getString(config.attribute, 'text'),
+                fieldName: getString(config.fieldName, 'value'),
                 required: config.required !== false,
             };
         
         case 'click':
             return {
                 type: 'click',
-                selector: config.selector || '',
+                selector: getString(config.selector),
                 waitForNavigation: config.waitForNavigation !== false,
-                waitTimeout: config.waitTimeout || 30000,
+                waitTimeout: getNumber(config.waitTimeout, 30000),
             };
         
         case 'pagination':
             return {
                 type: 'pagination',
-                nextButtonSelector: config.nextButtonSelector,
-                nextLinkSelector: config.nextLinkSelector,
-                maxPages: config.maxPages || 10,
+                nextButtonSelector: getString(config.nextButtonSelector, undefined),
+                nextLinkSelector: getString(config.nextLinkSelector, undefined),
+                maxPages: getNumber(config.maxPages, 10),
                 waitForSelector: config.waitForSelector !== false,
-                waitTimeout: config.waitTimeout || 30000,
+                waitTimeout: getNumber(config.waitTimeout, 30000),
             };
         
         case 'source':
             return {
                 type: 'source',
-                url: config.url || '',
-                method: config.method || 'GET',
-                headers: config.headers || {},
-                body: config.body,
+                url: getString(config.url),
+                method: getString(config.method, 'GET') as 'GET' | 'POST',
+                headers: getConfigRecord(config.headers) as Record<string, string>,
+                body: getString(config.body, undefined),
             };
 
         case 'remove_element':
             return {
                 type: 'select',
-                selector: config.selector || '',
+                selector: getString(config.selector),
             };
 
         default:
             return {
                 type: 'select',
-                selector: config.selector || '',
+                selector: getString(config.selector),
             };
     }
 }
@@ -356,25 +377,11 @@ export function workflowToJSON(
  * - sources with their steps → steps.source_urls.workflow (download documents)
  */
 export function generateWorkerRuntimeConfig(
-    workflowData: WorkflowData,
+    workflowData: ScrapingWorkflow,
     pageType: { requiresPlaywright: boolean; framework: string },
     baseUrl: string,
 ): WorkerRuntimeConfig {
-    const discoverSteps: HierarchicalStep[] = workflowData.mainLoop.map(block =>
-        blockToHierarchicalStep(block)
-    );
-
-    const downloadSources: HierarchicalSource[] = workflowData.sources.map(source => ({
-        id: source.id,
-        url: source.url,
-        label: source.label,
-        loopConfig: source.loopConfig,
-        steps: source.steps.map(block => blockToHierarchicalStep(block)),
-    }));
-
-    const downloadSteps: HierarchicalStep[] = workflowData.sources.flatMap(source =>
-        source.steps.map(block => blockToHierarchicalStep(block))
-    );
+    const playwrightEnabled = workflowData.playwright_enabled;
 
     return {
         schema_version: '1.0',
@@ -423,7 +430,10 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    steps: discoverSteps,
+                    version: 'scoped_selectors.v1',
+                    phase: 'discovery',
+                    playwright_enabled: playwrightEnabled,
+                    config: workflowData.discovery,
                 },
             },
             source_urls: {
@@ -459,8 +469,10 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    steps: downloadSteps,
-                    sources: downloadSources,
+                    version: 'scoped_selectors.v1',
+                    phase: 'processing',
+                    playwright_enabled: playwrightEnabled,
+                    url_types: workflowData.url_types,
                 },
             },
         },
@@ -498,14 +510,17 @@ export function generateWorkerRuntimeConfig(
                     },
                 },
                 workflow: {
-                    steps: [],
+                    version: 'scoped_selectors.v1',
+                    phase: 'processing',
+                    playwright_enabled: playwrightEnabled,
+                    url_types: [],
                 },
             },
         },
         metadata: {
-            pageType: pageType.requiresPlaywright ? 'playwright' : 'scrapy',
-            framework: pageType.framework,
-            requiresPlaywright: pageType.requiresPlaywright,
+            pageType: playwrightEnabled ? 'playwright' : 'scrapy',
+            framework: pageType.framework || 'unknown',
+            requiresPlaywright: playwrightEnabled,
             baseUrl,
             createdAt: new Date().toISOString(),
         },

@@ -400,6 +400,7 @@ export async function GET(request: NextRequest) {
                         let hoveredEl = null;
                         let selectedEl = null;
                         let highlightDiv = null;
+                        let selectorMatchOverlays = [];
                         let isSelectionMode = false;
                         let pageTypeDetected = false;
                         let pageType = null;
@@ -436,6 +437,47 @@ export async function GET(request: NextRequest) {
                             highlight.style.top = (rect.top + scrollY) + 'px';
                             highlight.style.width = rect.width + 'px';
                             highlight.style.height = rect.height + 'px';
+                        }
+
+                        function clearSelectorHighlights() {
+                            selectorMatchOverlays.forEach(function(overlay) {
+                                try { overlay.remove(); } catch {}
+                            });
+                            selectorMatchOverlays = [];
+                        }
+
+                        function highlightSelectorMatches(selector) {
+                            clearSelectorHighlights();
+                            if (!selector || typeof selector !== 'string') return;
+
+                            let elements = [];
+                            try {
+                                elements = Array.from(document.querySelectorAll(selector));
+                            } catch {
+                                return;
+                            }
+
+                            elements.slice(0, 200).forEach(function(element) {
+                                const rect = element.getBoundingClientRect();
+                                if (rect.width <= 0 || rect.height <= 0) return;
+                                const overlay = document.createElement('div');
+                                overlay.style.cssText = \`
+                                    position: absolute;
+                                    pointer-events: none;
+                                    z-index: 999998;
+                                    border: 2px dashed #22c55e;
+                                    background: rgba(34, 197, 94, 0.12);
+                                    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4);
+                                \`;
+                                const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+                                const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+                                overlay.style.left = (rect.left + scrollX) + 'px';
+                                overlay.style.top = (rect.top + scrollY) + 'px';
+                                overlay.style.width = rect.width + 'px';
+                                overlay.style.height = rect.height + 'px';
+                                document.body.appendChild(overlay);
+                                selectorMatchOverlays.push(overlay);
+                            });
                         }
 
                         function getElementSelector(el) {
@@ -575,6 +617,18 @@ export async function GET(request: NextRequest) {
                         window.addEventListener('message', function(event) {
                             if (event.data.type === 'enable-selection') enableSelection();
                             else if (event.data.type === 'disable-selection') disableSelection();
+                            else if (event.data.type === 'highlight-selector') {
+                                highlightSelectorMatches(event.data.selector);
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'clear-highlight-selector') {
+                                clearSelectorHighlights();
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
                             else if (event.data.type === 'remove-element') {
                                 try {
                                     const selector = event.data.localSelector || event.data.selector;
@@ -714,6 +768,7 @@ export async function GET(request: NextRequest) {
                         }
 
                         window.addEventListener('beforeunload', function() {
+                            clearSelectorHighlights();
                             if (highlightDiv) highlightDiv.remove();
                         });
                     })();

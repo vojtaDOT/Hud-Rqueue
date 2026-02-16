@@ -4,7 +4,7 @@ export interface BlockData {
     id: string;
     type: BlockType;
     label: string;
-    config?: Record<string, any>;
+    config?: Record<string, string | number | undefined>;
 }
 
 export interface SourceData {
@@ -23,3 +23,14 @@ export interface WorkflowData {
     mainLoop: BlockData[];
     sources: SourceData[];
 }
+
+export type {
+    ScrapingWorkflow,
+    PhaseConfig,
+    SourceUrlType,
+    FieldConfig,
+    PlaywrightAction,
+    ScopeConfig,
+    RepeaterConfig,
+    PaginationConfig,
+} from '@/lib/crawler-types';

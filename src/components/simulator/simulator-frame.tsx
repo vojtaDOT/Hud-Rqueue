@@ -14,6 +14,9 @@ interface SimulatorFrameProps {
     onElementSelect?: (selector: string, elementInfo?: ElementSelector) => void;
     onPageTypeDetected?: (pageType: PageType) => void;
     onElementRemove?: (selector: string) => void;
+    playwrightEnabled?: boolean;
+    onPlaywrightToggleRequest?: (nextEnabled: boolean) => boolean;
+    highlightSelector?: string | null;
 }
 
 
@@ -35,7 +38,10 @@ export function SimulatorFrame({
     className,
     onElementSelect,
     onPageTypeDetected,
-    onElementRemove
+    onElementRemove,
+    playwrightEnabled = false,
+    onPlaywrightToggleRequest,
+    highlightSelector = null,
 }: SimulatorFrameProps) {
 
     const [iframeLoaded, setIframeLoaded] = useState(false);
@@ -43,7 +49,7 @@ export function SimulatorFrame({
     const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
     const [hoveredElement, setHoveredElement] = useState<{ selector: string; bounds: DOMRect } | null>(null);
     const [pageType, setPageType] = useState<PageType | null>(null);
-    const [renderMode, setRenderMode] = useState<RenderMode>('proxy');
+    const [renderMode, setRenderMode] = useState<RenderMode>(playwrightEnabled ? 'playwright' : 'proxy');
     const [loadError, setLoadError] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
     const [reloadKey, setReloadKey] = useState(0);
@@ -74,19 +80,23 @@ export function SimulatorFrame({
     }, [onLoad]);
 
     const switchToPlaywright = useCallback(() => {
+        const accepted = onPlaywrightToggleRequest ? onPlaywrightToggleRequest(true) : true;
+        if (!accepted) return;
         console.log('[SimulatorFrame] Switching to Playwright mode');
         setRenderMode('playwright');
         setIframeLoaded(false);
         setLoadError(null);
-    }, []);
+    }, [onPlaywrightToggleRequest]);
 
     const retryWithProxy = useCallback(() => {
+        const accepted = onPlaywrightToggleRequest ? onPlaywrightToggleRequest(false) : true;
+        if (!accepted) return;
         console.log('[SimulatorFrame] Retrying with proxy');
         setRenderMode('proxy');
         setIframeLoaded(false);
         setLoadError(null);
         setRetryCount(prev => prev + 1);
-    }, []);
+    }, [onPlaywrightToggleRequest]);
 
     const handleReload = useCallback(() => {
         setReloadKey(prev => prev + 1);
@@ -170,7 +180,6 @@ export function SimulatorFrame({
         return () => window.removeEventListener('message', handleMessage);
     }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright, interactionMode, onElementRemove]);
 
-
     // Enable/disable selection mode in iframe
     useEffect(() => {
         const iframe = iframeRef.current;
@@ -192,15 +201,20 @@ export function SimulatorFrame({
     }, [interactionMode, iframeLoaded]);
 
 
-    // Reset state when URL changes
-    useEffect(() => {
+    const resetFrameState = useCallback(() => {
         setSelectedElement(null);
         setHoveredElement(null);
         setPageType(null);
         setIframeLoaded(false);
         setLoadError(null);
-        setRenderMode('proxy'); // Always start with proxy
+        setRenderMode(playwrightEnabled ? 'playwright' : 'proxy');
         setRetryCount(0);
+    }, [playwrightEnabled]);
+
+    // Reset state when URL changes
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        resetFrameState();
 
         // Set a timeout to detect if the page doesn't load
         if (loadTimeoutRef.current) {
@@ -221,7 +235,19 @@ export function SimulatorFrame({
                 clearTimeout(loadTimeoutRef.current);
             }
         };
-    }, [url, isValidUrl]);
+    }, [url, isValidUrl, resetFrameState]);
+
+    useEffect(() => {
+        if (!iframeLoaded || !iframeRef.current?.contentWindow) return;
+        if (highlightSelector && highlightSelector.trim()) {
+            iframeRef.current.contentWindow.postMessage({
+                type: 'highlight-selector',
+                selector: highlightSelector,
+            }, '*');
+            return;
+        }
+        iframeRef.current.contentWindow.postMessage({ type: 'clear-highlight-selector' }, '*');
+    }, [highlightSelector, iframeLoaded]);
 
     const handleClearSelection = () => {
         setSelectedElement(null);

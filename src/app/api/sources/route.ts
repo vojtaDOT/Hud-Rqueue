@@ -4,7 +4,19 @@ import { supabase } from '@/lib/supabase';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { name, base_url, enabled, crawl_strategy, crawl_params, crawl_interval, typ_id, obec_id, okres_id, kraj_id } = body;
+        const {
+            name,
+            base_url,
+            enabled,
+            crawl_strategy,
+            crawl_params,
+            extraction_data,
+            crawl_interval,
+            typ_id,
+            obec_id,
+            okres_id,
+            kraj_id,
+        } = body;
 
         // Basic server-side validation
         if (!name || !base_url) {
@@ -22,6 +34,7 @@ export async function POST(request: Request) {
                     base_url,
                     enabled,
                     crawl_strategy,
+                    extraction_data,
                     crawl_params, // Expecting valid JSON object
                     crawl_interval,
                     typ_id: typ_id || null,

@@ -186,7 +186,7 @@ export interface WorkflowData {
         id: string;
         type: string;
         label: string;
-        config?: Record<string, any>;
+        config?: Record<string, unknown>;
     }>;
     sources: Array<{
         id: string;
@@ -196,7 +196,7 @@ export interface WorkflowData {
             id: string;
             type: string;
             label: string;
-            config?: Record<string, any>;
+            config?: Record<string, unknown>;
         }>;
         loopConfig?: {
             enabled: boolean;
@@ -216,15 +216,77 @@ export interface WorkerRuntimeEnqueueConfig {
     payload_template: WorkerRuntimePayloadTemplate;
 }
 
+export type ExtractType = 'text' | 'href' | 'src' | 'attribute' | 'html';
+
+export interface ScopeConfig {
+    css_selector: string;
+    label: string;
+}
+
+export interface RepeaterConfig {
+    css_selector: string;
+    label: string;
+}
+
+export interface FieldConfig {
+    name: string;
+    css_selector: string;
+    extract_type: ExtractType;
+    attribute_name?: string;
+    is_source_url?: boolean;
+    url_type_id?: string;
+}
+
+export interface PaginationConfig {
+    css_selector: string;
+    max_pages: number;
+}
+
+export type PlaywrightAction =
+    | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
+    | { type: 'wait_network'; state: 'networkidle' | 'domcontentloaded' | 'load' }
+    | { type: 'wait_timeout'; ms: number }
+    | { type: 'click'; css_selector: string; wait_after_ms?: number }
+    | { type: 'scroll'; count: number; delay_ms: number }
+    | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
+    | { type: 'select_option'; css_selector: string; value: string }
+    | { type: 'evaluate'; script: string }
+    | { type: 'screenshot'; filename: string };
+
+export interface PhaseConfig {
+    pre_actions: PlaywrightAction[];
+    scope: ScopeConfig | null;
+    repeater: RepeaterConfig | null;
+    fields: FieldConfig[];
+    pagination: PaginationConfig | null;
+}
+
+export interface SourceUrlType {
+    id: string;
+    name: string;
+    processing: PhaseConfig;
+}
+
+export interface ScrapingWorkflow {
+    playwright_enabled: boolean;
+    discovery: PhaseConfig;
+    url_types: SourceUrlType[];
+}
+
+export interface WorkerRuntimePhaseWorkflow {
+    version: 'scoped_selectors.v1';
+    phase: 'discovery' | 'processing';
+    playwright_enabled: boolean;
+    config?: PhaseConfig;
+    url_types?: SourceUrlType[];
+}
+
 export interface WorkerRuntimeStepConfig {
     task: string;
     required_task_fields_after_claim: string[];
     controller_api_enqueue: WorkerRuntimeEnqueueConfig;
     redis_enqueue: WorkerRuntimeEnqueueConfig;
-    workflow: {
-        steps: HierarchicalStep[];
-        sources?: HierarchicalSource[];
-    };
+    workflow: WorkerRuntimePhaseWorkflow;
 }
 
 export interface WorkerRuntimeConfig {

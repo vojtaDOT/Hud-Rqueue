@@ -135,7 +135,37 @@ export async function GET(request: NextRequest) {
         await browser.close();
 
         // Rewrite iframe src to proxy through our endpoint (fixes cross-origin)
-        const proxyBaseUrl = request.nextUrl.origin + '/api/render?url=';
+        const renderBaseUrl = request.nextUrl.origin + '/api/render?url=';
+
+        // Rewrite anchor hrefs to keep navigation inside preview renderer
+        html = html.replace(
+            /<a([^>]*)\shref=["']([^"']+)["']([^>]*)>/gi,
+            (match: string, before: string, href: string, after: string) => {
+                const trimmedHref = href.trim();
+                if (!trimmedHref || /^(javascript:|mailto:|tel:|data:|blob:|#)/i.test(trimmedHref)) {
+                    return match;
+                }
+
+                let targetHref = '';
+                try {
+                    targetHref = new URL(trimmedHref, url.href).href;
+                } catch {
+                    return match;
+                }
+
+                try {
+                    const parsed = new URL(targetHref);
+                    const nestedTarget = parsed.searchParams.get('url');
+                    if (parsed.pathname === '/api/render' && nestedTarget) {
+                        targetHref = decodeURIComponent(nestedTarget);
+                    }
+                } catch {}
+
+                const renderedHref = renderBaseUrl + encodeURIComponent(targetHref);
+                const attrsWithoutTarget = (before + after).replace(/\s+target=["'][^"']*["']/gi, '');
+                return `<a${attrsWithoutTarget} href="${renderedHref}" target="_self">`;
+            }
+        );
 
         // Rewrite iframe src attributes to go through our proxy
         html = html.replace(
@@ -152,7 +182,7 @@ export async function GET(request: NextRequest) {
                 } catch {
                     return match;
                 }
-                const proxiedSrc = proxyBaseUrl + encodeURIComponent(absoluteSrc);
+                const proxiedSrc = renderBaseUrl + encodeURIComponent(absoluteSrc);
                 return '<iframe' + before + ' src="' + proxiedSrc + '"' + after + ' data-original-src="' + absoluteSrc + '">';
             }
         );
@@ -172,6 +202,7 @@ export async function GET(request: NextRequest) {
             <script id="element-selector">
                 (function() {
                     // FRAME_PATH can be updated via postMessage from parent
+                    const APP_ORIGIN = '${request.nextUrl.origin}';
                     let FRAME_PATH = window.__FRAME_PATH__ || [];
                     let highlightDiv = null;
                     let selectorMatchOverlays = [];
@@ -435,7 +466,20 @@ export async function GET(request: NextRequest) {
 
                         e.preventDefault();
                         e.stopPropagation();
-                        window.location.href = '${request.nextUrl.origin}/api/render?url=' + encodeURIComponent(absoluteHref);
+                        if (typeof e.stopImmediatePropagation === 'function') {
+                            e.stopImmediatePropagation();
+                        }
+                        const renderPrefix = APP_ORIGIN + '/api/render?url=';
+                        let targetHref = absoluteHref;
+                        try {
+                            const parsed = new URL(absoluteHref);
+                            const nestedTarget = parsed.searchParams.get('url');
+                            if (parsed.pathname === '/api/render' && nestedTarget) {
+                                targetHref = decodeURIComponent(nestedTarget);
+                            }
+                        } catch {}
+                        const nextHref = renderPrefix + encodeURIComponent(targetHref);
+                        window.location.href = nextHref;
                     }, true);
 
                     document.addEventListener('mousemove', function(e) {

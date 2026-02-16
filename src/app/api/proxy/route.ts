@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
                 html = html.replace(/<base[^>]*>/gi, '');
 
                 const baseUrlForRelative = url.href;
-                const proxyBase = `/api/proxy?url=`;
+                const proxyBase = `${request.nextUrl.origin}/api/proxy?url=`;
 
                 // Prevent infinite loops
                 const isAlreadyProxied = (urlValue: string) => {
@@ -230,7 +230,7 @@ export async function GET(request: NextRequest) {
                     } catch(e) {}
                     
                     // === FETCH/XHR INTERCEPTION ===
-                    var PROXY_BASE = '/api/proxy?url=';
+                    var PROXY_BASE = '${request.nextUrl.origin}/api/proxy?url=';
                     var ORIGINAL_ORIGIN = '${url.origin}';
                     var ORIGINAL_HREF = '${url.href}';
                     
@@ -397,6 +397,8 @@ export async function GET(request: NextRequest) {
                 const selectionScript = `
                 <script id="element-selector-script">
                     (function() {
+                        const ORIGINAL_HREF = '${url.href.replace(/'/g, "\\'")}';
+                        const APP_ORIGIN = '${request.nextUrl.origin}';
                         let hoveredEl = null;
                         let selectedEl = null;
                         let highlightDiv = null;
@@ -626,6 +628,46 @@ export async function GET(request: NextRequest) {
                         setInterval(setupIframes, 600);
                         setTimeout(setupIframes, 100);
                         setTimeout(setupIframes, 400);
+
+                        window.addEventListener('click', function(e) {
+                            if (isSelectionMode) return;
+
+                            let t = e.target;
+                            if (t && t.nodeType === 3) t = t.parentElement;
+                            if (!t || !t.closest) return;
+
+                            const anchor = t.closest('a[href]');
+                            if (!anchor) return;
+
+                            const href = anchor.getAttribute('href') || '';
+                            if (!href || href.startsWith('#') || /^(javascript:|mailto:|tel:|data:)/i.test(href)) return;
+
+                            let absoluteHref = '';
+                            try {
+                                absoluteHref = new URL(href, ORIGINAL_HREF).href;
+                            } catch {
+                                return;
+                            }
+
+                            const proxiedPrefix = APP_ORIGIN + '/api/proxy?url=';
+                            let targetHref = absoluteHref;
+                            try {
+                                const parsed = new URL(absoluteHref);
+                                const nestedTarget = parsed.searchParams.get('url');
+                                if (parsed.pathname === '/api/proxy' && nestedTarget) {
+                                    targetHref = decodeURIComponent(nestedTarget);
+                                }
+                            } catch {}
+
+                            const nextHref = proxiedPrefix + encodeURIComponent(targetHref);
+
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (typeof e.stopImmediatePropagation === 'function') {
+                                e.stopImmediatePropagation();
+                            }
+                            window.location.href = nextHref;
+                        }, true);
 
                         function handleMouseMove(e) {
                             if (!isSelectionMode) return;

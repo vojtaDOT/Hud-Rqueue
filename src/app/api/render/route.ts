@@ -128,8 +128,10 @@ export async function GET(request: NextRequest) {
 
         const page = await context.newPage();
 
-        await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        await page.waitForTimeout(1000);
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForLoadState('load', { timeout: 5000 }).catch(() => null);
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => null);
+        await page.waitForTimeout(400);
 
         let html = await page.content();
         await browser.close();

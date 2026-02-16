@@ -59,17 +59,13 @@ export function SimulatorFrame({
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const iframeLoadedRef = useRef(false);
-    const renderModeRef = useRef<RenderMode>(renderMode);
 
     const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
+    const iframeAttemptKey = `${url}|${renderMode}|${retryCount}|${reloadKey}`;
 
     useEffect(() => {
         iframeLoadedRef.current = iframeLoaded;
     }, [iframeLoaded]);
-
-    useEffect(() => {
-        renderModeRef.current = renderMode;
-    }, [renderMode]);
 
     // Generate URL based on render mode
     const getIframeSrc = useCallback(() => {
@@ -175,6 +171,8 @@ export function SimulatorFrame({
             else if (event.data.type === 'playwright-error') {
                 console.warn('[SimulatorFrame] Playwright render error:', event.data.message);
                 setLoadError(event.data.message ?? 'Playwright render selhal.');
+                setIframeLoaded(true);
+                onLoad?.();
             }
             // Handle proxy error - switch to Playwright
             else if (event.data.type === 'proxy-error') {
@@ -188,7 +186,7 @@ export function SimulatorFrame({
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright, interactionMode, onElementRemove]);
+    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright, interactionMode, onElementRemove, onLoad]);
 
     // Enable/disable selection mode in iframe
     useEffect(() => {
@@ -226,26 +224,41 @@ export function SimulatorFrame({
         // eslint-disable-next-line react-hooks/set-state-in-effect
         resetFrameState();
 
-        // Set a timeout to detect if the page doesn't load
         if (loadTimeoutRef.current) {
             clearTimeout(loadTimeoutRef.current);
+            loadTimeoutRef.current = null;
         }
+    }, [url, resetFrameState]);
 
+    // Load watchdog for each iframe attempt (url/mode/retry/reload)
+    useEffect(() => {
+        if (loadTimeoutRef.current) {
+            clearTimeout(loadTimeoutRef.current);
+            loadTimeoutRef.current = null;
+        }
         if (isValidUrl) {
             loadTimeoutRef.current = setTimeout(() => {
-                if (!iframeLoadedRef.current && renderModeRef.current === 'proxy') {
-                    console.log('[SimulatorFrame] Load timeout, considering Playwright fallback');
-                    // Don't auto-switch, let user decide
+                if (iframeLoadedRef.current) return;
+
+                if (renderMode === 'playwright') {
+                    console.warn('[SimulatorFrame] Playwright load timeout');
+                    setLoadError('Playwright render timeout (20s). Zkuste Načíst znovu nebo Zkusit proxy.');
+                } else {
+                    console.warn('[SimulatorFrame] Proxy load timeout');
+                    setLoadError('Proxy load timeout (20s). Zkuste Playwright nebo Načíst znovu.');
                 }
-            }, 15000);
+                setIframeLoaded(true);
+                onLoad?.();
+            }, 20000);
         }
 
         return () => {
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
             }
         };
-    }, [url, isValidUrl, resetFrameState]);
+    }, [iframeAttemptKey, isValidUrl, onLoad, renderMode]);
 
     useEffect(() => {
         if (!iframeLoaded || !iframeRef.current?.contentWindow) return;

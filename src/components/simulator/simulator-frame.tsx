@@ -22,6 +22,9 @@ interface SimulatorFrameProps {
 
 interface ElementInfo {
     selector: string;
+    localSelector?: string;
+    framePath?: string[];
+    inIframe?: boolean;
     tagName: string;
     textContent: string;
     isList: boolean;
@@ -47,7 +50,6 @@ export function SimulatorFrame({
     const [iframeLoaded, setIframeLoaded] = useState(false);
     const [interactionMode, setInteractionMode] = useState<'select' | 'remove' | null>(null);
     const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
-    const [hoveredElement, setHoveredElement] = useState<{ selector: string; bounds: DOMRect } | null>(null);
     const [pageType, setPageType] = useState<PageType | null>(null);
     const [renderMode, setRenderMode] = useState<RenderMode>(playwrightEnabled ? 'playwright' : 'proxy');
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -56,8 +58,18 @@ export function SimulatorFrame({
 
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const iframeLoadedRef = useRef(false);
+    const renderModeRef = useRef<RenderMode>(renderMode);
 
     const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
+
+    useEffect(() => {
+        iframeLoadedRef.current = iframeLoaded;
+    }, [iframeLoaded]);
+
+    useEffect(() => {
+        renderModeRef.current = renderMode;
+    }, [renderMode]);
 
     // Generate URL based on render mode
     const getIframeSrc = useCallback(() => {
@@ -75,7 +87,6 @@ export function SimulatorFrame({
             loadTimeoutRef.current = null;
         }
         setIframeLoaded(true);
-        setLoadError(null);
         onLoad?.();
     }, [onLoad]);
 
@@ -108,29 +119,19 @@ export function SimulatorFrame({
     // Handle messages from iframe
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
-            // Handle element hover
-            if (event.data.type === 'element-hover') {
-                setHoveredElement({
-                    selector: event.data.selector,
-                    bounds: {
-                        left: event.data.bounds.left,
-                        top: event.data.bounds.top,
-                        width: event.data.bounds.width,
-                        height: event.data.bounds.height
-                    } as DOMRect
-                });
-            }
             // Handle element selection
-            else if (event.data.type === 'element-select') {
+            if (event.data.type === 'element-select') {
                 const elementInfo = event.data.elementInfo as ElementInfo;
 
                 if (interactionMode === 'remove') {
                     // Immediate removal mode
                     iframeRef.current?.contentWindow?.postMessage({
                         type: 'remove-element',
-                        selector: elementInfo.selector
+                        selector: elementInfo.selector,
+                        localSelector: elementInfo.localSelector,
+                        framePath: elementInfo.framePath,
                     }, '*');
-                    onElementRemove?.(elementInfo.selector);
+                    onElementRemove?.(elementInfo.localSelector ?? elementInfo.selector);
                     // Don't select it
                     return;
                 }
@@ -140,6 +141,9 @@ export function SimulatorFrame({
 
                 const selectorInfo: ElementSelector = {
                     selector: elementInfo.selector,
+                    localSelector: elementInfo.localSelector,
+                    framePath: elementInfo.framePath,
+                    inIframe: elementInfo.inIframe,
                     tagName: elementInfo.tagName,
                     textContent: elementInfo.textContent,
                     isList: elementInfo.isList,
@@ -166,6 +170,10 @@ export function SimulatorFrame({
                 console.log('[SimulatorFrame] Playwright loaded successfully:', event.data.url);
                 setLoadError(null);
             }
+            else if (event.data.type === 'playwright-error') {
+                console.warn('[SimulatorFrame] Playwright render error:', event.data.message);
+                setLoadError(event.data.message ?? 'Playwright render selhal.');
+            }
             // Handle proxy error - switch to Playwright
             else if (event.data.type === 'proxy-error') {
                 console.log('[SimulatorFrame] Proxy error, switching to Playwright:', event.data.message);
@@ -191,7 +199,9 @@ export function SimulatorFrame({
                 // We enable selection for both modes, but handle the result differently
 
                 iframe.contentWindow?.postMessage(
-                    { type: interactionMode !== null ? 'enable-selection' : 'disable-selection' },
+                    interactionMode !== null
+                        ? { type: 'enable-selection', mode: interactionMode }
+                        : { type: 'disable-selection' },
                     '*'
                 );
             } catch (error) {
@@ -200,10 +210,8 @@ export function SimulatorFrame({
         }, 100);
     }, [interactionMode, iframeLoaded]);
 
-
     const resetFrameState = useCallback(() => {
         setSelectedElement(null);
-        setHoveredElement(null);
         setPageType(null);
         setIframeLoaded(false);
         setLoadError(null);
@@ -223,7 +231,7 @@ export function SimulatorFrame({
 
         if (isValidUrl) {
             loadTimeoutRef.current = setTimeout(() => {
-                if (!iframeLoaded && renderMode === 'proxy') {
+                if (!iframeLoadedRef.current && renderModeRef.current === 'proxy') {
                     console.log('[SimulatorFrame] Load timeout, considering Playwright fallback');
                     // Don't auto-switch, let user decide
                 }
@@ -251,7 +259,6 @@ export function SimulatorFrame({
 
     const handleClearSelection = () => {
         setSelectedElement(null);
-        setHoveredElement(null);
     };
 
     const handleRemoveElement = () => {
@@ -259,13 +266,14 @@ export function SimulatorFrame({
 
         iframeRef.current.contentWindow.postMessage({
             type: 'remove-element',
-            selector: selectedElement.selector
+            selector: selectedElement.selector,
+            localSelector: selectedElement.localSelector,
+            framePath: selectedElement.framePath,
         }, '*');
 
-        onElementRemove?.(selectedElement.selector);
+        onElementRemove?.(selectedElement.localSelector ?? selectedElement.selector);
 
         setSelectedElement(null);
-        setHoveredElement(null);
     };
 
     const iframeSrc = getIframeSrc();

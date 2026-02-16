@@ -7,7 +7,7 @@ import { ChevronRight, Globe, Loader2, Search } from 'lucide-react';
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
 import { generateWorkerRuntimeConfig } from '@/lib/crawler-export';
-import { PageType, PhaseConfig, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
+import { ElementSelector, PageType, PhaseConfig, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
 import {
     ResizableHandle,
     ResizablePanel,
@@ -212,10 +212,10 @@ export function SourceEditor() {
         setObecResults([]);
     };
 
-    const handleElementSelect = (selector: string) => {
-        const applied = sidebarRef.current?.applySelectedSelector(selector) ?? false;
+    const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
+        const applied = sidebarRef.current?.applySelectedSelector(selector, elementInfo) ?? false;
         if (!applied) {
-            toast.info('Nejprve vyberte vstup CSS selectoru v panelu workflow.');
+            toast.info('Vyberte cílový Scope/Repeater nebo fokusujte CSS input v panelu workflow.');
         } else {
             toast.success('Selector byl vložen do aktivního pole.');
         }

@@ -3,6 +3,82 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeJsString(value: string): string {
+    return value
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
+}
+
+function renderPlaywrightErrorHtml(title: string, message: string, extra = ''): string {
+    const escapedTitle = escapeHtml(title);
+    const escapedMessage = escapeHtml(message);
+    const escapedMessageForPostMessage = escapeJsString(message);
+
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>${escapedTitle}</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                    color: white;
+                }
+                .container {
+                    background: rgba(255,255,255,0.1);
+                    padding: 2rem;
+                    border-radius: 12px;
+                    max-width: 560px;
+                    text-align: center;
+                }
+                h2 { color: #ef4444; margin-bottom: 1rem; }
+                p { color: #e5e7eb; }
+                code {
+                    background: rgba(0,0,0,0.3);
+                    padding: 0.5rem 1rem;
+                    border-radius: 6px;
+                    display: block;
+                    margin: 0.75rem 0;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>${escapedTitle}</h2>
+                <p>${escapedMessage}</p>
+                ${extra}
+            </div>
+            <script>
+                window.parent.postMessage({
+                    type: 'playwright-error',
+                    message: '${escapedMessageForPostMessage}'
+                }, '*');
+            </script>
+        </body>
+        </html>
+    `;
+}
+
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const targetUrl = searchParams.get('url');
@@ -29,44 +105,12 @@ export async function GET(request: NextRequest) {
         const playwright = await import('playwright');
         chromium = playwright.chromium;
     } catch {
-        return new NextResponse(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>Playwright Required</title>
-                <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-height: 100vh;
-                        margin: 0;
-                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                        color: white;
-                    }
-                    .container {
-                        background: rgba(255,255,255,0.1);
-                        padding: 2rem;
-                        border-radius: 12px;
-                        max-width: 500px;
-                        text-align: center;
-                    }
-                    h2 { color: #a855f7; }
-                    code { background: rgba(0,0,0,0.3); padding: 0.5rem 1rem; border-radius: 6px; display: block; margin: 1rem 0; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h2>🎭 Playwright Not Installed</h2>
-                    <p>Run these commands:</p>
-                    <code>npm install playwright</code>
-                    <code>npx playwright install chromium</code>
-                </div>
-            </body>
-            </html>
-        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        const html = renderPlaywrightErrorHtml(
+            'Playwright není dostupný',
+            'Modul playwright není nainstalovaný nebo se nepodařilo načíst.',
+            '<code>npm install playwright</code><code>npx playwright install chromium</code>',
+        );
+        return new NextResponse(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     let browser = null;
@@ -132,6 +176,7 @@ export async function GET(request: NextRequest) {
                     let highlightDiv = null;
                     let selectorMatchOverlays = [];
                     let isSelectionMode = false;
+                    let selectionMode = 'select';
                     
                     // Watch for frame path updates
                     window.addEventListener('message', function(e) {
@@ -294,6 +339,12 @@ export async function GET(request: NextRequest) {
                                         type: 'set-frame-path', 
                                         framePath: newFramePath 
                                     }, '*');
+                                    if (isSelectionMode) {
+                                        iframe.contentWindow?.postMessage({
+                                            type: 'enable-selection',
+                                            mode: selectionMode,
+                                        }, '*');
+                                    }
                                 } catch {}
                             });
                             
@@ -304,6 +355,12 @@ export async function GET(request: NextRequest) {
                                         type: 'set-frame-path', 
                                         framePath: newFramePath 
                                     }, '*');
+                                    if (isSelectionMode) {
+                                        iframe.contentWindow?.postMessage({
+                                            type: 'enable-selection',
+                                            mode: selectionMode,
+                                        }, '*');
+                                    }
                                 }
                             } catch {}
                             
@@ -340,7 +397,7 @@ export async function GET(request: NextRequest) {
                         let t = e.target; if (t.nodeType === 3) t = t.parentElement;
                         if (!t || t === highlightDiv || t.id === 'selector-highlight') return;
                         // Don't highlight cookie dialogs/modals - let user interact naturally
-                        if (isInteractiveOverlay(t)) {
+                        if (selectionMode === 'select' && isInteractiveOverlay(t)) {
                             updateHighlight(null);
                             return;
                         }
@@ -352,7 +409,7 @@ export async function GET(request: NextRequest) {
                         let t = e.target; if (t.nodeType === 3) t = t.parentElement;
                         if (!t || t === highlightDiv || t.id === 'selector-highlight') return;
                         // Allow clicks on cookie dialogs/modals to pass through
-                        if (isInteractiveOverlay(t)) {
+                        if (selectionMode === 'select' && isInteractiveOverlay(t)) {
                             return; // Don't intercept - let the click happen normally
                         }
                         e.preventDefault(); e.stopPropagation();
@@ -393,14 +450,21 @@ export async function GET(request: NextRequest) {
                     window.addEventListener('message', function(e) {
                         if (e.data.type === 'enable-selection') { 
                             isSelectionMode = true; 
+                            selectionMode = e.data.mode === 'remove' ? 'remove' : 'select';
                             document.body.style.cursor = 'crosshair';
                             // Forward to iframes
                             document.querySelectorAll('iframe').forEach(function(iframe) {
-                                try { iframe.contentWindow?.postMessage({ type: 'enable-selection' }, '*'); } catch {}
+                                try {
+                                    iframe.contentWindow?.postMessage({
+                                        type: 'enable-selection',
+                                        mode: selectionMode,
+                                    }, '*');
+                                } catch {}
                             });
                         }
                         else if (e.data.type === 'disable-selection') { 
                             isSelectionMode = false; 
+                            selectionMode = 'select';
                             document.body.style.cursor = ''; 
                             if (highlightDiv) highlightDiv.style.display = 'none';
                             // Forward to iframes
@@ -422,9 +486,53 @@ export async function GET(request: NextRequest) {
                         }
                         else if (e.data.type === 'remove-element') {
                             try {
-                                const el = document.querySelector(e.data.localSelector || e.data.selector);
+                                const selector = e.data.localSelector || e.data.selector;
+                                let el = null;
+                                try {
+                                    el = document.querySelector(selector);
+                                } catch {}
+
+                                if (!el && selector) {
+                                    const parts = selector.split(' > ');
+                                    for (let i = parts.length - 1; i >= 0 && !el; i--) {
+                                        try {
+                                            const partialSelector = parts.slice(i).join(' > ');
+                                            el = document.querySelector(partialSelector);
+                                        } catch {}
+                                    }
+                                }
+
                                 if (el) {
-                                    el.remove();
+                                    const cookiePatterns = /cookie|consent|gdpr|privacy|cc-|cmp-|onetrust|cookiebot|trustarc|quantcast|cookie-notice|cookie-banner|cookie-popup|cookie-modal|cookie-overlay|cookie-dialog/i;
+                                    let targetEl = el;
+                                    let current = el;
+                                    while (current && current !== document.body) {
+                                        const id = current.id || '';
+                                        const cls = typeof current.className === 'string' ? current.className : '';
+                                        const role = current.getAttribute('role') || '';
+                                        if (cookiePatterns.test(id) || cookiePatterns.test(cls) || role === 'dialog') {
+                                            targetEl = current;
+                                        }
+                                        const style = window.getComputedStyle(current);
+                                        if ((style.position === 'fixed' || style.position === 'absolute') && parseInt(style.zIndex) > 9999) {
+                                            targetEl = current;
+                                        }
+                                        current = current.parentElement;
+                                    }
+                                    targetEl.remove();
+
+                                    ['.cookie-overlay', '.consent-overlay', '.gdpr-overlay', '.cc-overlay', '.cmp-overlay', '.modal-backdrop', '[class*="overlay"]', '[class*="backdrop"]']
+                                        .forEach(function(sel) {
+                                            try {
+                                                document.querySelectorAll(sel).forEach(function(overlay) {
+                                                    const style = window.getComputedStyle(overlay);
+                                                    if (style.position === 'fixed' && parseInt(style.zIndex) > 1000) {
+                                                        overlay.remove();
+                                                    }
+                                                });
+                                            } catch {}
+                                        });
+
                                     if (highlightDiv) highlightDiv.style.display = 'none';
                                 }
                                 // Forward to iframes
@@ -467,15 +575,14 @@ export async function GET(request: NextRequest) {
     } catch (error: unknown) {
         if (browser) { try { await browser.close(); } catch { } }
         const err = error as { message?: string };
+        const rawMessage = err.message || 'Unknown error';
+        const browserMissing = /executable doesn't exist|browserType\.launch|please run.*playwright install/i.test(rawMessage);
+        const html = renderPlaywrightErrorHtml(
+            browserMissing ? 'Playwright browser není nainstalovaný' : 'Playwright rendering selhal',
+            rawMessage,
+            browserMissing ? '<code>npx playwright install chromium</code>' : '',
+        );
 
-        return new NextResponse(`
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="utf-8"><title>Error</title>
-            <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:white;}.error{background:rgba(220,38,38,0.2);border:1px solid rgba(220,38,38,0.5);padding:2rem;border-radius:12px;max-width:500px;text-align:center;}h2{color:#ef4444;}</style>
-            </head>
-            <body><div class="error"><h2>Rendering Failed</h2><p>${err.message || 'Unknown error'}</p></div></body>
-            </html>
-        `, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        return new NextResponse(html, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 }

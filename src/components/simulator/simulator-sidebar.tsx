@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
     ArrowDown,
     ArrowUp,
@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import type {
     BeforeAction,
+    ElementSelector,
     FieldConfig,
     PhaseConfig,
     PlaywrightAction,
@@ -70,7 +71,7 @@ interface SimulatorSidebarProps {
 }
 
 export interface SimulatorSidebarRef {
-    applySelectedSelector: (selector: string) => boolean;
+    applySelectedSelector: (selector: string, elementInfo?: ElementSelector) => boolean;
     appendRemoveElementBeforeAction: (selector: string) => void;
     clearAllPlaywrightActions: () => void;
     hasAnyPlaywrightActions: () => boolean;
@@ -377,6 +378,53 @@ function hasSourceUrlField(scopes: ScopeModule[]): boolean {
     return false;
 }
 
+function findScopeForRepeater(scopes: ScopeModule[], repeaterId: string): ScopeModule | null {
+    for (const scope of scopes) {
+        if (scope.repeater?.id === repeaterId) {
+            return scope;
+        }
+        const child = findScopeForRepeater(scope.children, repeaterId);
+        if (child) {
+            return child;
+        }
+    }
+    return null;
+}
+
+function findScopeForField(scopes: ScopeModule[], fieldId: string): ScopeModule | null {
+    for (const scope of scopes) {
+        if (scope.repeater?.fields.some((field) => field.id === fieldId)) {
+            return scope;
+        }
+        const child = findScopeForField(scope.children, fieldId);
+        if (child) {
+            return child;
+        }
+    }
+    return null;
+}
+
+function normalizeSelectorWithinScope(selector: string, scopeSelector?: string): string {
+    if (!scopeSelector?.trim()) {
+        return selector.trim();
+    }
+
+    const full = selector.trim();
+    const scope = scopeSelector.trim();
+    if (!full || !scope) return full;
+
+    if (full === scope) {
+        return full;
+    }
+    if (full.startsWith(`${scope} > `)) {
+        return full.slice(scope.length + 3).trim();
+    }
+    if (full.startsWith(`${scope} `)) {
+        return full.slice(scope.length + 1).trim();
+    }
+    return full;
+}
+
 function actionHasSelector(action: PlaywrightAction): action is
     | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
     | { type: 'click'; css_selector: string; wait_after_ms?: number }
@@ -479,17 +527,90 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         }
     };
 
+    const getFallbackTarget = useCallback((): FocusTarget | null => {
+        if (effectiveSelectedRepeaterId) {
+            return currentPhaseKey.phase === 'discovery'
+                ? { phase: 'discovery', section: 'repeater', repeaterId: effectiveSelectedRepeaterId }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'repeater', repeaterId: effectiveSelectedRepeaterId };
+        }
+
+        if (effectiveSelectedScopeId) {
+            return currentPhaseKey.phase === 'discovery'
+                ? { phase: 'discovery', section: 'scope', scopeId: effectiveSelectedScopeId }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'scope', scopeId: effectiveSelectedScopeId };
+        }
+
+        const firstRemoveIndex = currentPhase.before_actions.findIndex((action) => action.type === 'remove_element');
+        if (firstRemoveIndex >= 0) {
+            return currentPhaseKey.phase === 'discovery'
+                ? { phase: 'discovery', section: 'before', index: firstRemoveIndex }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'before', index: firstRemoveIndex };
+        }
+
+        const firstSelectorPlaywrightIndex = currentPhase.playwright_actions.findIndex((action) => actionHasSelector(action));
+        if (firstSelectorPlaywrightIndex >= 0) {
+            return currentPhaseKey.phase === 'discovery'
+                ? { phase: 'discovery', section: 'playwright', index: firstSelectorPlaywrightIndex }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'playwright', index: firstSelectorPlaywrightIndex };
+        }
+
+        return null;
+    }, [
+        currentPhase.before_actions,
+        currentPhase.playwright_actions,
+        currentPhaseKey,
+        effectiveSelectedRepeaterId,
+        effectiveSelectedScopeId,
+    ]);
+
+    const resolveSelectorForTarget = useCallback((
+        phase: PhaseConfig,
+        target: FocusTarget,
+        selector: string,
+        elementInfo?: ElementSelector,
+    ): string => {
+        const baseSelector = (elementInfo?.localSelector ?? selector).trim();
+        if (!baseSelector) return '';
+
+        if (target.section === 'repeater') {
+            const scope = findScopeForRepeater(phase.chain, target.repeaterId);
+            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
+        }
+
+        if (target.section === 'field') {
+            const scope = findScopeForField(phase.chain, target.fieldId);
+            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
+        }
+
+        if (target.section === 'pagination') {
+            const scope = findScopeInTree(phase.chain, target.scopeId);
+            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
+        }
+
+        return baseSelector;
+    }, []);
+
     useImperativeHandle(ref, () => ({
-        applySelectedSelector: (selector: string) => {
-            const target = focusedTarget;
-            const nextSelector = selector.trim();
-            if (!target || !nextSelector) return false;
+        applySelectedSelector: (selector: string, elementInfo?: ElementSelector) => {
+            const nextSelectorRaw = (elementInfo?.localSelector ?? selector).trim();
+            if (!nextSelectorRaw) return false;
+
+            const target = focusedTarget ?? getFallbackTarget();
+            if (!target) return false;
+            if (!focusedTarget) {
+                setFocusedTarget(target);
+            }
 
             updateWorkflowPhase(
                 target.phase === 'discovery'
                     ? { phase: 'discovery' }
                     : { phase: 'processing', urlTypeId: target.urlTypeId },
                 (phase) => {
+                    const nextSelector = resolveSelectorForTarget(phase, target, selector, elementInfo);
+                    if (!nextSelector) {
+                        return phase;
+                    }
+
                     if (target.section === 'before') {
                         const action = phase.before_actions[target.index];
                         if (!action || action.type !== 'remove_element') return phase;
@@ -548,7 +669,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     return phase;
                 },
             );
-            onSelectorPreviewChange?.(nextSelector);
+            onSelectorPreviewChange?.(nextSelectorRaw);
             return true;
         },
         appendRemoveElementBeforeAction: (selector: string) => {
@@ -576,7 +697,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             }
             return workflow.url_types.some((item) => item.processing.playwright_actions.length > 0);
         },
-    }), [focusedTarget, currentPhaseKey, onSelectorPreviewChange, workflow]);
+    }), [currentPhaseKey, focusedTarget, getFallbackTarget, onSelectorPreviewChange, resolveSelectorForTarget, workflow]);
 
     const addBeforeAction = () => {
         updateWorkflowPhase(currentPhaseKey, (phase) => ({

@@ -402,8 +402,17 @@ export async function GET(request: NextRequest) {
                         let highlightDiv = null;
                         let selectorMatchOverlays = [];
                         let isSelectionMode = false;
+                        let selectionMode = 'select';
+                        let FRAME_PATH = window.__FRAME_PATH__ || [];
                         let pageTypeDetected = false;
                         let pageType = null;
+
+                        window.addEventListener('message', function(event) {
+                            if (event.data?.type === 'set-frame-path' && Array.isArray(event.data.framePath)) {
+                                FRAME_PATH = event.data.framePath;
+                                window.__FRAME_PATH__ = FRAME_PATH;
+                            }
+                        });
 
                         function createHighlight() {
                             if (!highlightDiv) {
@@ -541,12 +550,57 @@ export async function GET(request: NextRequest) {
                             return { isList: false };
                         }
 
+                        function getIframeSelector(iframe) {
+                            if (iframe.id) return 'iframe#' + iframe.id;
+                            if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
+                            const iframes = Array.from(document.querySelectorAll('iframe'));
+                            const idx = iframes.indexOf(iframe);
+                            if (idx >= 0) return 'iframe:nth-of-type(' + (idx + 1) + ')';
+                            return 'iframe';
+                        }
+
+                        function setupIframes() {
+                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                                if (iframe.dataset.framePathBound === 'true') return;
+
+                                const iframeSelector = getIframeSelector(iframe);
+                                const framePath = FRAME_PATH.concat([iframeSelector]);
+                                const sendFramePath = function() {
+                                    try {
+                                        iframe.contentWindow?.postMessage({
+                                            type: 'set-frame-path',
+                                            framePath: framePath,
+                                        }, '*');
+                                    } catch {}
+                                };
+
+                                iframe.addEventListener('load', function() {
+                                    sendFramePath();
+                                    if (isSelectionMode) {
+                                        try {
+                                            iframe.contentWindow?.postMessage({
+                                                type: 'enable-selection',
+                                                mode: selectionMode,
+                                            }, '*');
+                                        } catch {}
+                                    }
+                                });
+
+                                sendFramePath();
+                                iframe.dataset.framePathBound = 'true';
+                            });
+                        }
+
                         function getElementFromEvent(e) {
                             let target = e.target;
                             if (target.nodeType === 3) target = target.parentElement;
                             while (target && target.nodeType !== 1) target = target.parentElement;
                             return target;
                         }
+
+                        setInterval(setupIframes, 600);
+                        setTimeout(setupIframes, 100);
+                        setTimeout(setupIframes, 400);
 
                         function handleMouseMove(e) {
                             if (!isSelectionMode) return;
@@ -580,9 +634,17 @@ export async function GET(request: NextRequest) {
 
                             const selector = getElementSelector(elementToSelect);
                             const listInfo = detectListPattern(elementToSelect);
+                            const localSelector = listInfo.isList ? listInfo.listSelector : selector;
+                            let fullSelector = localSelector;
+                            if (FRAME_PATH.length > 0) {
+                                fullSelector = FRAME_PATH.join(' >>> ') + ' >>> ' + localSelector;
+                            }
 
                             const elementInfo = {
-                                selector: listInfo.isList ? listInfo.listSelector : selector,
+                                selector: fullSelector,
+                                localSelector: localSelector,
+                                framePath: FRAME_PATH,
+                                inIframe: FRAME_PATH.length > 0,
                                 tagName: elementToSelect.tagName.toLowerCase(),
                                 textContent: elementToSelect.textContent?.substring(0, 100) || '',
                                 isList: listInfo.isList,
@@ -597,15 +659,18 @@ export async function GET(request: NextRequest) {
                             }
                         }
 
-                        function enableSelection() {
+                        function enableSelection(mode) {
                             isSelectionMode = true;
+                            selectionMode = mode === 'remove' ? 'remove' : 'select';
                             document.body.style.cursor = 'crosshair';
                             document.addEventListener('mousemove', handleMouseMove);
                             document.addEventListener('click', handleClick, true);
+                            setupIframes();
                         }
 
                         function disableSelection() {
                             isSelectionMode = false;
+                            selectionMode = 'select';
                             document.body.style.cursor = '';
                             document.removeEventListener('mousemove', handleMouseMove);
                             document.removeEventListener('click', handleClick, true);
@@ -615,8 +680,23 @@ export async function GET(request: NextRequest) {
                         }
 
                         window.addEventListener('message', function(event) {
-                            if (event.data.type === 'enable-selection') enableSelection();
-                            else if (event.data.type === 'disable-selection') disableSelection();
+                            if (event.data.type === 'enable-selection') {
+                                enableSelection(event.data.mode);
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try {
+                                        iframe.contentWindow?.postMessage({
+                                            type: 'enable-selection',
+                                            mode: event.data.mode,
+                                        }, '*');
+                                    } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'disable-selection') {
+                                disableSelection();
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage({ type: 'disable-selection' }, '*'); } catch {}
+                                });
+                            }
                             else if (event.data.type === 'highlight-selector') {
                                 highlightSelectorMatches(event.data.selector);
                                 document.querySelectorAll('iframe').forEach(function(iframe) {
@@ -719,6 +799,9 @@ export async function GET(request: NextRequest) {
                                         } catch {}
                                     });
                                 } catch (e) { console.error('Error removing element:', e); }
+                            }
+                            else if (event.data.type === 'element-select' && event.source !== window) {
+                                window.parent.postMessage(event.data, '*');
                             }
 
                         });

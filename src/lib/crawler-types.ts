@@ -10,6 +10,9 @@ export interface PageType {
 
 export interface ElementSelector {
     selector: string;
+    localSelector?: string;
+    framePath?: string[];
+    inIframe?: boolean;
     tagName: string;
     textContent?: string;
     isList: boolean;

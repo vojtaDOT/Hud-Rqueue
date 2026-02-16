@@ -401,6 +401,7 @@ export async function GET(request: NextRequest) {
                         let selectedEl = null;
                         let highlightDiv = null;
                         let selectorMatchOverlays = [];
+                        let selectorMatchEntries = [];
                         let isSelectionMode = false;
                         let selectionMode = 'select';
                         let FRAME_PATH = window.__FRAME_PATH__ || [];
@@ -453,6 +454,27 @@ export async function GET(request: NextRequest) {
                                 try { overlay.remove(); } catch {}
                             });
                             selectorMatchOverlays = [];
+                            selectorMatchEntries = [];
+                        }
+
+                        function updateSelectorHighlightPositions() {
+                            selectorMatchEntries.forEach(function(entry) {
+                                if (!entry || !entry.element || !entry.overlay) return;
+                                const rect = entry.element.getBoundingClientRect();
+                                const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+                                const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+
+                                if (rect.width <= 0 || rect.height <= 0) {
+                                    entry.overlay.style.display = 'none';
+                                    return;
+                                }
+
+                                entry.overlay.style.display = 'block';
+                                entry.overlay.style.left = (rect.left + scrollX) + 'px';
+                                entry.overlay.style.top = (rect.top + scrollY) + 'px';
+                                entry.overlay.style.width = rect.width + 'px';
+                                entry.overlay.style.height = rect.height + 'px';
+                            });
                         }
 
                         function highlightSelectorMatches(selector) {
@@ -486,7 +508,10 @@ export async function GET(request: NextRequest) {
                                 overlay.style.height = rect.height + 'px';
                                 document.body.appendChild(overlay);
                                 selectorMatchOverlays.push(overlay);
+                                selectorMatchEntries.push({ element: element, overlay: overlay });
                             });
+
+                            updateSelectorHighlightPositions();
                         }
 
                         function getElementSelector(el) {
@@ -849,6 +874,9 @@ export async function GET(request: NextRequest) {
                         } else {
                             setTimeout(detectPageType, 100);
                         }
+
+                        window.addEventListener('scroll', updateSelectorHighlightPositions, true);
+                        window.addEventListener('resize', updateSelectorHighlightPositions);
 
                         window.addEventListener('beforeunload', function() {
                             clearSelectorHighlights();

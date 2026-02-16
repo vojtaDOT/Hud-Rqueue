@@ -132,6 +132,7 @@ export function SimulatorFrame({
                         framePath: elementInfo.framePath,
                     }, '*');
                     onElementRemove?.(elementInfo.localSelector ?? elementInfo.selector);
+                    setInteractionMode(null);
                     // Don't select it
                     return;
                 }
@@ -152,6 +153,7 @@ export function SimulatorFrame({
                 };
 
                 onElementSelect?.(elementInfo.selector, selectorInfo);
+                setInteractionMode(null);
             }
 
             // Handle page type detection
@@ -466,7 +468,7 @@ export function SimulatorFrame({
                         src={iframeSrc}
                         className="w-full h-full border-0 bg-white"
                         onLoad={handleLoad}
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
                         title="Page Simulator"
                     />
                 </div>

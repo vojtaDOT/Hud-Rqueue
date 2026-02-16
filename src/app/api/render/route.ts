@@ -175,6 +175,7 @@ export async function GET(request: NextRequest) {
                     let FRAME_PATH = window.__FRAME_PATH__ || [];
                     let highlightDiv = null;
                     let selectorMatchOverlays = [];
+                    let selectorMatchEntries = [];
                     let isSelectionMode = false;
                     let selectionMode = 'select';
                     
@@ -212,6 +213,23 @@ export async function GET(request: NextRequest) {
                             try { overlay.remove(); } catch {}
                         });
                         selectorMatchOverlays = [];
+                        selectorMatchEntries = [];
+                    }
+
+                    function updateSelectorHighlightPositions() {
+                        selectorMatchEntries.forEach(function(entry) {
+                            if (!entry || !entry.element || !entry.overlay) return;
+                            const rect = entry.element.getBoundingClientRect();
+                            if (rect.width <= 0 || rect.height <= 0) {
+                                entry.overlay.style.display = 'none';
+                                return;
+                            }
+                            entry.overlay.style.display = 'block';
+                            entry.overlay.style.left = rect.left + 'px';
+                            entry.overlay.style.top = rect.top + 'px';
+                            entry.overlay.style.width = rect.width + 'px';
+                            entry.overlay.style.height = rect.height + 'px';
+                        });
                     }
 
                     function highlightSelectorMatches(selector) {
@@ -236,7 +254,10 @@ export async function GET(request: NextRequest) {
                             overlay.style.height = rect.height + 'px';
                             document.body.appendChild(overlay);
                             selectorMatchOverlays.push(overlay);
+                            selectorMatchEntries.push({ element: element, overlay: overlay });
                         });
+
+                        updateSelectorHighlightPositions();
                     }
 
                     function getSelector(el) {
@@ -392,6 +413,31 @@ export async function GET(request: NextRequest) {
                     setTimeout(setupIframes, 500);
                     setTimeout(setupIframes, 1000);
 
+                    document.addEventListener('click', function(e) {
+                        if (isSelectionMode) return;
+                        let t = e.target;
+                        if (t && t.nodeType === 3) t = t.parentElement;
+                        if (!t) return;
+
+                        const anchor = t.closest ? t.closest('a[href]') : null;
+                        if (!anchor) return;
+
+                        const href = anchor.getAttribute('href') || '';
+                        if (!href || href.startsWith('#') || /^(javascript:|mailto:|tel:|data:)/i.test(href)) return;
+
+                        let absoluteHref = '';
+                        try {
+                            const base = window.__ORIGINAL_URL__ || window.location.href;
+                            absoluteHref = new URL(href, base).href;
+                        } catch {
+                            return;
+                        }
+
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.location.href = '${request.nextUrl.origin}/api/render?url=' + encodeURIComponent(absoluteHref);
+                    }, true);
+
                     document.addEventListener('mousemove', function(e) {
                         if (!isSelectionMode) return;
                         let t = e.target; if (t.nodeType === 3) t = t.parentElement;
@@ -446,6 +492,9 @@ export async function GET(request: NextRequest) {
                         }
                         win.postMessage(msg, '*');
                     }, true);
+
+                    window.addEventListener('scroll', updateSelectorHighlightPositions, true);
+                    window.addEventListener('resize', updateSelectorHighlightPositions);
 
                     window.addEventListener('message', function(e) {
                         if (e.data.type === 'enable-selection') { 

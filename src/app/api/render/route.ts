@@ -3,6 +3,75 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const PREVIEW_BLOCKED_PATTERNS = [
+    'demos\\.telma\\.ai',
+    'mchats',
+    'cookiebot',
+    'onetrust',
+    'trustarc',
+    'quantcast',
+    'cookie-consent',
+    'dgp-cookie-consent',
+    'cookies\\.min\\.js',
+    'consentmanager',
+];
+
+function stripProblematicThirdPartySnippets(html: string): string {
+    const blocked = PREVIEW_BLOCKED_PATTERNS.join('|');
+    return html
+        .replace(new RegExp(`<script[^>]+(?:${blocked})[^>]*>\\s*</script>`, 'gi'), '')
+        .replace(new RegExp(`<link[^>]+(?:${blocked})[^>]*>`, 'gi'), '')
+        .replace(
+            new RegExp(`<script\\b[^>]*>(?:(?!<\\/script>)[\\s\\S])*?(?:${blocked})(?:(?!<\\/script>)[\\s\\S])*?<\\/script>`, 'gi'),
+            '',
+        );
+}
+
+function parseOriginCandidate(value: string | null): string | null {
+    if (!value) return null;
+    try {
+        const parsed = new URL(value);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.origin;
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
+function getRequestOrigin(request: NextRequest): string {
+    const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+    const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+    const originHeader = parseOriginCandidate(request.headers.get('origin'));
+    const refererOrigin = parseOriginCandidate(request.headers.get('referer'));
+
+    if (forwardedHost) {
+        const inferredProto = forwardedProto
+            || (refererOrigin?.startsWith('https://') ? 'https' : null)
+            || request.nextUrl.protocol.replace(':', '');
+        return `${inferredProto}://${forwardedHost}`;
+    }
+
+    if (originHeader) {
+        return originHeader;
+    }
+
+    if (refererOrigin) {
+        return refererOrigin;
+    }
+
+    const host = request.headers.get('host');
+    if (host) {
+        const inferredProto = forwardedProto
+            || (refererOrigin?.startsWith('https://') ? 'https' : null)
+            || request.nextUrl.protocol.replace(':', '');
+        return `${inferredProto}://${host}`;
+    }
+
+    return request.nextUrl.origin;
+}
+
 function escapeHtml(value: string): string {
     return value
         .replace(/&/g, '&amp;')
@@ -80,6 +149,7 @@ function renderPlaywrightErrorHtml(title: string, message: string, extra = ''): 
 }
 
 export async function GET(request: NextRequest) {
+    const appOrigin = getRequestOrigin(request);
     const searchParams = request.nextUrl.searchParams;
     const targetUrl = searchParams.get('url');
 
@@ -128,6 +198,26 @@ export async function GET(request: NextRequest) {
 
         const page = await context.newPage();
 
+        // Block common chat/cookie-consent providers that frequently hijack clicks or break iframe previews.
+        await page.route('**/*', (route) => {
+            const reqUrl = route.request().url().toLowerCase();
+            const blockedPatterns = [
+                'demos.telma.ai',
+                'cookiebot',
+                'onetrust',
+                'trustarc',
+                'quantcast',
+                'cookie-consent',
+                'consentmanager',
+                'dgp-cookie-consent',
+            ];
+            if (blockedPatterns.some((pattern) => reqUrl.includes(pattern))) {
+                route.abort().catch(() => null);
+                return;
+            }
+            route.continue().catch(() => null);
+        });
+
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForLoadState('load', { timeout: 5000 }).catch(() => null);
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => null);
@@ -136,14 +226,14 @@ export async function GET(request: NextRequest) {
         let html = await page.content();
         await browser.close();
 
-        // Remove 3rd-party chat widget assets that frequently break preview overlays/interactions.
-        html = html.replace(/<script[^>]+demos\.telma\.ai[^>]*>\s*<\/script>/gi, '');
-        html = html.replace(/<link[^>]+demos\.telma\.ai[^>]*>/gi, '');
-        html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*demos\.telma\.ai\/mchats(?:(?!<\/script>)[\s\S])*<\/script>/gi, '');
-        html = html.replace(/<script[^>]+(?:cookie-consent|cookies\.min\.js|cookiebot|onetrust)[^>]*>\s*<\/script>/gi, '');
+        html = stripProblematicThirdPartySnippets(html);
+
+        // The Playwright snapshot is already rendered server-side, so client scripts are unnecessary
+        // and frequently break preview interaction (consent/chat overlays, frame busting).
+        html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
         // Rewrite iframe src to proxy through our endpoint (fixes cross-origin)
-        const renderBaseUrl = request.nextUrl.origin + '/api/render?url=';
+        const renderBaseUrl = `${appOrigin}/api/render?url=`;
 
         // Rewrite anchor hrefs to keep navigation inside preview renderer
         html = html.replace(
@@ -210,7 +300,7 @@ export async function GET(request: NextRequest) {
             <script id="element-selector">
                 (function() {
                     // FRAME_PATH can be updated via postMessage from parent
-                    const APP_ORIGIN = '${request.nextUrl.origin}';
+                    const APP_ORIGIN = '${appOrigin}';
                     let FRAME_PATH = window.__FRAME_PATH__ || [];
                     let highlightDiv = null;
                     let selectorMatchOverlays = [];
@@ -465,7 +555,8 @@ export async function GET(request: NextRequest) {
                         const href = anchor.getAttribute('href') || '';
                         if (!href || href.startsWith('#') || /^(javascript:|mailto:|tel:|data:)/i.test(href)) return;
 
-                        const renderPrefix = APP_ORIGIN + '/api/render?url=';
+                        const runtimeOrigin = (window.location && window.location.origin) ? window.location.origin : APP_ORIGIN;
+                        const renderPrefix = runtimeOrigin + '/api/render?url=';
                         const directHref = anchor.href || href;
                         if (directHref && directHref.startsWith(renderPrefix)) {
                             e.preventDefault();

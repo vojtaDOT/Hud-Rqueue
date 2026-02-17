@@ -219,26 +219,12 @@ export interface WorkerRuntimeEnqueueConfig {
     payload_template: WorkerRuntimePayloadTemplate;
 }
 
-export type ExtractType = 'text' | 'href' | 'src' | 'attribute' | 'html';
-
-export interface FieldConfig {
-    id?: string;
-    name: string;
-    css_selector: string;
-    extract_type: ExtractType;
-    attribute_name?: string;
-    is_source_url?: boolean;
-    url_type_id?: string;
-}
+export type ExtractType = 'text' | 'href';
 
 export interface PaginationConfig {
     css_selector: string;
     max_pages: number;
 }
-
-export type BeforeAction =
-    | { type: 'remove_element'; css_selector: string }
-    | { type: 'wait_timeout'; ms: number };
 
 export type PlaywrightAction =
     | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
@@ -250,11 +236,42 @@ export type PlaywrightAction =
     | { type: 'evaluate'; script: string }
     | { type: 'screenshot'; filename: string };
 
+export type BeforeAction =
+    | { type: 'remove_element'; css_selector: string }
+    | { type: 'wait_timeout'; ms: number }
+    | PlaywrightAction;
+
+export interface SourceUrlStep {
+    id: string;
+    type: 'source_url';
+    selector: string;
+    extract_type: 'href';
+    url_type_id?: string;
+}
+
+export interface DownloadFileStep {
+    id: string;
+    type: 'download_file';
+    url_selector: string;
+    filename_selector?: string;
+    file_type_hint?: string;
+}
+
+export interface DataExtractStep {
+    id: string;
+    type: 'data_extract';
+    key: string;
+    selector: string;
+    extract_type: ExtractType;
+}
+
+export type RepeaterStep = SourceUrlStep | DownloadFileStep | DataExtractStep;
+
 export interface RepeaterNode {
     id: string;
     css_selector: string;
     label: string;
-    fields: FieldConfig[];
+    steps: RepeaterStep[];
 }
 
 export interface ScopeModule {
@@ -267,8 +284,7 @@ export interface ScopeModule {
 }
 
 export interface PhaseConfig {
-    before_actions: BeforeAction[];
-    playwright_actions: PlaywrightAction[];
+    before: BeforeAction[];
     chain: ScopeModule[];
 }
 
@@ -284,42 +300,43 @@ export interface ScrapingWorkflow {
     url_types: SourceUrlType[];
 }
 
-export interface WorkerRuntimePhaseWorkflow {
-    version: 'scoped_chain.v2.1';
-    phase: 'discovery' | 'processing';
-    playwright_enabled: boolean;
-    config?: PhaseConfig;
-    url_types?: SourceUrlType[];
+export type UnifiedWorkerBeforeAction =
+    | { action: 'remove_element'; selector: string }
+    | { action: 'wait_timeout'; ms: number }
+    | { action: 'wait_selector'; selector: string; timeout?: number }
+    | { action: 'wait_network'; state: 'networkidle' | 'domcontentloaded' | 'load' }
+    | { action: 'click'; selector: string; wait_after?: number }
+    | { action: 'scroll'; count: number; delay: number }
+    | { action: 'fill'; selector: string; value: string; press_enter: boolean }
+    | { action: 'select_option'; selector: string; value: string }
+    | { action: 'evaluate'; script: string }
+    | { action: 'screenshot'; filename: string };
+
+export interface UnifiedWorkerField {
+    name: string;
+    selector: string;
+    type: ExtractType;
 }
 
-export interface WorkerRuntimeStepConfig {
-    task: string;
-    required_task_fields_after_claim: string[];
-    controller_api_enqueue: WorkerRuntimeEnqueueConfig;
-    redis_enqueue: WorkerRuntimeEnqueueConfig;
-    workflow: WorkerRuntimePhaseWorkflow;
+export interface UnifiedWorkerPagination {
+    selector: string;
+    max_pages: number;
 }
 
-export interface WorkerRuntimeConfig {
-    schema_version: string;
-    runtime_contract: string;
-    flow: string[];
-    worker_preconditions: {
-        database: { source_exists: boolean; source_enabled: boolean };
-        download: { source_url_exists: boolean; source_url_enabled: boolean };
-    };
-    steps: {
-        source: WorkerRuntimeStepConfig;
-        source_urls: WorkerRuntimeStepConfig;
-    };
-    optional_tasks: {
-        ocr: WorkerRuntimeStepConfig;
-    };
-    metadata: {
-        pageType: 'scrapy' | 'playwright';
-        framework: string;
-        requiresPlaywright: boolean;
-        baseUrl: string;
-        createdAt: string;
-    };
+export interface UnifiedWorkerPhase {
+    before: UnifiedWorkerBeforeAction[];
+    scope: string | null;
+    repeater: string | null;
+    fields: UnifiedWorkerField[];
+    pagination: UnifiedWorkerPagination | null;
+}
+
+export interface UnifiedWorkerProcessingPhase extends UnifiedWorkerPhase {
+    url_type: string;
+}
+
+export interface UnifiedWorkerCrawlParams {
+    playwright: boolean;
+    discovery: UnifiedWorkerPhase;
+    processing: UnifiedWorkerProcessingPhase[];
 }

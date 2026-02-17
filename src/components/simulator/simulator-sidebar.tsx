@@ -6,7 +6,9 @@ import {
     ArrowUp,
     Bot,
     Clock3,
+    Download,
     FolderTree,
+    Link2,
     Plus,
     Settings2,
     Trash2,
@@ -16,13 +18,16 @@ import {
 import { cn } from '@/lib/utils';
 import type {
     BeforeAction,
+    DataExtractStep,
+    DownloadFileStep,
     ElementSelector,
-    FieldConfig,
     PhaseConfig,
     PlaywrightAction,
     RepeaterNode,
+    RepeaterStep,
     ScopeModule,
     ScrapingWorkflow,
+    SourceUrlStep,
     SourceUrlType,
 } from '@/lib/crawler-types';
 import { Button } from '@/components/ui/button';
@@ -37,19 +42,20 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type PhaseTab = 'discovery' | 'processing';
+type BasicBeforeStepType = 'remove_element' | 'wait_timeout';
+type PlaywrightBeforeStepType = PlaywrightAction['type'];
+type SelectorKey = 'selector' | 'url_selector' | 'filename_selector';
 
 type FocusTarget =
     | { phase: 'discovery'; section: 'before'; index: number }
-    | { phase: 'discovery'; section: 'playwright'; index: number }
     | { phase: 'discovery'; section: 'scope'; scopeId: string }
     | { phase: 'discovery'; section: 'repeater'; repeaterId: string }
-    | { phase: 'discovery'; section: 'field'; fieldId: string }
+    | { phase: 'discovery'; section: 'step'; stepId: string; selectorKey: SelectorKey }
     | { phase: 'discovery'; section: 'pagination'; scopeId: string }
     | { phase: 'processing'; urlTypeId: string; section: 'before'; index: number }
-    | { phase: 'processing'; urlTypeId: string; section: 'playwright'; index: number }
     | { phase: 'processing'; urlTypeId: string; section: 'scope'; scopeId: string }
     | { phase: 'processing'; urlTypeId: string; section: 'repeater'; repeaterId: string }
-    | { phase: 'processing'; urlTypeId: string; section: 'field'; fieldId: string }
+    | { phase: 'processing'; urlTypeId: string; section: 'step'; stepId: string; selectorKey: SelectorKey }
     | { phase: 'processing'; urlTypeId: string; section: 'pagination'; scopeId: string };
 
 interface RepeaterRef {
@@ -77,12 +83,12 @@ export interface SimulatorSidebarRef {
     hasAnyPlaywrightActions: () => boolean;
 }
 
-const BEFORE_STEP_TYPES = [
+const BASIC_BEFORE_STEP_TYPES: Array<{ value: BasicBeforeStepType; label: string }> = [
     { value: 'remove_element', label: 'Remove Element' },
     { value: 'wait_timeout', label: 'Wait Timeout' },
-] as const;
+];
 
-const PLAYWRIGHT_STEP_TYPES = [
+const PLAYWRIGHT_BEFORE_STEP_TYPES: Array<{ value: PlaywrightBeforeStepType; label: string }> = [
     { value: 'wait_selector', label: 'Wait for Selector' },
     { value: 'wait_network', label: 'Wait for Network' },
     { value: 'click', label: 'Click' },
@@ -91,7 +97,18 @@ const PLAYWRIGHT_STEP_TYPES = [
     { value: 'select_option', label: 'Select Dropdown' },
     { value: 'evaluate', label: 'Run JavaScript' },
     { value: 'screenshot', label: 'Screenshot' },
-] as const;
+];
+
+const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
+    'wait_selector',
+    'wait_network',
+    'click',
+    'scroll',
+    'fill',
+    'select_option',
+    'evaluate',
+    'screenshot',
+]);
 
 function createId(prefix: string): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -110,15 +127,31 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
     return next;
 }
 
-function createDefaultBeforeAction(type: BeforeAction['type']): BeforeAction {
-    if (type === 'remove_element') {
-        return { type: 'remove_element', css_selector: '' };
-    }
-    return { type: 'wait_timeout', ms: 1000 };
+function isPlaywrightBeforeAction(action: BeforeAction): action is PlaywrightAction {
+    return PLAYWRIGHT_ACTION_TYPES.has(action.type);
 }
 
-function createDefaultPlaywrightAction(type: PlaywrightAction['type']): PlaywrightAction {
+function actionHasSelector(action: BeforeAction): action is
+    | { type: 'remove_element'; css_selector: string }
+    | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
+    | { type: 'click'; css_selector: string; wait_after_ms?: number }
+    | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
+    | { type: 'select_option'; css_selector: string; value: string } {
+    return (
+        action.type === 'remove_element'
+        || action.type === 'wait_selector'
+        || action.type === 'click'
+        || action.type === 'fill'
+        || action.type === 'select_option'
+    );
+}
+
+function createDefaultBeforeAction(type: BeforeAction['type']): BeforeAction {
     switch (type) {
+        case 'remove_element':
+            return { type: 'remove_element', css_selector: '' };
+        case 'wait_timeout':
+            return { type: 'wait_timeout', ms: 1000 };
         case 'wait_selector':
             return { type: 'wait_selector', css_selector: '', timeout_ms: 10000 };
         case 'wait_network':
@@ -136,7 +169,7 @@ function createDefaultPlaywrightAction(type: PlaywrightAction['type']): Playwrig
         case 'screenshot':
             return { type: 'screenshot', filename: 'debug.png' };
         default:
-            return { type: 'wait_network', state: 'networkidle' };
+            return { type: 'wait_timeout', ms: 1000 };
     }
 }
 
@@ -156,23 +189,43 @@ function createRepeaterNode(): RepeaterNode {
         id: createId('repeater'),
         css_selector: '',
         label: '',
-        fields: [],
+        steps: [],
     };
 }
 
-function createFieldConfig(defaultName = ''): FieldConfig {
+function createSourceUrlStep(defaultUrlTypeId?: string): SourceUrlStep {
     return {
-        id: createId('field'),
-        name: defaultName,
-        css_selector: '',
+        id: createId('step'),
+        type: 'source_url',
+        selector: '',
+        extract_type: 'href',
+        url_type_id: defaultUrlTypeId,
+    };
+}
+
+function createDownloadFileStep(): DownloadFileStep {
+    return {
+        id: createId('step'),
+        type: 'download_file',
+        url_selector: '',
+        filename_selector: '',
+        file_type_hint: '',
+    };
+}
+
+function createDataExtractStep(defaultKey = ''): DataExtractStep {
+    return {
+        id: createId('step'),
+        type: 'data_extract',
+        key: defaultKey,
+        selector: '',
         extract_type: 'text',
     };
 }
 
 function createEmptyPhase(): PhaseConfig {
     return {
-        before_actions: [],
-        playwright_actions: [],
+        before: [],
         chain: [],
     };
 }
@@ -189,6 +242,12 @@ function createDefaultWorkflow(playwrightEnabled: boolean): ScrapingWorkflow {
             },
         ],
     };
+}
+
+function getActionLabel(action: BeforeAction): string {
+    if (action.type === 'remove_element') return 'Remove Element';
+    if (action.type === 'wait_timeout') return 'Wait Timeout';
+    return PLAYWRIGHT_BEFORE_STEP_TYPES.find((item) => item.value === action.type)?.label ?? action.type;
 }
 
 function updateScopeInTree(
@@ -210,17 +269,74 @@ function updateScopeInTree(
     return [next, changed];
 }
 
-function findScopeInTree(scopes: ScopeModule[], scopeId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.id === scopeId) {
-            return scope;
+function updateRepeaterInTree(
+    scopes: ScopeModule[],
+    repeaterId: string,
+    updater: (repeater: RepeaterNode) => RepeaterNode,
+): [ScopeModule[], boolean] {
+    let changed = false;
+    const next = scopes.map((scope) => {
+        if (scope.repeater?.id === repeaterId) {
+            changed = true;
+            return { ...scope, repeater: updater(scope.repeater) };
         }
-        const child = findScopeInTree(scope.children, scopeId);
-        if (child) {
-            return child;
+        const [children, childChanged] = updateRepeaterInTree(scope.children, repeaterId, updater);
+        if (!childChanged) return scope;
+        changed = true;
+        return { ...scope, children };
+    });
+    return [next, changed];
+}
+
+function updateStepInTree(
+    scopes: ScopeModule[],
+    stepId: string,
+    updater: (step: RepeaterStep) => RepeaterStep,
+): [ScopeModule[], boolean] {
+    let changed = false;
+    const next = scopes.map((scope) => {
+        if (scope.repeater) {
+            const stepIndex = scope.repeater.steps.findIndex((step) => step.id === stepId);
+            if (stepIndex >= 0) {
+                changed = true;
+                return {
+                    ...scope,
+                    repeater: {
+                        ...scope.repeater,
+                        steps: scope.repeater.steps.map((step) => (
+                            step.id === stepId ? updater(step) : step
+                        )),
+                    },
+                };
+            }
         }
-    }
-    return null;
+        const [children, childChanged] = updateStepInTree(scope.children, stepId, updater);
+        if (!childChanged) return scope;
+        changed = true;
+        return { ...scope, children };
+    });
+    return [next, changed];
+}
+
+function removeStepFromTree(scopes: ScopeModule[], stepId: string): [ScopeModule[], boolean] {
+    let changed = false;
+    const next = scopes.map((scope) => {
+        if (scope.repeater?.steps.some((step) => step.id === stepId)) {
+            changed = true;
+            return {
+                ...scope,
+                repeater: {
+                    ...scope.repeater,
+                    steps: scope.repeater.steps.filter((step) => step.id !== stepId),
+                },
+            };
+        }
+        const [children, childChanged] = removeStepFromTree(scope.children, stepId);
+        if (!childChanged) return scope;
+        changed = true;
+        return { ...scope, children };
+    });
+    return [next, changed];
 }
 
 function removeScopeFromTree(scopes: ScopeModule[], scopeId: string): [ScopeModule[], boolean] {
@@ -249,84 +365,58 @@ function appendChildScope(scopes: ScopeModule[], parentScopeId: string, child: S
     }));
 }
 
-function updateRepeaterInTree(
-    scopes: ScopeModule[],
-    repeaterId: string,
-    updater: (repeater: RepeaterNode) => RepeaterNode,
-): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
+function findScopeInTree(scopes: ScopeModule[], scopeId: string): ScopeModule | null {
+    for (const scope of scopes) {
+        if (scope.id === scopeId) {
+            return scope;
+        }
+        const child = findScopeInTree(scope.children, scopeId);
+        if (child) {
+            return child;
+        }
+    }
+    return null;
+}
+
+function findScopeForRepeater(scopes: ScopeModule[], repeaterId: string): ScopeModule | null {
+    for (const scope of scopes) {
         if (scope.repeater?.id === repeaterId) {
-            changed = true;
-            return { ...scope, repeater: updater(scope.repeater) };
+            return scope;
         }
-        const [children, childChanged] = updateRepeaterInTree(scope.children, repeaterId, updater);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
+        const child = findScopeForRepeater(scope.children, repeaterId);
+        if (child) {
+            return child;
+        }
+    }
+    return null;
 }
 
-function updateFieldInTree(
+function findScopeForStep(scopes: ScopeModule[], stepId: string): ScopeModule | null {
+    for (const scope of scopes) {
+        if (scope.repeater?.steps.some((step) => step.id === stepId)) {
+            return scope;
+        }
+        const child = findScopeForStep(scope.children, stepId);
+        if (child) {
+            return child;
+        }
+    }
+    return null;
+}
+
+function mapStepsInTree(
     scopes: ScopeModule[],
-    fieldId: string,
-    updater: (field: FieldConfig) => FieldConfig,
-): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.repeater) {
-            const fieldIndex = scope.repeater.fields.findIndex((field) => field.id === fieldId);
-            if (fieldIndex >= 0) {
-                const fields = scope.repeater.fields.map((field) => (
-                    field.id === fieldId ? updater(field) : field
-                ));
-                changed = true;
-                return { ...scope, repeater: { ...scope.repeater, fields } };
-            }
-        }
-        const [children, childChanged] = updateFieldInTree(scope.children, fieldId, updater);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function removeFieldFromTree(scopes: ScopeModule[], fieldId: string): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.repeater?.fields.some((field) => field.id === fieldId)) {
-            changed = true;
-            return {
-                ...scope,
-                repeater: {
-                    ...scope.repeater,
-                    fields: scope.repeater.fields.filter((field) => field.id !== fieldId),
-                },
-            };
-        }
-        const [children, childChanged] = removeFieldFromTree(scope.children, fieldId);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function mapFieldsInTree(
-    scopes: ScopeModule[],
-    mapper: (field: FieldConfig) => FieldConfig,
+    mapper: (step: RepeaterStep) => RepeaterStep,
 ): ScopeModule[] {
     return scopes.map((scope) => ({
         ...scope,
         repeater: scope.repeater
             ? {
                 ...scope.repeater,
-                fields: scope.repeater.fields.map(mapper),
+                steps: scope.repeater.steps.map(mapper),
             }
             : null,
-        children: mapFieldsInTree(scope.children, mapper),
+        children: mapStepsInTree(scope.children, mapper),
     }));
 }
 
@@ -355,53 +445,12 @@ function collectScopes(scopes: ScopeModule[]): ScopeRef[] {
     const walk = (nodes: ScopeModule[], parentPath: string[]) => {
         nodes.forEach((scope, index) => {
             const scopeLabel = scope.label.trim() || `Scope ${parentPath.concat(String(index + 1)).join('.')}`;
-            result.push({
-                scopeId: scope.id,
-                scopeLabel,
-            });
+            result.push({ scopeId: scope.id, scopeLabel });
             walk(scope.children, parentPath.concat(String(index + 1)));
         });
     };
     walk(scopes, []);
     return result;
-}
-
-function hasSourceUrlField(scopes: ScopeModule[]): boolean {
-    for (const scope of scopes) {
-        if (scope.repeater?.fields.some((field) => field.is_source_url)) {
-            return true;
-        }
-        if (hasSourceUrlField(scope.children)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function findScopeForRepeater(scopes: ScopeModule[], repeaterId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.repeater?.id === repeaterId) {
-            return scope;
-        }
-        const child = findScopeForRepeater(scope.children, repeaterId);
-        if (child) {
-            return child;
-        }
-    }
-    return null;
-}
-
-function findScopeForField(scopes: ScopeModule[], fieldId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.repeater?.fields.some((field) => field.id === fieldId)) {
-            return scope;
-        }
-        const child = findScopeForField(scope.children, fieldId);
-        if (child) {
-            return child;
-        }
-    }
-    return null;
 }
 
 function normalizeSelectorWithinScope(selector: string, scopeSelector?: string): string {
@@ -412,30 +461,40 @@ function normalizeSelectorWithinScope(selector: string, scopeSelector?: string):
     const full = selector.trim();
     const scope = scopeSelector.trim();
     if (!full || !scope) return full;
-
-    if (full === scope) {
-        return full;
-    }
-    if (full.startsWith(`${scope} > `)) {
-        return full.slice(scope.length + 3).trim();
-    }
-    if (full.startsWith(`${scope} `)) {
-        return full.slice(scope.length + 1).trim();
-    }
+    if (full === scope) return full;
+    if (full.startsWith(`${scope} > `)) return full.slice(scope.length + 3).trim();
+    if (full.startsWith(`${scope} `)) return full.slice(scope.length + 1).trim();
     return full;
 }
 
-function actionHasSelector(action: PlaywrightAction): action is
-    | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
-    | { type: 'click'; css_selector: string; wait_after_ms?: number }
-    | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
-    | { type: 'select_option'; css_selector: string; value: string } {
-    return (
-        action.type === 'wait_selector'
-        || action.type === 'click'
-        || action.type === 'fill'
-        || action.type === 'select_option'
-    );
+function isSameTarget(a: FocusTarget | null, b: FocusTarget | null): boolean {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function firstStepTarget(
+    scopes: ScopeModule[],
+    phaseKey: { phase: 'discovery' } | { phase: 'processing'; urlTypeId: string },
+): FocusTarget | null {
+    for (const scope of scopes) {
+        const repeater = scope.repeater;
+        if (repeater) {
+            for (const step of repeater.steps) {
+                if (step.type === 'source_url' || step.type === 'data_extract') {
+                    return phaseKey.phase === 'discovery'
+                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'selector' }
+                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'selector' };
+                }
+                if (step.type === 'download_file') {
+                    return phaseKey.phase === 'discovery'
+                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'url_selector' }
+                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'url_selector' };
+                }
+            }
+        }
+        const child = firstStepTarget(scope.children, phaseKey);
+        if (child) return child;
+    }
+    return null;
 }
 
 export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebarProps>(({
@@ -449,8 +508,8 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
     const [selectedRepeaterId, setSelectedRepeaterId] = useState<string | null>(null);
     const [focusedTarget, setFocusedTarget] = useState<FocusTarget | null>(null);
-    const [beforeToAdd, setBeforeToAdd] = useState<BeforeAction['type']>('remove_element');
-    const [playwrightToAdd, setPlaywrightToAdd] = useState<PlaywrightAction['type']>('wait_selector');
+    const [beforeToAdd, setBeforeToAdd] = useState<BasicBeforeStepType>('remove_element');
+    const [playwrightToAdd, setPlaywrightToAdd] = useState<PlaywrightBeforeStepType>('wait_selector');
 
     const activeUrlType = useMemo(
         () => workflow.url_types.find((item) => item.id === activeUrlTypeId) ?? workflow.url_types[0],
@@ -462,14 +521,15 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         [activeTab, workflow.discovery, activeUrlType],
     );
 
+    const currentPhaseKey = useMemo(
+        () => (activeTab === 'discovery'
+            ? ({ phase: 'discovery' } as const)
+            : ({ phase: 'processing', urlTypeId: activeUrlType.id } as const)),
+        [activeTab, activeUrlType.id],
+    );
+
     const scopeRefs = useMemo(() => collectScopes(currentPhase.chain), [currentPhase.chain]);
     const repeaterRefs = useMemo(() => collectRepeaters(currentPhase.chain), [currentPhase.chain]);
-
-    const currentPhaseKey = useMemo(() => (
-        activeTab === 'discovery'
-            ? { phase: 'discovery' as const }
-            : { phase: 'processing' as const, urlTypeId: activeUrlType.id }
-    ), [activeTab, activeUrlType.id]);
 
     const effectiveSelectedScopeId = useMemo(
         () => (selectedScopeId && scopeRefs.some((scope) => scope.scopeId === selectedScopeId))
@@ -520,9 +580,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     };
 
     const syncPreviewOnChange = (target: FocusTarget, value: string) => {
-        const isSame =
-            JSON.stringify(target) === JSON.stringify(focusedTarget);
-        if (isSame) {
+        if (isSameTarget(target, focusedTarget)) {
             onSelectorPreviewChange?.(value.trim() ? value : null);
         }
     };
@@ -540,24 +598,17 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'scope', scopeId: effectiveSelectedScopeId };
         }
 
-        const firstRemoveIndex = currentPhase.before_actions.findIndex((action) => action.type === 'remove_element');
-        if (firstRemoveIndex >= 0) {
+        const firstActionIndex = currentPhase.before.findIndex((action) => actionHasSelector(action));
+        if (firstActionIndex >= 0) {
             return currentPhaseKey.phase === 'discovery'
-                ? { phase: 'discovery', section: 'before', index: firstRemoveIndex }
-                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'before', index: firstRemoveIndex };
+                ? { phase: 'discovery', section: 'before', index: firstActionIndex }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'before', index: firstActionIndex };
         }
 
-        const firstSelectorPlaywrightIndex = currentPhase.playwright_actions.findIndex((action) => actionHasSelector(action));
-        if (firstSelectorPlaywrightIndex >= 0) {
-            return currentPhaseKey.phase === 'discovery'
-                ? { phase: 'discovery', section: 'playwright', index: firstSelectorPlaywrightIndex }
-                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'playwright', index: firstSelectorPlaywrightIndex };
-        }
-
-        return null;
+        return firstStepTarget(currentPhase.chain, currentPhaseKey);
     }, [
-        currentPhase.before_actions,
-        currentPhase.playwright_actions,
+        currentPhase.before,
+        currentPhase.chain,
         currentPhaseKey,
         effectiveSelectedRepeaterId,
         effectiveSelectedScopeId,
@@ -577,8 +628,8 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
         }
 
-        if (target.section === 'field') {
-            const scope = findScopeForField(phase.chain, target.fieldId);
+        if (target.section === 'step') {
+            const scope = findScopeForStep(phase.chain, target.stepId);
             return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
         }
 
@@ -607,34 +658,21 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     : { phase: 'processing', urlTypeId: target.urlTypeId },
                 (phase) => {
                     const nextSelector = resolveSelectorForTarget(phase, target, selector, elementInfo);
-                    if (!nextSelector) {
-                        return phase;
-                    }
+                    if (!nextSelector) return phase;
 
                     if (target.section === 'before') {
-                        const action = phase.before_actions[target.index];
-                        if (!action || action.type !== 'remove_element') return phase;
-                        return {
-                            ...phase,
-                            before_actions: phase.before_actions.map((item, index) => (
-                                index === target.index && item.type === 'remove_element'
-                                    ? { ...item, css_selector: nextSelector }
-                                    : item
-                            )),
-                        };
-                    }
-                    if (target.section === 'playwright') {
-                        const action = phase.playwright_actions[target.index];
+                        const action = phase.before[target.index];
                         if (!action || !actionHasSelector(action)) return phase;
                         return {
                             ...phase,
-                            playwright_actions: phase.playwright_actions.map((item, index) => (
+                            before: phase.before.map((item, index) => (
                                 index === target.index && actionHasSelector(item)
                                     ? { ...item, css_selector: nextSelector }
                                     : item
                             )),
                         };
                     }
+
                     if (target.section === 'scope') {
                         const [chain] = updateScopeInTree(phase.chain, target.scopeId, (scope) => ({
                             ...scope,
@@ -642,6 +680,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         }));
                         return { ...phase, chain };
                     }
+
                     if (target.section === 'repeater') {
                         const [chain] = updateRepeaterInTree(phase.chain, target.repeaterId, (repeater) => ({
                             ...repeater,
@@ -649,13 +688,28 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         }));
                         return { ...phase, chain };
                     }
-                    if (target.section === 'field') {
-                        const [chain] = updateFieldInTree(phase.chain, target.fieldId, (field) => ({
-                            ...field,
-                            css_selector: nextSelector,
-                        }));
+
+                    if (target.section === 'step') {
+                        const [chain] = updateStepInTree(phase.chain, target.stepId, (step) => {
+                            if (step.type === 'source_url' && target.selectorKey === 'selector') {
+                                return { ...step, selector: nextSelector };
+                            }
+                            if (step.type === 'data_extract' && target.selectorKey === 'selector') {
+                                return { ...step, selector: nextSelector };
+                            }
+                            if (step.type === 'download_file') {
+                                if (target.selectorKey === 'url_selector') {
+                                    return { ...step, url_selector: nextSelector };
+                                }
+                                if (target.selectorKey === 'filename_selector') {
+                                    return { ...step, filename_selector: nextSelector };
+                                }
+                            }
+                            return step;
+                        });
                         return { ...phase, chain };
                     }
+
                     if (target.section === 'pagination') {
                         const [chain] = updateScopeInTree(phase.chain, target.scopeId, (scope) => ({
                             ...scope,
@@ -666,50 +720,55 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         }));
                         return { ...phase, chain };
                     }
+
                     return phase;
                 },
             );
+
             onSelectorPreviewChange?.(nextSelectorRaw);
             return true;
         },
         appendRemoveElementBeforeAction: (selector: string) => {
             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                 ...phase,
-                before_actions: [
-                    ...phase.before_actions,
-                    { type: 'remove_element', css_selector: selector },
-                ],
+                before: [...phase.before, { type: 'remove_element', css_selector: selector }],
             }));
         },
         clearAllPlaywrightActions: () => {
             setWorkflow((prev) => ({
                 ...prev,
-                discovery: { ...prev.discovery, playwright_actions: [] },
-                url_types: prev.url_types.map((item) => ({
-                    ...item,
-                    processing: { ...item.processing, playwright_actions: [] },
+                discovery: {
+                    ...prev.discovery,
+                    before: prev.discovery.before.filter((action) => !isPlaywrightBeforeAction(action)),
+                },
+                url_types: prev.url_types.map((urlType) => ({
+                    ...urlType,
+                    processing: {
+                        ...urlType.processing,
+                        before: urlType.processing.before.filter((action) => !isPlaywrightBeforeAction(action)),
+                    },
                 })),
             }));
         },
         hasAnyPlaywrightActions: () => {
-            if (workflow.discovery.playwright_actions.length > 0) {
+            if (workflow.discovery.before.some((action) => isPlaywrightBeforeAction(action))) {
                 return true;
             }
-            return workflow.url_types.some((item) => item.processing.playwright_actions.length > 0);
+            return workflow.url_types.some((item) => item.processing.before.some((action) => isPlaywrightBeforeAction(action)));
         },
     }), [currentPhaseKey, focusedTarget, getFallbackTarget, onSelectorPreviewChange, resolveSelectorForTarget, workflow]);
 
-    const addBeforeAction = () => {
+    const addBasicBeforeAction = () => {
         updateWorkflowPhase(currentPhaseKey, (phase) => ({
             ...phase,
-            before_actions: [...phase.before_actions, createDefaultBeforeAction(beforeToAdd)],
+            before: [...phase.before, createDefaultBeforeAction(beforeToAdd)],
         }));
     };
 
     const addPlaywrightAction = () => {
         updateWorkflowPhase(currentPhaseKey, (phase) => ({
             ...phase,
-            playwright_actions: [...phase.playwright_actions, createDefaultPlaywrightAction(playwrightToAdd)],
+            before: [...phase.before, createDefaultBeforeAction(playwrightToAdd)],
         }));
     };
 
@@ -745,21 +804,38 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         setSelectedRepeaterId(repeater.id);
     };
 
-    const addFieldStep = () => {
-        if (!effectiveSelectedRepeaterId) return;
-        const isDiscovery = currentPhaseKey.phase === 'discovery';
-        const sourceUrlDefault = isDiscovery && !hasSourceUrlField(currentPhase.chain);
-        const field = createFieldConfig(sourceUrlDefault ? 'source_url' : '');
-        if (sourceUrlDefault) {
-            field.extract_type = 'href';
-            field.is_source_url = true;
-            field.url_type_id = workflow.url_types[0]?.id;
-        }
-
+    const addSourceUrlStep = () => {
+        if (!effectiveSelectedRepeaterId || currentPhaseKey.phase !== 'discovery') return;
+        const defaultUrlTypeId = workflow.url_types[0]?.id;
+        const sourceUrlStep = createSourceUrlStep(defaultUrlTypeId);
         updateWorkflowPhase(currentPhaseKey, (phase) => {
             const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
                 ...repeater,
-                fields: [...repeater.fields, field],
+                steps: [...repeater.steps, sourceUrlStep],
+            }));
+            return { ...phase, chain };
+        });
+    };
+
+    const addDownloadFileStep = () => {
+        if (!effectiveSelectedRepeaterId) return;
+        const downloadStep = createDownloadFileStep();
+        updateWorkflowPhase(currentPhaseKey, (phase) => {
+            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
+                ...repeater,
+                steps: [...repeater.steps, downloadStep],
+            }));
+            return { ...phase, chain };
+        });
+    };
+
+    const addDataExtractStep = () => {
+        if (!effectiveSelectedRepeaterId) return;
+        const dataStep = createDataExtractStep();
+        updateWorkflowPhase(currentPhaseKey, (phase) => {
+            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
+                ...repeater,
+                steps: [...repeater.steps, dataStep],
             }));
             return { ...phase, chain };
         });
@@ -807,8 +883,10 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             url_types: nextUrlTypes,
             discovery: {
                 ...prev.discovery,
-                chain: mapFieldsInTree(prev.discovery.chain, (field) => (
-                    field.url_type_id === id ? { ...field, url_type_id: fallbackId } : field
+                chain: mapStepsInTree(prev.discovery.chain, (step) => (
+                    step.type === 'source_url' && step.url_type_id === id
+                        ? { ...step, url_type_id: fallbackId }
+                        : step
                 )),
             },
         }));
@@ -825,7 +903,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         return (
             <div key={`before-${index}`} className="rounded-lg border border-white/10 bg-black/30 p-2">
                 <div className="mb-2 flex items-center justify-between text-xs text-white/70">
-                    <span>{action.type === 'remove_element' ? 'Remove Element' : 'Wait Timeout'}</span>
+                    <span>{getActionLabel(action)}</span>
                     <div className="flex gap-1">
                         <Button
                             type="button"
@@ -834,7 +912,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             className="h-6 w-6"
                             onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                before_actions: moveItem(phase.before_actions, index, index - 1),
+                                before: moveItem(phase.before, index, index - 1),
                             }))}
                         >
                             <ArrowUp className="h-3.5 w-3.5" />
@@ -846,7 +924,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             className="h-6 w-6"
                             onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                before_actions: moveItem(phase.before_actions, index, index + 1),
+                                before: moveItem(phase.before, index, index + 1),
                             }))}
                         >
                             <ArrowDown className="h-3.5 w-3.5" />
@@ -858,14 +936,15 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             className="h-6 w-6 text-red-300"
                             onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                before_actions: phase.before_actions.filter((_, i) => i !== index),
+                                before: phase.before.filter((_, i) => i !== index),
                             }))}
                         >
                             <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                     </div>
                 </div>
-                {action.type === 'remove_element' ? (
+
+                {action.type === 'remove_element' && (
                     <Input
                         value={action.css_selector}
                         placeholder="CSS selector"
@@ -875,14 +954,16 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                before_actions: phase.before_actions.map((item, i) => (
+                                before: phase.before.map((item, i) => (
                                     i === index && item.type === 'remove_element' ? { ...item, css_selector: value } : item
                                 )),
                             }));
                             syncPreviewOnChange(target, value);
                         }}
                     />
-                ) : (
+                )}
+
+                {action.type === 'wait_timeout' && (
                     <Input
                         type="number"
                         value={action.ms}
@@ -892,65 +973,13 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             const value = Number(event.target.value) || 0;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                before_actions: phase.before_actions.map((item, i) => (
+                                before: phase.before.map((item, i) => (
                                     i === index && item.type === 'wait_timeout' ? { ...item, ms: value } : item
                                 )),
                             }));
                         }}
                     />
                 )}
-            </div>
-        );
-    };
-
-    const renderPlaywrightAction = (action: PlaywrightAction, index: number) => {
-        const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-            ? { phase: 'discovery', section: 'playwright', index }
-            : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'playwright', index };
-
-        return (
-            <div key={`playwright-${index}`} className="rounded-lg border border-white/10 bg-black/30 p-2">
-                <div className="mb-2 flex items-center justify-between text-xs text-white/70">
-                    <span>{PLAYWRIGHT_STEP_TYPES.find((item) => item.value === action.type)?.label ?? action.type}</span>
-                    <div className="flex gap-1">
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6"
-                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                ...phase,
-                                playwright_actions: moveItem(phase.playwright_actions, index, index - 1),
-                            }))}
-                        >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6"
-                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                ...phase,
-                                playwright_actions: moveItem(phase.playwright_actions, index, index + 1),
-                            }))}
-                        >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-red-300"
-                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                ...phase,
-                                playwright_actions: phase.playwright_actions.filter((_, i) => i !== index),
-                            }))}
-                        >
-                            <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                    </div>
-                </div>
 
                 {action.type === 'wait_selector' && (
                     <div className="grid grid-cols-2 gap-2">
@@ -963,7 +992,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'wait_selector' ? { ...item, css_selector: value } : item
                                     )),
                                 }));
@@ -979,7 +1008,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'wait_selector' ? { ...item, timeout_ms: value } : item
                                     )),
                                 }));
@@ -987,13 +1016,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         />
                     </div>
                 )}
+
                 {action.type === 'wait_network' && (
                     <Select
                         value={action.state}
                         onValueChange={(value) => {
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                playwright_actions: phase.playwright_actions.map((item, i) => (
+                                before: phase.before.map((item, i) => (
                                     i === index && item.type === 'wait_network'
                                         ? { ...item, state: value as 'networkidle' | 'domcontentloaded' | 'load' }
                                         : item
@@ -1011,6 +1041,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         </SelectContent>
                     </Select>
                 )}
+
                 {action.type === 'click' && (
                     <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -1022,7 +1053,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'click' ? { ...item, css_selector: value } : item
                                     )),
                                 }));
@@ -1038,7 +1069,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'click' ? { ...item, wait_after_ms: value } : item
                                     )),
                                 }));
@@ -1046,6 +1077,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         />
                     </div>
                 )}
+
                 {action.type === 'scroll' && (
                     <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -1057,7 +1089,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'scroll' ? { ...item, count: value } : item
                                     )),
                                 }));
@@ -1072,7 +1104,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'scroll' ? { ...item, delay_ms: value } : item
                                     )),
                                 }));
@@ -1080,6 +1112,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         />
                     </div>
                 )}
+
                 {action.type === 'fill' && (
                     <div className="space-y-2">
                         <Input
@@ -1091,7 +1124,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'fill' ? { ...item, css_selector: value } : item
                                     )),
                                 }));
@@ -1106,7 +1139,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'fill' ? { ...item, value } : item
                                     )),
                                 }));
@@ -1119,7 +1152,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 onChange={(event) => {
                                     updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                         ...phase,
-                                        playwright_actions: phase.playwright_actions.map((item, i) => (
+                                        before: phase.before.map((item, i) => (
                                             i === index && item.type === 'fill' ? { ...item, press_enter: event.target.checked } : item
                                         )),
                                     }));
@@ -1129,6 +1162,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         </label>
                     </div>
                 )}
+
                 {action.type === 'select_option' && (
                     <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -1140,7 +1174,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'select_option' ? { ...item, css_selector: value } : item
                                     )),
                                 }));
@@ -1155,7 +1189,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                     ...phase,
-                                    playwright_actions: phase.playwright_actions.map((item, i) => (
+                                    before: phase.before.map((item, i) => (
                                         i === index && item.type === 'select_option' ? { ...item, value } : item
                                     )),
                                 }));
@@ -1163,6 +1197,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         />
                     </div>
                 )}
+
                 {action.type === 'evaluate' && (
                     <Input
                         value={action.script}
@@ -1172,13 +1207,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                playwright_actions: phase.playwright_actions.map((item, i) => (
+                                before: phase.before.map((item, i) => (
                                     i === index && item.type === 'evaluate' ? { ...item, script: value } : item
                                 )),
                             }));
                         }}
                     />
                 )}
+
                 {action.type === 'screenshot' && (
                     <Input
                         value={action.filename}
@@ -1188,7 +1224,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
                                 ...phase,
-                                playwright_actions: phase.playwright_actions.map((item, i) => (
+                                before: phase.before.map((item, i) => (
                                     i === index && item.type === 'screenshot' ? { ...item, filename: value } : item
                                 )),
                             }));
@@ -1199,163 +1235,236 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         );
     };
 
-    const renderField = (field: FieldConfig, repeater: RepeaterNode, fieldIndex: number, isDiscovery: boolean) => {
-        const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-            ? { phase: 'discovery', section: 'field', fieldId: field.id ?? '' }
-            : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'field', fieldId: field.id ?? '' };
-        const fieldId = field.id ?? '';
+    const renderRepeaterStep = (
+        step: RepeaterStep,
+        repeater: RepeaterNode,
+        stepIndex: number,
+        isDiscovery: boolean,
+    ) => {
+        const stepTarget = (selectorKey: SelectorKey): FocusTarget => (
+            currentPhaseKey.phase === 'discovery'
+                ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey }
+                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey }
+        );
+
+        const stepTitle = step.type === 'source_url'
+            ? 'Source URL'
+            : step.type === 'download_file'
+                ? 'Download File'
+                : 'Data Extract';
 
         return (
-            <div key={fieldId} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                <div className="mb-2 flex items-center gap-2">
-                    <Input
-                        value={field.name}
-                        placeholder="Field name"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                        onChange={(event) => {
-                            const value = event.target.value;
-                            updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({ ...current, name: value }));
-                                return { ...phase, chain };
-                            });
-                        }}
-                    />
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6"
-                        onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
-                            const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
-                                ...current,
-                                fields: moveItem(current.fields, fieldIndex, fieldIndex - 1),
-                            }));
-                            return { ...phase, chain };
-                        })}
-                    >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6"
-                        onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
-                            const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
-                                ...current,
-                                fields: moveItem(current.fields, fieldIndex, fieldIndex + 1),
-                            }));
-                            return { ...phase, chain };
-                        })}
-                    >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6 text-red-300"
-                        onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
-                            const [chain] = removeFieldFromTree(phase.chain, fieldId);
-                            return { ...phase, chain };
-                        })}
-                    >
-                        <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                    <Input
-                        value={field.css_selector}
-                        placeholder="CSS selector"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                        onFocus={() => setSelectorFocus(target, field.css_selector)}
-                        onChange={(event) => {
-                            const value = event.target.value;
-                            updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({ ...current, css_selector: value }));
-                                return { ...phase, chain };
-                            });
-                            syncPreviewOnChange(target, value);
-                        }}
-                    />
-                    <Select
-                        value={field.extract_type}
-                        onValueChange={(value) => {
-                            updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({
+            <div key={step.id} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/70">
+                        {step.type === 'source_url' && <Link2 className="h-3.5 w-3.5 text-cyan-300" />}
+                        {step.type === 'download_file' && <Download className="h-3.5 w-3.5 text-emerald-300" />}
+                        {step.type === 'data_extract' && <FolderTree className="h-3.5 w-3.5 text-green-300" />}
+                        <span>{stepTitle}</span>
+                    </div>
+                    <div className="flex gap-1">
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6"
+                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
                                     ...current,
-                                    extract_type: value as FieldConfig['extract_type'],
-                                    attribute_name: value === 'attribute' ? current.attribute_name ?? '' : undefined,
+                                    steps: moveItem(current.steps, stepIndex, stepIndex - 1),
                                 }));
                                 return { ...phase, chain };
-                            });
-                        }}
-                    >
-                        <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="text">Text</SelectItem>
-                            <SelectItem value="href">Href</SelectItem>
-                            <SelectItem value="src">Src</SelectItem>
-                            <SelectItem value="attribute">Attribute</SelectItem>
-                            <SelectItem value="html">HTML</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                {field.extract_type === 'attribute' && (
-                    <Input
-                        value={field.attribute_name ?? ''}
-                        placeholder="Attribute name"
-                        className="mt-2 h-8 border-white/10 bg-black/30 text-xs text-white"
-                        onChange={(event) => {
-                            const value = event.target.value;
-                            updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({ ...current, attribute_name: value }));
+                            })}
+                        >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6"
+                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
+                                    ...current,
+                                    steps: moveItem(current.steps, stepIndex, stepIndex + 1),
+                                }));
                                 return { ...phase, chain };
-                            });
-                        }}
-                    />
-                )}
-                {isDiscovery && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                            <input
-                                type="checkbox"
-                                checked={field.is_source_url ?? false}
-                                onChange={(event) => {
-                                    const checked = event.target.checked;
+                            })}
+                        >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-red-300"
+                            onClick={() => updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                const [chain] = removeStepFromTree(phase.chain, step.id);
+                                return { ...phase, chain };
+                            })}
+                        >
+                            <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                    </div>
+                </div>
+
+                {step.type === 'source_url' && (
+                    <div className="space-y-2">
+                        <Input
+                            value={step.selector}
+                            placeholder="Selector for source URL"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'source_url' ? { ...current, selector: value } : current
+                                    ));
+                                    return { ...phase, chain };
+                                });
+                                syncPreviewOnChange(stepTarget('selector'), value);
+                            }}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                            <Input
+                                value="href"
+                                disabled
+                                className="h-8 border-white/10 bg-black/40 text-xs text-white/60"
+                            />
+                            <Select
+                                value={step.url_type_id ?? workflow.url_types[0]?.id}
+                                disabled={!isDiscovery}
+                                onValueChange={(value) => {
                                     updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                        const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({
-                                            ...current,
-                                            is_source_url: checked,
-                                            url_type_id: checked ? current.url_type_id ?? workflow.url_types[0]?.id : undefined,
-                                        }));
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'source_url' ? { ...current, url_type_id: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            >
+                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {workflow.url_types.map((urlType) => (
+                                        <SelectItem key={urlType.id} value={urlType.id}>
+                                            {urlType.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                )}
+
+                {step.type === 'download_file' && (
+                    <div className="space-y-2">
+                        <Input
+                            value={step.url_selector}
+                            placeholder="File URL selector"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(stepTarget('url_selector'), step.url_selector)}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'download_file' ? { ...current, url_selector: value } : current
+                                    ));
+                                    return { ...phase, chain };
+                                });
+                                syncPreviewOnChange(stepTarget('url_selector'), value);
+                            }}
+                        />
+                        <Input
+                            value={step.filename_selector ?? ''}
+                            placeholder="Filename selector (optional)"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'download_file' ? { ...current, filename_selector: value } : current
+                                    ));
+                                    return { ...phase, chain };
+                                });
+                                syncPreviewOnChange(stepTarget('filename_selector'), value);
+                            }}
+                        />
+                        <Input
+                            value={step.file_type_hint ?? ''}
+                            placeholder="File type hint (optional)"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'download_file' ? { ...current, file_type_hint: value } : current
+                                    ));
+                                    return { ...phase, chain };
+                                });
+                            }}
+                        />
+                    </div>
+                )}
+
+                {step.type === 'data_extract' && (
+                    <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                            <Input
+                                value={step.key}
+                                placeholder="Output key"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'data_extract' ? { ...current, key: value } : current
+                                        ));
                                         return { ...phase, chain };
                                     });
                                 }}
                             />
-                            source_url
-                        </label>
-                        <Select
-                            value={field.url_type_id ?? workflow.url_types[0]?.id}
-                            disabled={!field.is_source_url}
-                            onValueChange={(value) => {
+                            <Select
+                                value={step.extract_type}
+                                onValueChange={(value) => {
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'data_extract'
+                                                ? { ...current, extract_type: value as 'text' | 'href' }
+                                                : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            >
+                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="text">Text</SelectItem>
+                                    <SelectItem value="href">Href</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Input
+                            value={step.selector}
+                            placeholder="CSS selector"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
+                            onChange={(event) => {
+                                const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                    const [chain] = updateFieldInTree(phase.chain, fieldId, (current) => ({ ...current, url_type_id: value }));
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'data_extract' ? { ...current, selector: value } : current
+                                    ));
                                     return { ...phase, chain };
                                 });
+                                syncPreviewOnChange(stepTarget('selector'), value);
                             }}
-                        >
-                            <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {workflow.url_types.map((urlType) => (
-                                    <SelectItem key={urlType.id} value={urlType.id}>{urlType.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        />
                     </div>
                 )}
             </div>
@@ -1367,12 +1476,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             ? { phase: 'discovery', section: 'scope', scopeId: scope.id }
             : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'scope', scopeId: scope.id };
 
+        const paginationTarget: FocusTarget = currentPhaseKey.phase === 'discovery'
+            ? { phase: 'discovery', section: 'pagination', scopeId: scope.id }
+            : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'pagination', scopeId: scope.id };
+
         return (
             <div key={scope.id} className={cn('space-y-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 p-3', depth > 0 && 'ml-4')}>
                 <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">
-                        Scope
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Scope</div>
                     <div className="flex gap-1">
                         <Button
                             type="button"
@@ -1399,6 +1510,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         </Button>
                     </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-2">
                     <Input
                         value={scope.css_selector}
@@ -1430,92 +1542,88 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {scope.repeater && (() => {
                     const repeater = scope.repeater;
+                    const repeaterTarget: FocusTarget = currentPhaseKey.phase === 'discovery'
+                        ? { phase: 'discovery', section: 'repeater', repeaterId: repeater.id }
+                        : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'repeater', repeaterId: repeater.id };
+
                     return (
-                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
-                        <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold uppercase tracking-wider text-amber-200">
-                                Repeater
+                        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
+                            <div className="mb-2 flex items-center justify-between">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-amber-200">Repeater</div>
+                                <div className="flex gap-1">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className={cn('h-7 text-xs', effectiveSelectedRepeaterId === repeater.id ? 'bg-white/20 text-white' : 'text-white/70')}
+                                        onClick={() => {
+                                            setSelectedScopeId(scope.id);
+                                            setSelectedRepeaterId(repeater.id);
+                                        }}
+                                    >
+                                        Target
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 text-red-300"
+                                        onClick={() => {
+                                            updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                                const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
+                                                    ...current,
+                                                    repeater: null,
+                                                }));
+                                                return { ...phase, chain };
+                                            });
+                                        }}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                </div>
                             </div>
-                            <div className="flex gap-1">
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="ghost"
-                                    className={cn('h-7 text-xs', effectiveSelectedRepeaterId === repeater.id ? 'bg-white/20 text-white' : 'text-white/70')}
-                                    onClick={() => {
-                                        setSelectedScopeId(scope.id);
-                                        setSelectedRepeaterId(repeater.id);
-                                    }}
-                                >
-                                    Target
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-7 w-7 text-red-300"
-                                    onClick={() => {
+
+                            <div className="grid grid-cols-2 gap-2">
+                                <Input
+                                    value={repeater.css_selector}
+                                    placeholder="Repeater selector"
+                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                    onFocus={() => setSelectorFocus(repeaterTarget, repeater.css_selector)}
+                                    onChange={(event) => {
+                                        const value = event.target.value;
                                         updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                            const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
+                                            const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
                                                 ...current,
-                                                repeater: null,
+                                                css_selector: value,
+                                            }));
+                                            return { ...phase, chain };
+                                        });
+                                        syncPreviewOnChange(repeaterTarget, value);
+                                    }}
+                                />
+                                <Input
+                                    value={repeater.label}
+                                    placeholder="Repeater label"
+                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                    onChange={(event) => {
+                                        const value = event.target.value;
+                                        updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                            const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
+                                                ...current,
+                                                label: value,
                                             }));
                                             return { ...phase, chain };
                                         });
                                     }}
-                                >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
+                                />
+                            </div>
+
+                            <div className="mt-2 space-y-2">
+                                {repeater.steps.map((step, index) => renderRepeaterStep(step, repeater, index, currentPhaseKey.phase === 'discovery'))}
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <Input
-                                value={repeater.css_selector}
-                                placeholder="Repeater selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                                onFocus={() => {
-                                    const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-                                        ? { phase: 'discovery', section: 'repeater', repeaterId: repeater.id }
-                                        : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'repeater', repeaterId: repeater.id };
-                                    setSelectorFocus(target, repeater.css_selector);
-                                }}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-                                        ? { phase: 'discovery', section: 'repeater', repeaterId: repeater.id }
-                                        : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'repeater', repeaterId: repeater.id };
-                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                        const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
-                                            ...current,
-                                            css_selector: value,
-                                        }));
-                                        return { ...phase, chain };
-                                    });
-                                    syncPreviewOnChange(target, value);
-                                }}
-                            />
-                            <Input
-                                value={repeater.label}
-                                placeholder="Repeater label"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                        const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
-                                            ...current,
-                                            label: value,
-                                        }));
-                                        return { ...phase, chain };
-                                    });
-                                }}
-                            />
-                        </div>
-
-                        <div className="mt-2 space-y-2">
-                            {repeater.fields.map((field, index) => renderField(field, repeater as RepeaterNode, index, currentPhaseKey.phase === 'discovery'))}
-                        </div>
-                    </div>
-                )})()}
+                    );
+                })()}
 
                 {scope.pagination && (
                     <div className="rounded-lg border border-dashed border-red-500/40 bg-red-500/5 p-2">
@@ -1544,17 +1652,9 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 value={scope.pagination.css_selector}
                                 placeholder="Next selector"
                                 className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                                onFocus={() => {
-                                    const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-                                        ? { phase: 'discovery', section: 'pagination', scopeId: scope.id }
-                                        : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'pagination', scopeId: scope.id };
-                                    setSelectorFocus(target, scope.pagination?.css_selector ?? '');
-                                }}
+                                onFocus={() => setSelectorFocus(paginationTarget, scope.pagination?.css_selector ?? '')}
                                 onChange={(event) => {
                                     const value = event.target.value;
-                                    const target: FocusTarget = currentPhaseKey.phase === 'discovery'
-                                        ? { phase: 'discovery', section: 'pagination', scopeId: scope.id }
-                                        : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'pagination', scopeId: scope.id };
                                     updateWorkflowPhase(currentPhaseKey, (phase) => {
                                         const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
                                             ...current,
@@ -1565,7 +1665,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                         }));
                                         return { ...phase, chain };
                                     });
-                                    syncPreviewOnChange(target, value);
+                                    syncPreviewOnChange(paginationTarget, value);
                                 }}
                             />
                             <Input
@@ -1600,6 +1700,173 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         );
     };
 
+    const renderPhaseEditor = () => (
+        <div className="space-y-4">
+            <section className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
+                <div className="space-y-3">
+                    <div className="rounded-lg border border-white/10 bg-black/30 p-2">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
+                            <Clock3 className="h-3.5 w-3.5" />
+                            Before
+                        </div>
+                        <div className="flex gap-2">
+                            <Select value={beforeToAdd} onValueChange={(value) => setBeforeToAdd(value as BasicBeforeStepType)}>
+                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {BASIC_BEFORE_STEP_TYPES.map((item) => (
+                                        <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button type="button" size="sm" onClick={addBasicBeforeAction} className="h-8">
+                                <Plus className="mr-1 h-3.5 w-3.5" />
+                                Add
+                            </Button>
+                        </div>
+                    </div>
+
+                    {playwrightEnabled && (
+                        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2">
+                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-purple-200">
+                                <Bot className="h-3.5 w-3.5" />
+                                Playwright
+                            </div>
+                            <div className="flex gap-2">
+                                <Select value={playwrightToAdd} onValueChange={(value) => setPlaywrightToAdd(value as PlaywrightBeforeStepType)}>
+                                    <SelectTrigger className="h-8 border-purple-500/20 bg-black/30 text-xs text-white">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {PLAYWRIGHT_BEFORE_STEP_TYPES.map((item) => (
+                                            <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Button type="button" size="sm" onClick={addPlaywrightAction} className="h-8">
+                                    <Plus className="mr-1 h-3.5 w-3.5" />
+                                    Add
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
+                            <FolderTree className="h-3.5 w-3.5" />
+                            Core
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
+                                onClick={addScopeStep}
+                            >
+                                + Scope
+                            </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-amber-500/40 bg-transparent text-amber-100"
+                                disabled={!effectiveSelectedScopeId}
+                                onClick={addRepeaterStep}
+                            >
+                                + Repeater
+                            </Button>
+                            <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={setSelectedRepeaterId}>
+                                <SelectTrigger className="h-8 border-green-500/40 bg-black/30 text-xs text-white">
+                                    <SelectValue placeholder="Step target repeater" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {repeaterRefs.map((item) => (
+                                        <SelectItem key={item.repeaterId} value={item.repeaterId}>
+                                            {item.scopeLabel} {'->'} {item.repeaterLabel}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {activeTab === 'discovery' ? (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
+                                    disabled={!effectiveSelectedRepeaterId}
+                                    onClick={addSourceUrlStep}
+                                >
+                                    + Source URL
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 border-emerald-500/40 bg-transparent text-emerald-100"
+                                    disabled={!effectiveSelectedRepeaterId}
+                                    onClick={addDownloadFileStep}
+                                >
+                                    + Download File
+                                </Button>
+                            )}
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-green-500/40 bg-transparent text-green-100"
+                                disabled={!effectiveSelectedRepeaterId}
+                                onClick={addDataExtractStep}
+                            >
+                                + Data Extract
+                            </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-red-500/40 bg-transparent text-red-100"
+                                disabled={!effectiveSelectedScopeId}
+                                onClick={addPaginationStep}
+                            >
+                                + Pagination
+                            </Button>
+                        </div>
+                        <div className="mt-2 text-[11px] text-white/50">
+                            Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'}
+                            {' | '}
+                            Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-white/60">Before Pipeline</div>
+                {currentPhase.before.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-white/20 py-4 text-center text-xs text-white/40">
+                        No before actions
+                    </div>
+                ) : (
+                    currentPhase.before.map((action, index) => renderBeforeAction(action, index))
+                )}
+            </section>
+
+            <section className="space-y-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Core Chain</div>
+                {currentPhase.chain.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-white/20 py-8 text-center text-sm text-white/40">
+                        Add Scope in Step Chooser to start chain
+                    </div>
+                ) : (
+                    currentPhase.chain.map((scope) => renderScopeNode(scope, 0))
+                )}
+            </section>
+        </div>
+    );
+
     return (
         <aside className="flex h-full w-full flex-col overflow-hidden border-l border-white/10 bg-black/30 backdrop-blur-sm">
             <div className="border-b border-white/10 p-4">
@@ -1629,140 +1896,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                     <TabsContent value="discovery" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
                         <div className="min-h-0 flex-1 overflow-auto p-4">
-                            <div className="space-y-4">
-                                <section className="rounded-lg border border-white/10 bg-white/5 p-3">
-                                    <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
-                                    <div className="space-y-3">
-                                        <div className="rounded-lg border border-white/10 bg-black/30 p-2">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
-                                                <Clock3 className="h-3.5 w-3.5" />
-                                                Before
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <Select value={beforeToAdd} onValueChange={(value) => setBeforeToAdd(value as BeforeAction['type'])}>
-                                                    <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {BEFORE_STEP_TYPES.map((item) => (
-                                                            <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button type="button" size="sm" onClick={addBeforeAction} className="h-8">
-                                                    <Plus className="mr-1 h-3.5 w-3.5" />
-                                                    Add
-                                                </Button>
-                                            </div>
-                                        </div>
-
-                                        {playwrightEnabled && (
-                                            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2">
-                                                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-purple-200">
-                                                    <Bot className="h-3.5 w-3.5" />
-                                                    Playwright
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <Select value={playwrightToAdd} onValueChange={(value) => setPlaywrightToAdd(value as PlaywrightAction['type'])}>
-                                                        <SelectTrigger className="h-8 border-purple-500/20 bg-black/30 text-xs text-white">
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {PLAYWRIGHT_STEP_TYPES.map((item) => (
-                                                                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                    <Button type="button" size="sm" onClick={addPlaywrightAction} className="h-8">
-                                                        <Plus className="mr-1 h-3.5 w-3.5" />
-                                                        Add
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
-                                                <FolderTree className="h-3.5 w-3.5" />
-                                                Core
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <Button type="button" size="sm" variant="outline" className="h-8 border-cyan-500/40 bg-transparent text-cyan-100" onClick={addScopeStep}>
-                                                    + Scope
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-amber-500/40 bg-transparent text-amber-100"
-                                                    disabled={!effectiveSelectedScopeId}
-                                                    onClick={addRepeaterStep}
-                                                >
-                                                    + Repeater
-                                                </Button>
-                                                <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={setSelectedRepeaterId}>
-                                                    <SelectTrigger className="h-8 border-green-500/40 bg-black/30 text-xs text-white">
-                                                        <SelectValue placeholder="Field target repeater" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {repeaterRefs.map((item) => (
-                                                            <SelectItem key={item.repeaterId} value={item.repeaterId}>
-                                                                {item.scopeLabel} {'->'} {item.repeaterLabel}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-green-500/40 bg-transparent text-green-100"
-                                                    disabled={!effectiveSelectedRepeaterId}
-                                                    onClick={addFieldStep}
-                                                >
-                                                    + Field
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-red-500/40 bg-transparent text-red-100"
-                                                    disabled={!effectiveSelectedScopeId}
-                                                    onClick={addPaginationStep}
-                                                >
-                                                    + Pagination
-                                                </Button>
-                                            </div>
-                                            <div className="mt-2 text-[11px] text-white/50">
-                                                Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'} | Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wider text-white/60">Before Steps</div>
-                                    {currentPhase.before_actions.map((action, index) => renderBeforeAction(action, index))}
-                                </section>
-
-                                {playwrightEnabled && (
-                                    <section className="space-y-2 rounded-lg border border-purple-500/30 bg-purple-500/5 p-3">
-                                        <div className="text-xs font-semibold uppercase tracking-wider text-purple-200">Playwright Steps</div>
-                                        {currentPhase.playwright_actions.map((action, index) => renderPlaywrightAction(action, index))}
-                                    </section>
-                                )}
-
-                                <section className="space-y-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Core Chain</div>
-                                    {currentPhase.chain.length === 0 ? (
-                                        <div className="rounded-lg border border-dashed border-white/20 py-8 text-center text-sm text-white/40">
-                                            Add Scope in Step Chooser to start chain
-                                        </div>
-                                    ) : (
-                                        currentPhase.chain.map((scope) => renderScopeNode(scope, 0))
-                                    )}
-                                </section>
-                            </div>
+                            {renderPhaseEditor()}
                         </div>
                     </TabsContent>
 
@@ -1825,140 +1959,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         </div>
 
                         <div className="min-h-0 flex-1 overflow-auto p-4">
-                            <div className="space-y-4">
-                                <section className="rounded-lg border border-white/10 bg-white/5 p-3">
-                                    <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
-                                    <div className="space-y-3">
-                                        <div className="rounded-lg border border-white/10 bg-black/30 p-2">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
-                                                <Clock3 className="h-3.5 w-3.5" />
-                                                Before
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <Select value={beforeToAdd} onValueChange={(value) => setBeforeToAdd(value as BeforeAction['type'])}>
-                                                    <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {BEFORE_STEP_TYPES.map((item) => (
-                                                            <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button type="button" size="sm" onClick={addBeforeAction} className="h-8">
-                                                    <Plus className="mr-1 h-3.5 w-3.5" />
-                                                    Add
-                                                </Button>
-                                            </div>
-                                        </div>
-
-                                        {playwrightEnabled && (
-                                            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2">
-                                                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-purple-200">
-                                                    <Bot className="h-3.5 w-3.5" />
-                                                    Playwright
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <Select value={playwrightToAdd} onValueChange={(value) => setPlaywrightToAdd(value as PlaywrightAction['type'])}>
-                                                        <SelectTrigger className="h-8 border-purple-500/20 bg-black/30 text-xs text-white">
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {PLAYWRIGHT_STEP_TYPES.map((item) => (
-                                                                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                    <Button type="button" size="sm" onClick={addPlaywrightAction} className="h-8">
-                                                        <Plus className="mr-1 h-3.5 w-3.5" />
-                                                        Add
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
-                                                <FolderTree className="h-3.5 w-3.5" />
-                                                Core
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <Button type="button" size="sm" variant="outline" className="h-8 border-cyan-500/40 bg-transparent text-cyan-100" onClick={addScopeStep}>
-                                                    + Scope
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-amber-500/40 bg-transparent text-amber-100"
-                                                    disabled={!effectiveSelectedScopeId}
-                                                    onClick={addRepeaterStep}
-                                                >
-                                                    + Repeater
-                                                </Button>
-                                                <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={setSelectedRepeaterId}>
-                                                    <SelectTrigger className="h-8 border-green-500/40 bg-black/30 text-xs text-white">
-                                                        <SelectValue placeholder="Field target repeater" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {repeaterRefs.map((item) => (
-                                                            <SelectItem key={item.repeaterId} value={item.repeaterId}>
-                                                                {item.scopeLabel} {'->'} {item.repeaterLabel}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-green-500/40 bg-transparent text-green-100"
-                                                    disabled={!effectiveSelectedRepeaterId}
-                                                    onClick={addFieldStep}
-                                                >
-                                                    + Field
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 border-red-500/40 bg-transparent text-red-100"
-                                                    disabled={!effectiveSelectedScopeId}
-                                                    onClick={addPaginationStep}
-                                                >
-                                                    + Pagination
-                                                </Button>
-                                            </div>
-                                            <div className="mt-2 text-[11px] text-white/50">
-                                                Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'} | Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wider text-white/60">Before Steps</div>
-                                    {currentPhase.before_actions.map((action, index) => renderBeforeAction(action, index))}
-                                </section>
-
-                                {playwrightEnabled && (
-                                    <section className="space-y-2 rounded-lg border border-purple-500/30 bg-purple-500/5 p-3">
-                                        <div className="text-xs font-semibold uppercase tracking-wider text-purple-200">Playwright Steps</div>
-                                        {currentPhase.playwright_actions.map((action, index) => renderPlaywrightAction(action, index))}
-                                    </section>
-                                )}
-
-                                <section className="space-y-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Core Chain</div>
-                                    {currentPhase.chain.length === 0 ? (
-                                        <div className="rounded-lg border border-dashed border-white/20 py-8 text-center text-sm text-white/40">
-                                            Add Scope in Step Chooser to start chain
-                                        </div>
-                                    ) : (
-                                        currentPhase.chain.map((scope) => renderScopeNode(scope, 0))
-                                    )}
-                                </section>
-                            </div>
+                            {renderPhaseEditor()}
                         </div>
                     </TabsContent>
                 </Tabs>

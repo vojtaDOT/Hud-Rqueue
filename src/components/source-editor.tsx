@@ -6,8 +6,8 @@ import { ChevronRight, Globe, Loader2, Search } from 'lucide-react';
 
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
-import { generateWorkerRuntimeConfig } from '@/lib/crawler-export';
-import { ElementSelector, PageType, PhaseConfig, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
+import { generateUnifiedCrawlParams, hasPlaywrightBeforeAction } from '@/lib/crawler-export';
+import { BeforeAction, ElementSelector, PhaseConfig, RepeaterStep, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
 import {
     ResizableHandle,
     ResizablePanel,
@@ -51,8 +51,23 @@ function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
     return output;
 }
 
-function getPhaseFields(phase: PhaseConfig) {
-    return flattenScopes(phase.chain).flatMap((scope) => scope.repeater?.fields ?? []);
+function getPhaseSteps(phase: PhaseConfig): RepeaterStep[] {
+    return flattenScopes(phase.chain).flatMap((scope) => scope.repeater?.steps ?? []);
+}
+
+function hasSelectorAction(action: BeforeAction): action is
+    | { type: 'remove_element'; css_selector: string }
+    | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
+    | { type: 'click'; css_selector: string; wait_after_ms?: number }
+    | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
+    | { type: 'select_option'; css_selector: string; value: string } {
+    return (
+        action.type === 'remove_element'
+        || action.type === 'wait_selector'
+        || action.type === 'click'
+        || action.type === 'fill'
+        || action.type === 'select_option'
+    );
 }
 
 function validateWorkflow(workflow: ScrapingWorkflow): string | null {
@@ -60,16 +75,29 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
         return 'Musí existovat alespoň jeden URL Type.';
     }
 
-    const sourceUrlFields = getPhaseFields(workflow.discovery).filter(
-        (field) => field.is_source_url && field.css_selector.trim().length > 0,
+    const validUrlTypeIds = new Set(workflow.url_types.map((item) => item.id));
+
+    const sourceUrlSteps = getPhaseSteps(workflow.discovery).filter(
+        (step) => step.type === 'source_url' && step.selector.trim().length > 0,
     );
-    if (sourceUrlFields.length < 1) {
-        return 'Phase 1 musí obsahovat alespoň jedno source_url pole s CSS selektorem.';
+    if (sourceUrlSteps.length < 1) {
+        return 'Phase 1 musí obsahovat alespoň jeden source_url krok s CSS selektorem.';
     }
 
-    const allPhases = [workflow.discovery, ...workflow.url_types.map((item) => item.processing)];
-    for (const phase of allPhases) {
+    const allPhases: Array<{ phaseName: string; phase: PhaseConfig }> = [
+        { phaseName: 'Discovery', phase: workflow.discovery },
+        ...workflow.url_types.map((item) => ({
+            phaseName: `Processing (${item.name})`,
+            phase: item.processing,
+        })),
+    ];
+
+    for (const { phaseName, phase } of allPhases) {
         const scopes = flattenScopes(phase.chain);
+        if (scopes.length > 1) {
+            return `${phaseName} obsahuje více Scope bloků. Aktuální worker export podporuje jednu Scope úroveň na fázi.`;
+        }
+
         for (const scope of scopes) {
             if (!scope.css_selector.trim()) {
                 return 'Každý Scope musí mít CSS selector.';
@@ -80,35 +108,54 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
             if (scope.pagination && !scope.pagination.css_selector.trim()) {
                 return 'Pagination musí mít CSS selector.';
             }
-        }
-
-        for (const field of getPhaseFields(phase)) {
-            if (!field.name.trim() || !field.css_selector.trim() || !field.extract_type) {
-                return 'Každé pole musí mít name, css_selector a extract_type.';
-            }
-            if (field.extract_type === 'attribute' && !(field.attribute_name ?? '').trim()) {
-                return 'Pole s extract_type=attribute musí mít attribute_name.';
+            if (scope.children.length > 0) {
+                return `${phaseName} obsahuje vnořený Scope. Tento export zatím podporuje jen jednu Scope úroveň.`;
             }
         }
 
-        for (const action of phase.before_actions) {
-            if (action.type === 'remove_element' && !action.css_selector.trim()) {
-                return 'Remove Element vyžaduje CSS selector.';
+        const phaseSteps = getPhaseSteps(phase);
+        if (phaseSteps.length < 1) {
+            return `${phaseName} musí obsahovat alespoň jeden krok uvnitř Repeateru.`;
+        }
+
+        for (const step of phaseSteps) {
+            if (step.type === 'source_url') {
+                if (!step.selector.trim()) {
+                    return 'source_url krok vyžaduje selector.';
+                }
+                if (step.extract_type !== 'href') {
+                    return 'source_url krok musí mít extract_type=href.';
+                }
+                if (step.url_type_id && !validUrlTypeIds.has(step.url_type_id)) {
+                    return 'source_url krok odkazuje na neexistující URL Type.';
+                }
+            }
+
+            if (step.type === 'download_file' && !step.url_selector.trim()) {
+                return 'download_file krok vyžaduje url_selector.';
+            }
+
+            if (step.type === 'data_extract') {
+                if (!step.key.trim() || !step.selector.trim()) {
+                    return 'data_extract krok vyžaduje key a selector.';
+                }
+                if (step.extract_type !== 'text' && step.extract_type !== 'href') {
+                    return 'data_extract podporuje jen extract_type text nebo href.';
+                }
             }
         }
 
-        for (const action of phase.playwright_actions) {
-            if (action.type === 'wait_selector' && !action.css_selector.trim()) {
-                return 'Wait for Selector vyžaduje CSS selector.';
+        if (!workflow.playwright_enabled && hasPlaywrightBeforeAction(phase.before)) {
+            return `${phaseName} obsahuje Playwright akce, ale Playwright režim je vypnutý.`;
+        }
+
+        for (const action of phase.before) {
+            if (hasSelectorAction(action) && !action.css_selector.trim()) {
+                return `${phaseName}: akce ${action.type} vyžaduje CSS selector.`;
             }
-            if (action.type === 'click' && !action.css_selector.trim()) {
-                return 'Click vyžaduje CSS selector.';
-            }
-            if (action.type === 'fill' && !action.css_selector.trim()) {
-                return 'Fill Input vyžaduje CSS selector.';
-            }
-            if (action.type === 'select_option' && !action.css_selector.trim()) {
-                return 'Select Dropdown vyžaduje CSS selector.';
+
+            if (action.type === 'evaluate' && !action.script.trim()) {
+                return `${phaseName}: akce evaluate vyžaduje script.`;
             }
         }
     }
@@ -132,7 +179,6 @@ export function SourceEditor() {
     const [submitting, setSubmitting] = useState(false);
     const [simulatorLoading, setSimulatorLoading] = useState(false);
 
-    const [pageType, setPageType] = useState<PageType | null>(null);
     const [workflowData, setWorkflowData] = useState<ScrapingWorkflow | null>(null);
     const [playwrightEnabled, setPlaywrightEnabled] = useState(false);
     const [selectorPreview, setSelectorPreview] = useState<string | null>(null);
@@ -265,17 +311,9 @@ export function SourceEditor() {
             return;
         }
 
-        const effectivePageType: PageType = pageType ?? {
-            isReact: false,
-            isSPA: playwrightEnabled,
-            isSSR: !playwrightEnabled,
-            framework: 'unknown',
-            requiresPlaywright: playwrightEnabled,
-        };
-
         setSubmitting(true);
         try {
-            const crawlParams = generateWorkerRuntimeConfig(workflowToSave, effectivePageType, baseUrl);
+            const crawlParams = generateUnifiedCrawlParams(workflowToSave);
 
             const response = await fetch('/api/sources', {
                 method: 'POST',
@@ -306,7 +344,6 @@ export function SourceEditor() {
             setObec(null);
             setObecSearch('');
             setBaseUrl('');
-            setPageType(null);
             setWorkflowData(null);
             setPlaywrightEnabled(false);
             setSelectorPreview(null);
@@ -456,7 +493,6 @@ export function SourceEditor() {
                             loading={simulatorLoading}
                             onLoad={handleIframeLoad}
                             className="h-full"
-                            onPageTypeDetected={setPageType}
                             onElementSelect={handleElementSelect}
                             onElementRemove={handleElementRemove}
                             playwrightEnabled={playwrightEnabled}

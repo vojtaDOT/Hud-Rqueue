@@ -1,20 +1,25 @@
 // Functions for exporting crawler configuration
 
 import {
+    BeforeAction,
     CrawlerConfig,
     ScrapyConfig,
     PlaywrightConfig,
     CrawlerStep,
     ExtractStep,
-    SelectStep,
-    ClickStep,
     PaginationStep,
     HierarchicalCrawlerConfig,
     HierarchicalStep,
     HierarchicalSource,
     WorkflowData,
-    WorkerRuntimeConfig,
+    PhaseConfig,
+    RepeaterStep,
+    ScopeModule,
     ScrapingWorkflow,
+    UnifiedWorkerBeforeAction,
+    UnifiedWorkerCrawlParams,
+    UnifiedWorkerField,
+    UnifiedWorkerPhase,
 } from './crawler-types';
 
 function getConfigRecord(value: unknown): Record<string, unknown> {
@@ -57,8 +62,6 @@ export function exportToScrapy(config: CrawlerConfig): ScrapyConfig {
 
     // Process steps
     const extractSteps = config.steps.filter(s => s.type === 'extract') as Array<ExtractStep>;
-    const selectSteps = config.steps.filter(s => s.type === 'select') as Array<SelectStep>;
-    const clickSteps = config.steps.filter(s => s.type === 'click') as Array<ClickStep>;
     const paginationSteps = config.steps.filter(s => s.type === 'pagination') as Array<PaginationStep>;
 
     if (extractSteps.length > 0) {
@@ -369,160 +372,147 @@ export function workflowToJSON(
     return exportHierarchicalJSON(config);
 }
 
+const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
+    'wait_selector',
+    'wait_network',
+    'click',
+    'scroll',
+    'fill',
+    'select_option',
+    'evaluate',
+    'screenshot',
+]);
+
+function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
+    const output: ScopeModule[] = [];
+    const walk = (items: ScopeModule[]) => {
+        for (const scope of items) {
+            output.push(scope);
+            walk(scope.children);
+        }
+    };
+    walk(scopes);
+    return output;
+}
+
+function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeAction[] {
+    return before.map((action) => {
+        switch (action.type) {
+            case 'remove_element':
+                return { action: 'remove_element', selector: action.css_selector };
+            case 'wait_timeout':
+                return { action: 'wait_timeout', ms: action.ms };
+            case 'wait_selector':
+                return { action: 'wait_selector', selector: action.css_selector, timeout: action.timeout_ms };
+            case 'wait_network':
+                return { action: 'wait_network', state: action.state };
+            case 'click':
+                return {
+                    action: 'click',
+                    selector: action.css_selector,
+                    wait_after: action.wait_after_ms,
+                };
+            case 'scroll':
+                return { action: 'scroll', count: action.count, delay: action.delay_ms };
+            case 'fill':
+                return {
+                    action: 'fill',
+                    selector: action.css_selector,
+                    value: action.value,
+                    press_enter: action.press_enter,
+                };
+            case 'select_option':
+                return { action: 'select_option', selector: action.css_selector, value: action.value };
+            case 'evaluate':
+                return { action: 'evaluate', script: action.script };
+            case 'screenshot':
+                return { action: 'screenshot', filename: action.filename };
+            default:
+                return { action: 'wait_timeout', ms: 0 };
+        }
+    });
+}
+
+function toWorkerField(step: RepeaterStep): UnifiedWorkerField[] {
+    switch (step.type) {
+        case 'source_url':
+            return [{
+                name: 'source_url',
+                selector: step.selector,
+                type: 'href',
+            }];
+        case 'download_file':
+            return [
+                {
+                    name: 'file_url',
+                    selector: step.url_selector,
+                    type: 'href',
+                },
+                ...(step.filename_selector?.trim()
+                    ? [{
+                        name: 'file_name',
+                        selector: step.filename_selector,
+                        type: 'text' as const,
+                    }]
+                    : []),
+            ];
+        case 'data_extract':
+            return [{
+                name: step.key,
+                selector: step.selector,
+                type: step.extract_type,
+            }];
+        default:
+            return [];
+    }
+}
+
+function toWorkerPhase(phase: PhaseConfig, phaseName: string): UnifiedWorkerPhase {
+    const allScopes = flattenScopes(phase.chain);
+    if (allScopes.length > 1) {
+        throw new Error(`${phaseName} obsahuje více Scope bloků. Aktuální worker export podporuje jen jeden Scope na fázi.`);
+    }
+
+    const scope = allScopes[0] ?? null;
+    const fields = scope?.repeater?.steps.flatMap((step) => toWorkerField(step)) ?? [];
+
+    return {
+        before: toWorkerBeforeActions(phase.before),
+        scope: scope?.css_selector?.trim() || null,
+        repeater: scope?.repeater?.css_selector?.trim() || null,
+        fields,
+        pagination: scope?.pagination
+            ? {
+                selector: scope.pagination.css_selector,
+                max_pages: scope.pagination.max_pages,
+            }
+            : null,
+    };
+}
+
+export function hasPlaywrightBeforeAction(actions: BeforeAction[]): boolean {
+    return actions.some((action) => PLAYWRIGHT_ACTION_TYPES.has(action.type));
+}
+
 /**
- * Generate full worker runtime config from workflow data.
- * Matches the worker-runtime-minimal-template.json structure.
- *
- * - mainLoop blocks → steps.source.workflow (discover source_urls)
- * - sources with their steps → steps.source_urls.workflow (download documents)
+ * Export workflow into worker-compatible unified crawl_params JSON.
+ */
+export function generateUnifiedCrawlParams(workflowData: ScrapingWorkflow): UnifiedWorkerCrawlParams {
+    return {
+        playwright: workflowData.playwright_enabled,
+        discovery: toWorkerPhase(workflowData.discovery, 'Discovery'),
+        processing: workflowData.url_types.map((urlType) => ({
+            url_type: urlType.name.trim() || urlType.id,
+            ...toWorkerPhase(urlType.processing, `Processing (${urlType.name})`),
+        })),
+    };
+}
+
+/**
+ * Backward-compatible alias for previous call sites.
  */
 export function generateWorkerRuntimeConfig(
     workflowData: ScrapingWorkflow,
-    pageType: { requiresPlaywright: boolean; framework: string },
-    baseUrl: string,
-): WorkerRuntimeConfig {
-    const playwrightEnabled = workflowData.playwright_enabled;
-
-    return {
-        schema_version: '1.0',
-        runtime_contract: 'scrapy-worker.runtime.minimal.v1',
-        flow: ['source', 'source_urls'],
-        worker_preconditions: {
-            database: {
-                source_exists: true,
-                source_enabled: true,
-            },
-            download: {
-                source_url_exists: true,
-                source_url_enabled: true,
-            },
-        },
-        steps: {
-            source: {
-                task: 'discover',
-                required_task_fields_after_claim: ['id', 'source_id', 'task'],
-                controller_api_enqueue: {
-                    required_fields: ['source_id', 'task'],
-                    payload_template: {
-                        source_id: '<SOURCE_ID:int>',
-                        task: 'discover',
-                        max_attempts: 3,
-                        idempotency_key: 'discover-<SOURCE_ID>-<YYYY-MM-DD>',
-                    },
-                },
-                redis_enqueue: {
-                    required_fields: ['id', 'source_id', 'task'],
-                    payload_template: {
-                        id: 'discover-<SOURCE_ID>-<UUID>',
-                        source_id: '<SOURCE_ID>',
-                        task: 'discover',
-                        source_url_id: '',
-                        document_id: 'None',
-                        status: 'pending',
-                        attempts: '0',
-                        max_attempts: '3',
-                        created_at: '<ISO8601_UTC>',
-                        error_message: '',
-                        worker: '',
-                        started_at: '',
-                        completed_at: '',
-                        cron_time: '',
-                    },
-                },
-                workflow: {
-                    version: 'scoped_chain.v2.1',
-                    phase: 'discovery',
-                    playwright_enabled: playwrightEnabled,
-                    config: workflowData.discovery,
-                },
-            },
-            source_urls: {
-                task: 'download',
-                required_task_fields_after_claim: ['id', 'source_id', 'source_url_id', 'task'],
-                controller_api_enqueue: {
-                    required_fields: ['source_id', 'source_url_id', 'task'],
-                    payload_template: {
-                        source_id: '<SOURCE_ID:int>',
-                        source_url_id: '<SOURCE_URL_ID:int>',
-                        task: 'download',
-                        max_attempts: 3,
-                        idempotency_key: 'download-<SOURCE_ID>-<SOURCE_URL_ID>-<YYYY-MM-DD>',
-                    },
-                },
-                redis_enqueue: {
-                    required_fields: ['id', 'source_id', 'source_url_id', 'task'],
-                    payload_template: {
-                        id: 'download-<SOURCE_ID>-<SOURCE_URL_ID>-<UUID>',
-                        source_id: '<SOURCE_ID>',
-                        source_url_id: '<SOURCE_URL_ID>',
-                        task: 'download',
-                        document_id: 'None',
-                        status: 'pending',
-                        attempts: '0',
-                        max_attempts: '3',
-                        created_at: '<ISO8601_UTC>',
-                        error_message: '',
-                        worker: '',
-                        started_at: '',
-                        completed_at: '',
-                        cron_time: '',
-                    },
-                },
-                workflow: {
-                    version: 'scoped_chain.v2.1',
-                    phase: 'processing',
-                    playwright_enabled: playwrightEnabled,
-                    url_types: workflowData.url_types,
-                },
-            },
-        },
-        optional_tasks: {
-            ocr: {
-                task: 'ocr',
-                required_task_fields_after_claim: ['id', 'source_id', 'document_id', 'task'],
-                controller_api_enqueue: {
-                    required_fields: ['source_id', 'document_id', 'task'],
-                    payload_template: {
-                        source_id: '<SOURCE_ID:int>',
-                        document_id: '<DOCUMENT_ID:int>',
-                        task: 'ocr',
-                        max_attempts: 3,
-                        idempotency_key: 'ocr-<DOCUMENT_ID>-<YYYY-MM-DD>',
-                    },
-                },
-                redis_enqueue: {
-                    required_fields: ['id', 'source_id', 'document_id', 'task'],
-                    payload_template: {
-                        id: 'ocr-<DOCUMENT_ID>-<UUID>',
-                        source_id: '<SOURCE_ID>',
-                        source_url_id: '',
-                        task: 'ocr',
-                        document_id: '<DOCUMENT_ID>',
-                        status: 'pending',
-                        attempts: '0',
-                        max_attempts: '3',
-                        created_at: '<ISO8601_UTC>',
-                        error_message: '',
-                        worker: '',
-                        started_at: '',
-                        completed_at: '',
-                        cron_time: '',
-                    },
-                },
-                workflow: {
-                    version: 'scoped_chain.v2.1',
-                    phase: 'processing',
-                    playwright_enabled: playwrightEnabled,
-                    url_types: [],
-                },
-            },
-        },
-        metadata: {
-            pageType: playwrightEnabled ? 'playwright' : 'scrapy',
-            framework: pageType.framework || 'unknown',
-            requiresPlaywright: playwrightEnabled,
-            baseUrl,
-            createdAt: new Date().toISOString(),
-        },
-    };
+): UnifiedWorkerCrawlParams {
+    return generateUnifiedCrawlParams(workflowData);
 }

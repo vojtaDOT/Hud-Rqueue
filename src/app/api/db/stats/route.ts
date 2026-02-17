@@ -3,6 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
+type SupabaseClient = ReturnType<typeof createClient>;
+type SqlRow = Record<string, unknown>;
+
 function getSupabase() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -10,23 +13,13 @@ function getSupabase() {
     return createClient(url, key);
 }
 
-async function rpc<T>(supabase: any, sql: string): Promise<T | null> {
-    // Supabase exposes raw SQL via pg_net or rpc; we use the postgres extension
-    // "supabase-js" doesn't support raw SQL out of the box, so we use rpc with a helper function
-    // or the REST endpoint. We'll try the common pattern.
-    const { data, error } = await (supabase as any).rpc('exec_sql', { query: sql }).single();
-    if (error) {
-        // fallback: try via rest / edge function — return null so the caller can skip
-        return null;
-    }
-    return data as T;
-}
-
-async function queryRows(supabase: any, sql: string) {
+async function queryRows(supabase: SupabaseClient, sql: string): Promise<SqlRow[] | null> {
     // Try using supabase.rpc or a raw fetch to the PostgREST RPC endpoint
     // If exec_sql doesn't exist, we fall back to direct pg fetch
-    const { data, error } = await (supabase as any).rpc('exec_sql', { query: sql });
-    if (!error && data) return data;
+    const { data, error } = await supabase.rpc('exec_sql', { query: sql });
+    if (!error && Array.isArray(data)) {
+        return data.filter((row): row is SqlRow => typeof row === 'object' && row !== null);
+    }
 
     // Fallback: use the Supabase Management API or direct postgres connection
     // For now, return null so the frontend shows "unavailable"

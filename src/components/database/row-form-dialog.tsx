@@ -25,14 +25,6 @@ interface RowFormDialogProps {
     onSubmit: (data: Record<string, unknown>) => Promise<void>;
 }
 
-function parseJsonField(value: string): unknown {
-    try {
-        return JSON.parse(value);
-    } catch {
-        return value;
-    }
-}
-
 function stringifyForForm(value: unknown, type: string): string {
     if (value === null || value === undefined) return '';
     if (type === 'jsonb' || type === 'json') {
@@ -77,7 +69,7 @@ export function RowFormDialog({
         });
         setFormData(data);
         setError(null);
-    }, [open, initialData, mode]);
+    }, [open, initialData, mode, columns]);
 
     const handleChange = (col: ColumnSchema, value: string | boolean) => {
         setFormData(prev => ({ ...prev, [col.name]: value }));

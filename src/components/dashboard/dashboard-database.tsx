@@ -94,16 +94,6 @@ interface DbStats {
     cacheHitRatio: number | null;
 }
 
-function Metric({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
-    return (
-        <div>
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-xl font-bold tabular-nums">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-        </div>
-    );
-}
-
 export function DashboardDatabase() {
     const [data, setData] = React.useState<DbStats | null>(null);
     const [loading, setLoading] = React.useState(true);

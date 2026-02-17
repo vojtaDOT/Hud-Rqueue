@@ -4,7 +4,7 @@ import { BlockData } from "../types";
 
 interface SourceConfigProps {
     block: BlockData;
-    onChange: (id: string, newConfig: any) => void;
+    onChange: (id: string, newConfig: NonNullable<BlockData['config']>) => void;
 }
 
 export function SourceConfig({ block, onChange }: SourceConfigProps) {

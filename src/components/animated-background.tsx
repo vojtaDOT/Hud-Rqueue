@@ -2,6 +2,37 @@
 
 import { useEffect, useRef } from 'react';
 
+interface Particle {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    size: number;
+    color: string;
+}
+
+function createParticle(width: number, height: number): Particle {
+    const gray = Math.floor(Math.random() * 50 + 200);
+    return {
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        size: Math.random() * 3 + 1,
+        color: `rgba(${gray}, ${gray}, ${gray}, 0.3)`,
+    };
+}
+
+function updateParticle(particle: Particle, width: number, height: number): Particle {
+    const nextX = particle.x + particle.vx;
+    const nextY = particle.y + particle.vy;
+    return {
+        ...particle,
+        x: nextX < 0 ? width : nextX > width ? 0 : nextX,
+        y: nextY < 0 ? height : nextY > height ? 0 : nextY,
+    };
+}
+
 export function AnimatedBackground() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -17,53 +48,12 @@ export function AnimatedBackground() {
         let width = window.innerWidth;
         let height = window.innerHeight;
 
-        class Particle {
-            x: number;
-            y: number;
-            vx: number;
-            vy: number;
-            size: number;
-            color: string;
-
-            constructor() {
-                this.x = Math.random() * width;
-                this.y = Math.random() * height;
-                this.vx = (Math.random() - 0.5) * 0.5;
-                this.vy = (Math.random() - 0.5) * 0.5;
-                this.size = Math.random() * 3 + 1;
-                // Subtle gray/blue colors
-                const gray = Math.floor(Math.random() * 50 + 200);
-                this.color = `rgba(${gray}, ${gray}, ${gray}, 0.3)`;
-            }
-
-            update() {
-                this.x += this.vx;
-                this.y += this.vy;
-
-                if (this.x < 0) this.x = width;
-                if (this.x > width) this.x = 0;
-                if (this.y < 0) this.y = height;
-                if (this.y > height) this.y = 0;
-            }
-
-            draw() {
-                if (!ctx) return;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-                ctx.fillStyle = this.color;
-                ctx.fill();
-            }
-        }
-
         const init = () => {
             width = window.innerWidth;
             height = window.innerHeight;
             canvas.width = width;
             canvas.height = height;
-            particles = [];
-            for (let i = 0; i < 50; i++) {
-                particles.push(new Particle());
-            }
+            particles = Array.from({ length: 50 }, () => createParticle(width, height));
         };
 
         const animate = () => {
@@ -72,9 +62,13 @@ export function AnimatedBackground() {
 
             // Connect particles
             for (let i = 0; i < particles.length; i++) {
+                particles[i] = updateParticle(particles[i], width, height);
                 const p1 = particles[i];
-                p1.update();
-                p1.draw();
+
+                ctx.beginPath();
+                ctx.arc(p1.x, p1.y, p1.size, 0, Math.PI * 2);
+                ctx.fillStyle = p1.color;
+                ctx.fill();
 
                 for (let j = i + 1; j < particles.length; j++) {
                     const p2 = particles[j];

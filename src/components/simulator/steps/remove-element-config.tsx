@@ -4,7 +4,7 @@ import { BlockData } from "../types";
 
 interface RemoveElementConfigProps {
     block: BlockData;
-    onChange: (id: string, newConfig: any) => void;
+    onChange: (id: string, newConfig: NonNullable<BlockData['config']>) => void;
 }
 
 export function RemoveElementConfig({ block, onChange }: RemoveElementConfigProps) {

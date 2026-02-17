@@ -30,7 +30,6 @@ import {
 } from '@/components/ui/dialog';
 import {
     TABLE_SCHEMAS,
-    TableSchema,
     getTableSchema,
     getVisibleColumns,
     formatCellValue,

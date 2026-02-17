@@ -3,17 +3,20 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-type SupabaseClient = ReturnType<typeof createClient>;
 type SqlRow = Record<string, unknown>;
+type ExecSqlResponse = { data: unknown; error: unknown };
+interface RpcCapableClient {
+    rpc: (fn: string, args?: unknown) => Promise<ExecSqlResponse>;
+}
 
-function getSupabase() {
+function getSupabase(): RpcCapableClient | null {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !key) return null;
-    return createClient(url, key);
+    return createClient(url, key) as unknown as RpcCapableClient;
 }
 
-async function queryRows(supabase: SupabaseClient, sql: string): Promise<SqlRow[] | null> {
+async function queryRows(supabase: RpcCapableClient, sql: string): Promise<SqlRow[] | null> {
     // Try using supabase.rpc or a raw fetch to the PostgREST RPC endpoint
     // If exec_sql doesn't exist, we fall back to direct pg fetch
     const { data, error } = await supabase.rpc('exec_sql', { query: sql });

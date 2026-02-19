@@ -1911,10 +1911,18 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             </div>
                             <div className="space-y-2">
                                 {workflow.url_types.map((urlType) => (
-                                    <button
+                                    <div
                                         key={urlType.id}
-                                        type="button"
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-pressed={activeUrlType.id === urlType.id}
                                         onClick={() => setActiveUrlTypeId(urlType.id)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                setActiveUrlTypeId(urlType.id);
+                                            }
+                                        }}
                                         className={cn(
                                             'w-full rounded-lg border px-3 py-2 text-left transition-colors',
                                             activeUrlType.id === urlType.id
@@ -1953,7 +1961,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                                 )}
                                             </span>
                                         </div>
-                                    </button>
+                                    </div>
                                 ))}
                             </div>
                         </div>

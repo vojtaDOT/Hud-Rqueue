@@ -27,6 +27,11 @@ function stripProblematicThirdPartySnippets(html: string): string {
         );
 }
 
+function stripInlineEventHandlers(html: string): string {
+    // Removed scripts often leave broken inline handlers (onload/onclick...) that throw runtime errors.
+    return html.replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+}
+
 function parseOriginCandidate(value: string | null): string | null {
     if (!value) return null;
     try {
@@ -231,6 +236,7 @@ export async function GET(request: NextRequest) {
         // The Playwright snapshot is already rendered server-side, so client scripts are unnecessary
         // and frequently break preview interaction (consent/chat overlays, frame busting).
         html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        html = stripInlineEventHandlers(html);
 
         // Rewrite iframe src to proxy through our endpoint (fixes cross-origin)
         const renderBaseUrl = `${appOrigin}/api/render?url=`;
@@ -280,27 +286,38 @@ export async function GET(request: NextRequest) {
                 } catch {
                     return match;
                 }
+                // Only proxy same-origin frames. Third-party ad/tracker iframes cause noisy recursive render failures.
+                try {
+                    if (new URL(absoluteSrc).origin !== url.origin) {
+                        return match;
+                    }
+                } catch {
+                    return match;
+                }
                 const proxiedSrc = renderBaseUrl + encodeURIComponent(absoluteSrc);
                 return '<iframe' + before + ' src="' + proxiedSrc + '"' + after + ' data-original-src="' + absoluteSrc + '">';
             }
         );
 
         // Inject selection script with iframe support
+        const safeBaseHref = escapeHtml(url.href);
+        const safeTargetUrl = escapeJsString(targetUrl);
+        const safeAppOrigin = escapeJsString(appOrigin);
         const injectedScript = `
-            <base href="${url.href}">
+            <base href="${safeBaseHref}">
             <script id="playwright-init">
                 window.__PLAYWRIGHT_RENDERED__ = true;
                 window.__FRAME_PATH__ = window.__FRAME_PATH__ || [];
-                window.__ORIGINAL_URL__ = '${targetUrl}';
+                window.__ORIGINAL_URL__ = '${safeTargetUrl}';
                 // Only send loaded message from top frame
                 if (window.__FRAME_PATH__.length === 0) {
-                    window.parent.postMessage({ type: 'playwright-loaded', url: '${targetUrl}' }, '*');
+                    window.parent.postMessage({ type: 'playwright-loaded', url: '${safeTargetUrl}' }, '*');
                 }
             </script>
             <script id="element-selector">
                 (function() {
                     // FRAME_PATH can be updated via postMessage from parent
-                    const APP_ORIGIN = '${appOrigin}';
+                    const APP_ORIGIN = '${safeAppOrigin}';
                     let FRAME_PATH = window.__FRAME_PATH__ || [];
                     let highlightDiv = null;
                     let selectorMatchOverlays = [];

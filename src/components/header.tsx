@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { Menu, X, Home, ListTodo, Database, Globe } from 'lucide-react';
+import { Menu, X, Home, ListTodo, Database, Globe, Workflow } from 'lucide-react';
 
 export function Header() {
     const pathname = usePathname();
@@ -16,6 +16,7 @@ export function Header() {
         { href: '/', label: 'Dashboard', icon: Home },
         { href: '/tasks', label: 'Tasks', icon: ListTodo },
         { href: '/sources', label: 'Sources', icon: Globe },
+        { href: '/pipeline', label: 'Pipeline', icon: Workflow },
         { href: '/database', label: 'Database', icon: Database },
     ];
 

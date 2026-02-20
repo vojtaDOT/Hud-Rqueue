@@ -10,6 +10,7 @@ export interface Source {
     enabled: boolean;
     crawl_strategy: string | null;
     crawl_interval: string | null;
+    last_crawled_at: string | null;
 }
 
 export function useSources() {
@@ -23,7 +24,7 @@ export function useSources() {
         async function fetchSources() {
             const { data, error } = await supabase
                 .from('sources')
-                .select('id, name, base_url, enabled, crawl_strategy, crawl_interval')
+                .select('id, name, base_url, enabled, crawl_strategy, crawl_interval, last_crawled_at')
                 .order('name', { ascending: true });
 
             if (!error && data && mounted) {

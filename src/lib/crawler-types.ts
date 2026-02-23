@@ -312,10 +312,20 @@ export type UnifiedWorkerBeforeAction =
     | { action: 'evaluate'; script: string }
     | { action: 'screenshot'; filename: string };
 
-export interface UnifiedWorkerField {
-    name: string;
+export interface UnifiedWorkerDataItem {
+    key: string;
+    extract: ExtractType;
     selector: string;
-    type: ExtractType;
+}
+
+export interface UnifiedWorkerSourceUrlItem {
+    selector: string;
+    url_type: string;
+}
+
+export interface UnifiedWorkerDownloadItem {
+    url_selector: string;
+    filename_selector: string;
 }
 
 export interface UnifiedWorkerPagination {
@@ -327,7 +337,9 @@ export interface UnifiedWorkerPhase {
     before: UnifiedWorkerBeforeAction[];
     scope: string | null;
     repeater: string | null;
-    fields: UnifiedWorkerField[];
+    data: UnifiedWorkerDataItem[];
+    source_urls: UnifiedWorkerSourceUrlItem[];
+    downloads: UnifiedWorkerDownloadItem[];
     pagination: UnifiedWorkerPagination | null;
 }
 

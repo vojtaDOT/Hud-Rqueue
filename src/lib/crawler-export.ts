@@ -13,13 +13,14 @@ import {
     HierarchicalSource,
     WorkflowData,
     PhaseConfig,
-    RepeaterStep,
     ScopeModule,
     ScrapingWorkflow,
     UnifiedWorkerBeforeAction,
     UnifiedWorkerCrawlParams,
-    UnifiedWorkerField,
+    UnifiedWorkerDataItem,
+    UnifiedWorkerDownloadItem,
     UnifiedWorkerPhase,
+    UnifiedWorkerSourceUrlItem,
 } from './crawler-types';
 
 function getConfigRecord(value: unknown): Record<string, unknown> {
@@ -433,54 +434,70 @@ function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeActio
     });
 }
 
-function toWorkerField(step: RepeaterStep): UnifiedWorkerField[] {
-    switch (step.type) {
-        case 'source_url':
-            return [{
-                name: 'source_url',
-                selector: step.selector,
-                type: 'href',
-            }];
-        case 'download_file':
-            return [
-                {
-                    name: 'file_url',
-                    selector: step.url_selector,
-                    type: 'href',
-                },
-                ...(step.filename_selector?.trim()
-                    ? [{
-                        name: 'file_name',
-                        selector: step.filename_selector,
-                        type: 'text' as const,
-                    }]
-                    : []),
-            ];
-        case 'data_extract':
-            return [{
-                name: step.key,
-                selector: step.selector,
-                type: step.extract_type,
-            }];
-        default:
-            return [];
-    }
+function createUrlTypeNameResolver(urlTypes: ScrapingWorkflow['url_types']): (urlTypeId?: string) => string {
+    const normalizedById = new Map(
+        urlTypes.map((urlType) => [urlType.id, urlType.name.trim() || urlType.id]),
+    );
+    const fallbackUrlTypeName = urlTypes[0]
+        ? (urlTypes[0].name.trim() || urlTypes[0].id)
+        : '';
+
+    return (urlTypeId?: string) => {
+        if (!urlTypeId) {
+            return fallbackUrlTypeName;
+        }
+        return normalizedById.get(urlTypeId) ?? urlTypeId;
+    };
 }
 
-function toWorkerPhase(phase: PhaseConfig, phaseName: string): UnifiedWorkerPhase {
+function toWorkerPhase(
+    phase: PhaseConfig,
+    phaseName: string,
+    resolveUrlTypeName: (urlTypeId?: string) => string,
+): UnifiedWorkerPhase {
     const allScopes = flattenScopes(phase.chain);
     if (allScopes.length > 1) {
         throw new Error(`${phaseName} obsahuje více Scope bloků. Aktuální worker export podporuje jen jeden Scope na fázi.`);
     }
 
     const scope = allScopes[0] ?? null;
-    const fields = scope?.repeater?.steps.flatMap((step) => toWorkerField(step)) ?? [];
+    const data: UnifiedWorkerDataItem[] = [];
+    const source_urls: UnifiedWorkerSourceUrlItem[] = [];
+    const downloads: UnifiedWorkerDownloadItem[] = [];
+
+    for (const step of scope?.repeater?.steps ?? []) {
+        if (step.type === 'data_extract') {
+            data.push({
+                key: step.key,
+                extract: step.extract_type,
+                selector: step.selector,
+            });
+            continue;
+        }
+
+        if (step.type === 'source_url') {
+            source_urls.push({
+                selector: step.selector,
+                url_type: resolveUrlTypeName(step.url_type_id),
+            });
+            continue;
+        }
+
+        if (step.type === 'download_file') {
+            downloads.push({
+                url_selector: step.url_selector,
+                filename_selector: step.filename_selector?.trim() || 'self',
+            });
+        }
+    }
 
     return {
         before: toWorkerBeforeActions(phase.before),
         scope: scope?.css_selector?.trim() || null,
         repeater: scope?.repeater?.css_selector?.trim() || null,
-        fields,
+        data,
+        source_urls,
+        downloads,
         pagination: scope?.pagination
             ? {
                 selector: scope.pagination.css_selector,
@@ -495,15 +512,17 @@ export function hasPlaywrightBeforeAction(actions: BeforeAction[]): boolean {
 }
 
 /**
- * Export workflow into worker-compatible unified crawl_params JSON.
+ * Export workflow into the new worker crawl_params JSON contract.
  */
 export function generateUnifiedCrawlParams(workflowData: ScrapingWorkflow): UnifiedWorkerCrawlParams {
+    const resolveUrlTypeName = createUrlTypeNameResolver(workflowData.url_types);
+
     return {
         playwright: workflowData.playwright_enabled,
-        discovery: toWorkerPhase(workflowData.discovery, 'Discovery'),
+        discovery: toWorkerPhase(workflowData.discovery, 'Discovery', resolveUrlTypeName),
         processing: workflowData.url_types.map((urlType) => ({
             url_type: urlType.name.trim() || urlType.id,
-            ...toWorkerPhase(urlType.processing, `Processing (${urlType.name})`),
+            ...toWorkerPhase(urlType.processing, `Processing (${urlType.name})`, resolveUrlTypeName),
         })),
     };
 }

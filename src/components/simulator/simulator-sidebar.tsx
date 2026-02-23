@@ -6,19 +6,23 @@ import {
     ArrowUp,
     Bot,
     Clock3,
+    Crosshair,
     Download,
+    FileText,
     FolderTree,
     Link2,
     Plus,
     Settings2,
     Trash2,
     Workflow,
+    X,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type {
     BeforeAction,
     DataExtractStep,
+    DocumentUrlStep,
     DownloadFileStep,
     ElementSelector,
     PhaseConfig,
@@ -45,6 +49,15 @@ type PhaseTab = 'discovery' | 'processing';
 type BasicBeforeStepType = 'remove_element' | 'wait_timeout';
 type PlaywrightBeforeStepType = PlaywrightAction['type'];
 type SelectorKey = 'selector' | 'url_selector' | 'filename_selector';
+export type SidebarQuickAction =
+    | 'scope'
+    | 'repeater'
+    | 'source_url'
+    | 'document_url'
+    | 'download_url'
+    | 'filename_selector'
+    | 'pagination'
+    | 'auto_scaffold';
 
 type FocusTarget =
     | { phase: 'discovery'; section: 'before'; index: number }
@@ -81,6 +94,7 @@ export interface SimulatorSidebarRef {
     appendRemoveElementBeforeAction: (selector: string) => void;
     clearAllPlaywrightActions: () => void;
     hasAnyPlaywrightActions: () => boolean;
+    applyQuickAction: (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => void;
 }
 
 const BASIC_BEFORE_STEP_TYPES: Array<{ value: BasicBeforeStepType; label: string }> = [
@@ -200,6 +214,15 @@ function createSourceUrlStep(defaultUrlTypeId?: string): SourceUrlStep {
         selector: '',
         extract_type: 'href',
         url_type_id: defaultUrlTypeId,
+    };
+}
+
+function createDocumentUrlStep(): DocumentUrlStep {
+    return {
+        id: createId('step'),
+        type: 'document_url',
+        selector: '',
+        filename_selector: '',
     };
 }
 
@@ -467,6 +490,59 @@ function normalizeSelectorWithinScope(selector: string, scopeSelector?: string):
     return full;
 }
 
+function describeTarget(target: FocusTarget): string {
+    const phase = target.phase === 'discovery' ? 'Discovery' : 'Processing';
+    if (target.section === 'before') return `${phase} > Before #${target.index + 1}`;
+    if (target.section === 'scope') return `${phase} > Scope`;
+    if (target.section === 'repeater') return `${phase} > Repeater`;
+    if (target.section === 'pagination') return `${phase} > Pagination`;
+    const selectorLabel = target.selectorKey === 'filename_selector'
+        ? 'Filename selector'
+        : target.selectorKey === 'url_selector'
+            ? 'URL selector'
+            : 'Selector';
+    return `${phase} > Step > ${selectorLabel}`;
+}
+
+function ensureScopeAndRepeater(
+    phase: PhaseConfig,
+    preferredScopeId: string | null,
+    preferredRepeaterId: string | null,
+): { phase: PhaseConfig; scopeId: string; repeaterId: string } {
+    let nextPhase = phase;
+    let scopeId = preferredScopeId;
+    let repeaterId = preferredRepeaterId;
+
+    if (!scopeId || !findScopeInTree(nextPhase.chain, scopeId)) {
+        const scope = createScopeModule();
+        nextPhase = { ...nextPhase, chain: [...nextPhase.chain, scope] };
+        scopeId = scope.id;
+        repeaterId = null;
+    }
+
+    const existingScope = findScopeInTree(nextPhase.chain, scopeId);
+    if (!existingScope) {
+        const scope = createScopeModule();
+        nextPhase = { ...nextPhase, chain: [...nextPhase.chain, scope] };
+        scopeId = scope.id;
+        repeaterId = null;
+    } else if (existingScope.repeater) {
+        repeaterId = existingScope.repeater.id;
+    }
+
+    if (!repeaterId || !findScopeForRepeater(nextPhase.chain, repeaterId)) {
+        const repeater = createRepeaterNode();
+        const [chain] = updateScopeInTree(nextPhase.chain, scopeId, (scope) => ({
+            ...scope,
+            repeater,
+        }));
+        nextPhase = { ...nextPhase, chain };
+        repeaterId = repeater.id;
+    }
+
+    return { phase: nextPhase, scopeId, repeaterId };
+}
+
 function isSameTarget(a: FocusTarget | null, b: FocusTarget | null): boolean {
     return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -480,6 +556,11 @@ function firstStepTarget(
         if (repeater) {
             for (const step of repeater.steps) {
                 if (step.type === 'source_url' || step.type === 'data_extract') {
+                    return phaseKey.phase === 'discovery'
+                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'selector' }
+                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'selector' };
+                }
+                if (step.type === 'document_url') {
                     return phaseKey.phase === 'discovery'
                         ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'selector' }
                         : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'selector' };
@@ -508,6 +589,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
     const [selectedRepeaterId, setSelectedRepeaterId] = useState<string | null>(null);
     const [focusedTarget, setFocusedTarget] = useState<FocusTarget | null>(null);
+    const [armedTarget, setArmedTarget] = useState<FocusTarget | null>(null);
     const [beforeToAdd, setBeforeToAdd] = useState<BasicBeforeStepType>('remove_element');
     const [playwrightToAdd, setPlaywrightToAdd] = useState<PlaywrightBeforeStepType>('wait_selector');
 
@@ -579,11 +661,48 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         onSelectorPreviewChange?.(selector.trim() ? selector : null);
     };
 
+    const armSelectorTarget = (target: FocusTarget, selector: string) => {
+        setFocusedTarget(target);
+        setArmedTarget(target);
+        onSelectorPreviewChange?.(selector.trim() ? selector : null);
+    };
+
+    const cancelArmedTarget = useCallback(() => {
+        setArmedTarget(null);
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            if (!armedTarget) return;
+            event.preventDefault();
+            setArmedTarget(null);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [armedTarget]);
+
     const syncPreviewOnChange = (target: FocusTarget, value: string) => {
         if (isSameTarget(target, focusedTarget)) {
             onSelectorPreviewChange?.(value.trim() ? value : null);
         }
     };
+
+    const renderPickButton = (target: FocusTarget, selector: string) => (
+        <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className={cn(
+                'h-8 w-8 border border-white/10',
+                isSameTarget(target, armedTarget) ? 'bg-cyan-500/30 text-cyan-100' : 'text-white/60',
+            )}
+            title="Pick target selector"
+            onClick={() => armSelectorTarget(target, selector)}
+        >
+            <Crosshair className="h-3.5 w-3.5" />
+        </Button>
+    );
 
     const getFallbackTarget = useCallback((): FocusTarget | null => {
         if (effectiveSelectedRepeaterId) {
@@ -646,7 +765,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             const nextSelectorRaw = (elementInfo?.localSelector ?? selector).trim();
             if (!nextSelectorRaw) return false;
 
-            const target = focusedTarget ?? getFallbackTarget();
+            const target = armedTarget ?? focusedTarget ?? getFallbackTarget();
             if (!target) return false;
             if (!focusedTarget) {
                 setFocusedTarget(target);
@@ -697,6 +816,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             if (step.type === 'data_extract' && target.selectorKey === 'selector') {
                                 return { ...step, selector: nextSelector };
                             }
+                            if (step.type === 'document_url') {
+                                if (target.selectorKey === 'selector') {
+                                    return { ...step, selector: nextSelector };
+                                }
+                                if (target.selectorKey === 'filename_selector') {
+                                    return { ...step, filename_selector: nextSelector };
+                                }
+                            }
                             if (step.type === 'download_file') {
                                 if (target.selectorKey === 'url_selector') {
                                     return { ...step, url_selector: nextSelector };
@@ -726,6 +853,9 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             );
 
             onSelectorPreviewChange?.(nextSelectorRaw);
+            if (armedTarget) {
+                setArmedTarget(null);
+            }
             return true;
         },
         appendRemoveElementBeforeAction: (selector: string) => {
@@ -733,6 +863,172 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 ...phase,
                 before: [...phase.before, { type: 'remove_element', css_selector: selector }],
             }));
+        },
+        applyQuickAction: (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => {
+            const nextSelectorRaw = (elementInfo?.localSelector ?? selector).trim();
+            if (!nextSelectorRaw) return;
+
+            if (action === 'scope') {
+                let nextScopeId = effectiveSelectedScopeId;
+                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                    if (!nextScopeId || !findScopeInTree(phase.chain, nextScopeId)) {
+                        const scope = createScopeModule();
+                        nextScopeId = scope.id;
+                        return {
+                            ...phase,
+                            chain: [...phase.chain, { ...scope, css_selector: nextSelectorRaw }],
+                        };
+                    }
+                    const [chain] = updateScopeInTree(phase.chain, nextScopeId, (scope) => ({
+                        ...scope,
+                        css_selector: nextSelectorRaw,
+                    }));
+                    return { ...phase, chain };
+                });
+                if (nextScopeId) {
+                    setSelectedScopeId(nextScopeId);
+                }
+                return;
+            }
+
+            if (action === 'pagination') {
+                let nextScopeId = effectiveSelectedScopeId;
+                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                    if (!nextScopeId || !findScopeInTree(phase.chain, nextScopeId)) {
+                        const scope = createScopeModule();
+                        nextScopeId = scope.id;
+                        return {
+                            ...phase,
+                            chain: [...phase.chain, { ...scope, pagination: { css_selector: nextSelectorRaw, max_pages: 0 } }],
+                        };
+                    }
+                    const [chain] = updateScopeInTree(phase.chain, nextScopeId, (scope) => ({
+                        ...scope,
+                        pagination: {
+                            ...(scope.pagination ?? { css_selector: '', max_pages: 0 }),
+                            css_selector: nextSelectorRaw,
+                        },
+                    }));
+                    return { ...phase, chain };
+                });
+                if (nextScopeId) {
+                    setSelectedScopeId(nextScopeId);
+                }
+                return;
+            }
+
+            if (action === 'repeater' || action === 'auto_scaffold' || action === 'source_url' || action === 'document_url' || action === 'download_url' || action === 'filename_selector') {
+                const phaseKey = (action === 'source_url' || action === 'document_url' || action === 'auto_scaffold')
+                    ? ({ phase: 'discovery' } as const)
+                    : currentPhaseKey;
+                let nextScopeId: string | null = null;
+                let nextRepeaterId: string | null = null;
+
+                updateWorkflowPhase(phaseKey, (phase) => {
+                    const ensured = ensureScopeAndRepeater(phase, effectiveSelectedScopeId, effectiveSelectedRepeaterId);
+                    nextScopeId = ensured.scopeId;
+                    nextRepeaterId = ensured.repeaterId;
+                    let nextPhase = ensured.phase;
+
+                    if (action === 'auto_scaffold') {
+                        const scopeSelector = (elementInfo?.parentSelector ?? nextSelectorRaw).trim();
+                        const [chain] = updateScopeInTree(nextPhase.chain, ensured.scopeId, (scope) => ({
+                            ...scope,
+                            css_selector: scope.css_selector.trim() || scopeSelector,
+                        }));
+                        nextPhase = { ...nextPhase, chain };
+                    }
+
+                    if (action === 'repeater' || action === 'auto_scaffold') {
+                        const scope = findScopeInTree(nextPhase.chain, ensured.scopeId);
+                        const normalizedSelector = normalizeSelectorWithinScope(nextSelectorRaw, scope?.css_selector);
+                        const [chain] = updateRepeaterInTree(nextPhase.chain, ensured.repeaterId, (repeater) => ({
+                            ...repeater,
+                            css_selector: normalizedSelector,
+                        }));
+                        nextPhase = { ...nextPhase, chain };
+                    }
+
+                    if (action === 'source_url' || action === 'auto_scaffold') {
+                        const defaultUrlTypeId = workflow.url_types[0]?.id;
+                        const scope = findScopeInTree(nextPhase.chain, ensured.scopeId);
+                        const normalizedSelector = normalizeSelectorWithinScope(nextSelectorRaw, scope?.css_selector);
+                        const [chain] = updateRepeaterInTree(nextPhase.chain, ensured.repeaterId, (repeater) => {
+                            const hasExisting = repeater.steps.some((step) => step.type === 'source_url' && step.selector.trim() === normalizedSelector);
+                            if (hasExisting) return repeater;
+                            return {
+                                ...repeater,
+                                steps: [
+                                    ...repeater.steps,
+                                    {
+                                        ...createSourceUrlStep(defaultUrlTypeId),
+                                        selector: normalizedSelector,
+                                    },
+                                ],
+                            };
+                        });
+                        nextPhase = { ...nextPhase, chain };
+                    }
+
+                    if (action === 'document_url') {
+                        const scope = findScopeInTree(nextPhase.chain, ensured.scopeId);
+                        const normalizedSelector = normalizeSelectorWithinScope(nextSelectorRaw, scope?.css_selector);
+                        const [chain] = updateRepeaterInTree(nextPhase.chain, ensured.repeaterId, (repeater) => ({
+                            ...repeater,
+                            steps: [
+                                ...repeater.steps,
+                                {
+                                    ...createDocumentUrlStep(),
+                                    selector: normalizedSelector,
+                                },
+                            ],
+                        }));
+                        nextPhase = { ...nextPhase, chain };
+                    }
+
+                    if (action === 'download_url' || action === 'filename_selector') {
+                        const scope = findScopeInTree(nextPhase.chain, ensured.scopeId);
+                        const normalizedSelector = normalizeSelectorWithinScope(nextSelectorRaw, scope?.css_selector);
+                        const [chain] = updateRepeaterInTree(nextPhase.chain, ensured.repeaterId, (repeater) => {
+                            const existingIndex = repeater.steps.findIndex((step) => step.type === 'download_file');
+                            if (existingIndex < 0) {
+                                return {
+                                    ...repeater,
+                                    steps: [
+                                        ...repeater.steps,
+                                        {
+                                            ...createDownloadFileStep(),
+                                            ...(action === 'download_url' ? { url_selector: normalizedSelector } : { filename_selector: normalizedSelector }),
+                                        },
+                                    ],
+                                };
+                            }
+                            return {
+                                ...repeater,
+                                steps: repeater.steps.map((step, index) => {
+                                    if (index !== existingIndex || step.type !== 'download_file') return step;
+                                    return action === 'download_url'
+                                        ? { ...step, url_selector: normalizedSelector }
+                                        : { ...step, filename_selector: normalizedSelector };
+                                }),
+                            };
+                        });
+                        nextPhase = { ...nextPhase, chain };
+                    }
+
+                    return nextPhase;
+                });
+
+                if (phaseKey.phase === 'discovery') {
+                    setActiveTab('discovery');
+                }
+                if (nextScopeId) {
+                    setSelectedScopeId(nextScopeId);
+                }
+                if (nextRepeaterId) {
+                    setSelectedRepeaterId(nextRepeaterId);
+                }
+            }
         },
         clearAllPlaywrightActions: () => {
             setWorkflow((prev) => ({
@@ -756,7 +1052,17 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             }
             return workflow.url_types.some((item) => item.processing.before.some((action) => isPlaywrightBeforeAction(action)));
         },
-    }), [currentPhaseKey, focusedTarget, getFallbackTarget, onSelectorPreviewChange, resolveSelectorForTarget, workflow]);
+    }), [
+        armedTarget,
+        currentPhaseKey,
+        effectiveSelectedRepeaterId,
+        effectiveSelectedScopeId,
+        focusedTarget,
+        getFallbackTarget,
+        onSelectorPreviewChange,
+        resolveSelectorForTarget,
+        workflow,
+    ]);
 
     const addBasicBeforeAction = () => {
         updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -812,6 +1118,18 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
                 ...repeater,
                 steps: [...repeater.steps, sourceUrlStep],
+            }));
+            return { ...phase, chain };
+        });
+    };
+
+    const addDocumentUrlStep = () => {
+        if (!effectiveSelectedRepeaterId || currentPhaseKey.phase !== 'discovery') return;
+        const documentUrlStep = createDocumentUrlStep();
+        updateWorkflowPhase(currentPhaseKey, (phase) => {
+            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
+                ...repeater,
+                steps: [...repeater.steps, documentUrlStep],
             }));
             return { ...phase, chain };
         });
@@ -945,22 +1263,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 </div>
 
                 {action.type === 'remove_element' && (
-                    <Input
-                        value={action.css_selector}
-                        placeholder="CSS selector"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                        onFocus={() => setSelectorFocus(target, action.css_selector)}
-                        onChange={(event) => {
-                            const value = event.target.value;
-                            updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                ...phase,
-                                before: phase.before.map((item, i) => (
-                                    i === index && item.type === 'remove_element' ? { ...item, css_selector: value } : item
-                                )),
-                            }));
-                            syncPreviewOnChange(target, value);
-                        }}
-                    />
+                    <div className="flex items-center gap-1">
+                        <Input
+                            value={action.css_selector}
+                            placeholder="CSS selector"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(target, action.css_selector)}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => ({
+                                    ...phase,
+                                    before: phase.before.map((item, i) => (
+                                        i === index && item.type === 'remove_element' ? { ...item, css_selector: value } : item
+                                    )),
+                                }));
+                                syncPreviewOnChange(target, value);
+                            }}
+                        />
+                        {renderPickButton(target, action.css_selector)}
+                    </div>
                 )}
 
                 {action.type === 'wait_timeout' && (
@@ -983,22 +1304,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {action.type === 'wait_selector' && (
                     <div className="grid grid-cols-2 gap-2">
-                        <Input
-                            value={action.css_selector}
-                            placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(target, action.css_selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                    ...phase,
-                                    before: phase.before.map((item, i) => (
-                                        i === index && item.type === 'wait_selector' ? { ...item, css_selector: value } : item
-                                    )),
-                                }));
-                                syncPreviewOnChange(target, value);
-                            }}
-                        />
+                        <div className="col-span-2 flex items-center gap-1">
+                            <Input
+                                value={action.css_selector}
+                                placeholder="CSS selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(target, action.css_selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => ({
+                                        ...phase,
+                                        before: phase.before.map((item, i) => (
+                                            i === index && item.type === 'wait_selector' ? { ...item, css_selector: value } : item
+                                        )),
+                                    }));
+                                    syncPreviewOnChange(target, value);
+                                }}
+                            />
+                            {renderPickButton(target, action.css_selector)}
+                        </div>
                         <Input
                             type="number"
                             value={action.timeout_ms}
@@ -1044,22 +1368,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {action.type === 'click' && (
                     <div className="grid grid-cols-2 gap-2">
-                        <Input
-                            value={action.css_selector}
-                            placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(target, action.css_selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                    ...phase,
-                                    before: phase.before.map((item, i) => (
-                                        i === index && item.type === 'click' ? { ...item, css_selector: value } : item
-                                    )),
-                                }));
-                                syncPreviewOnChange(target, value);
-                            }}
-                        />
+                        <div className="col-span-2 flex items-center gap-1">
+                            <Input
+                                value={action.css_selector}
+                                placeholder="CSS selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(target, action.css_selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => ({
+                                        ...phase,
+                                        before: phase.before.map((item, i) => (
+                                            i === index && item.type === 'click' ? { ...item, css_selector: value } : item
+                                        )),
+                                    }));
+                                    syncPreviewOnChange(target, value);
+                                }}
+                            />
+                            {renderPickButton(target, action.css_selector)}
+                        </div>
                         <Input
                             type="number"
                             value={action.wait_after_ms ?? 0}
@@ -1115,22 +1442,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {action.type === 'fill' && (
                     <div className="space-y-2">
-                        <Input
-                            value={action.css_selector}
-                            placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(target, action.css_selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                    ...phase,
-                                    before: phase.before.map((item, i) => (
-                                        i === index && item.type === 'fill' ? { ...item, css_selector: value } : item
-                                    )),
-                                }));
-                                syncPreviewOnChange(target, value);
-                            }}
-                        />
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={action.css_selector}
+                                placeholder="CSS selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(target, action.css_selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => ({
+                                        ...phase,
+                                        before: phase.before.map((item, i) => (
+                                            i === index && item.type === 'fill' ? { ...item, css_selector: value } : item
+                                        )),
+                                    }));
+                                    syncPreviewOnChange(target, value);
+                                }}
+                            />
+                            {renderPickButton(target, action.css_selector)}
+                        </div>
                         <Input
                             value={action.value}
                             placeholder="Value"
@@ -1165,22 +1495,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {action.type === 'select_option' && (
                     <div className="grid grid-cols-2 gap-2">
-                        <Input
-                            value={action.css_selector}
-                            placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(target, action.css_selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => ({
-                                    ...phase,
-                                    before: phase.before.map((item, i) => (
-                                        i === index && item.type === 'select_option' ? { ...item, css_selector: value } : item
-                                    )),
-                                }));
-                                syncPreviewOnChange(target, value);
-                            }}
-                        />
+                        <div className="col-span-2 flex items-center gap-1">
+                            <Input
+                                value={action.css_selector}
+                                placeholder="CSS selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(target, action.css_selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => ({
+                                        ...phase,
+                                        before: phase.before.map((item, i) => (
+                                            i === index && item.type === 'select_option' ? { ...item, css_selector: value } : item
+                                        )),
+                                    }));
+                                    syncPreviewOnChange(target, value);
+                                }}
+                            />
+                            {renderPickButton(target, action.css_selector)}
+                        </div>
                         <Input
                             value={action.value}
                             placeholder="Value"
@@ -1249,6 +1582,8 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
         const stepTitle = step.type === 'source_url'
             ? 'Source URL'
+            : step.type === 'document_url'
+                ? 'Document URL'
             : step.type === 'download_file'
                 ? 'Download File'
                 : 'Data Extract';
@@ -1258,6 +1593,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/70">
                         {step.type === 'source_url' && <Link2 className="h-3.5 w-3.5 text-cyan-300" />}
+                        {step.type === 'document_url' && <FileText className="h-3.5 w-3.5 text-sky-300" />}
                         {step.type === 'download_file' && <Download className="h-3.5 w-3.5 text-emerald-300" />}
                         {step.type === 'data_extract' && <FolderTree className="h-3.5 w-3.5 text-green-300" />}
                         <span>{stepTitle}</span>
@@ -1310,22 +1646,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
                 {step.type === 'source_url' && (
                     <div className="space-y-2">
-                        <Input
-                            value={step.selector}
-                            placeholder="Selector for source URL"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
-                                        current.type === 'source_url' ? { ...current, selector: value } : current
-                                    ));
-                                    return { ...phase, chain };
-                                });
-                                syncPreviewOnChange(stepTarget('selector'), value);
-                            }}
-                        />
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.selector}
+                                placeholder="Selector for source URL"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'source_url' ? { ...current, selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('selector'), step.selector)}
+                        </div>
                         <div className="grid grid-cols-2 gap-2">
                             <Input
                                 value="href"
@@ -1359,40 +1698,89 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     </div>
                 )}
 
+                {step.type === 'document_url' && (
+                    <div className="space-y-2">
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.selector}
+                                placeholder="Selector for document URL"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'document_url' ? { ...current, selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('selector'), step.selector)}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.filename_selector ?? ''}
+                                placeholder="Filename selector (optional)"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'document_url' ? { ...current, filename_selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('filename_selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('filename_selector'), step.filename_selector ?? '')}
+                        </div>
+                    </div>
+                )}
+
                 {step.type === 'download_file' && (
                     <div className="space-y-2">
-                        <Input
-                            value={step.url_selector}
-                            placeholder="File URL selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(stepTarget('url_selector'), step.url_selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
-                                        current.type === 'download_file' ? { ...current, url_selector: value } : current
-                                    ));
-                                    return { ...phase, chain };
-                                });
-                                syncPreviewOnChange(stepTarget('url_selector'), value);
-                            }}
-                        />
-                        <Input
-                            value={step.filename_selector ?? ''}
-                            placeholder="Filename selector (optional)"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
-                                        current.type === 'download_file' ? { ...current, filename_selector: value } : current
-                                    ));
-                                    return { ...phase, chain };
-                                });
-                                syncPreviewOnChange(stepTarget('filename_selector'), value);
-                            }}
-                        />
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.url_selector}
+                                placeholder="File URL selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('url_selector'), step.url_selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'download_file' ? { ...current, url_selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('url_selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('url_selector'), step.url_selector)}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.filename_selector ?? ''}
+                                placeholder="Filename selector (optional)"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'download_file' ? { ...current, filename_selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('filename_selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('filename_selector'), step.filename_selector ?? '')}
+                        </div>
                         <Input
                             value={step.file_type_hint ?? ''}
                             placeholder="File type hint (optional)"
@@ -1449,22 +1837,25 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 </SelectContent>
                             </Select>
                         </div>
-                        <Input
-                            value={step.selector}
-                            placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                            onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
-                                        current.type === 'data_extract' ? { ...current, selector: value } : current
-                                    ));
-                                    return { ...phase, chain };
-                                });
-                                syncPreviewOnChange(stepTarget('selector'), value);
-                            }}
-                        />
+                        <div className="flex items-center gap-1">
+                            <Input
+                                value={step.selector}
+                                placeholder="CSS selector"
+                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                            current.type === 'data_extract' ? { ...current, selector: value } : current
+                                        ));
+                                        return { ...phase, chain };
+                                    });
+                                    syncPreviewOnChange(stepTarget('selector'), value);
+                                }}
+                            />
+                            {renderPickButton(stepTarget('selector'), step.selector)}
+                        </div>
                     </div>
                 )}
             </div>
@@ -1512,20 +1903,23 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                    <Input
-                        value={scope.css_selector}
-                        placeholder="Scope selector"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                        onFocus={() => setSelectorFocus(scopeTarget, scope.css_selector)}
-                        onChange={(event) => {
-                            const value = event.target.value;
-                            updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({ ...current, css_selector: value }));
-                                return { ...phase, chain };
-                            });
-                            syncPreviewOnChange(scopeTarget, value);
-                        }}
-                    />
+                    <div className="col-span-2 flex items-center gap-1">
+                        <Input
+                            value={scope.css_selector}
+                            placeholder="Scope selector"
+                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            onFocus={() => setSelectorFocus(scopeTarget, scope.css_selector)}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                    const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({ ...current, css_selector: value }));
+                                    return { ...phase, chain };
+                                });
+                                syncPreviewOnChange(scopeTarget, value);
+                            }}
+                        />
+                        {renderPickButton(scopeTarget, scope.css_selector)}
+                    </div>
                     <Input
                         value={scope.label}
                         placeholder="Scope label"
@@ -1584,23 +1978,26 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             </div>
 
                             <div className="grid grid-cols-2 gap-2">
-                                <Input
-                                    value={repeater.css_selector}
-                                    placeholder="Repeater selector"
-                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                                    onFocus={() => setSelectorFocus(repeaterTarget, repeater.css_selector)}
-                                    onChange={(event) => {
-                                        const value = event.target.value;
-                                        updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                            const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
-                                                ...current,
-                                                css_selector: value,
-                                            }));
-                                            return { ...phase, chain };
-                                        });
-                                        syncPreviewOnChange(repeaterTarget, value);
-                                    }}
-                                />
+                                <div className="col-span-2 flex items-center gap-1">
+                                    <Input
+                                        value={repeater.css_selector}
+                                        placeholder="Repeater selector"
+                                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                        onFocus={() => setSelectorFocus(repeaterTarget, repeater.css_selector)}
+                                        onChange={(event) => {
+                                            const value = event.target.value;
+                                            updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                                const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
+                                                    ...current,
+                                                    css_selector: value,
+                                                }));
+                                                return { ...phase, chain };
+                                            });
+                                            syncPreviewOnChange(repeaterTarget, value);
+                                        }}
+                                    />
+                                    {renderPickButton(repeaterTarget, repeater.css_selector)}
+                                </div>
                                 <Input
                                     value={repeater.label}
                                     placeholder="Repeater label"
@@ -1648,26 +2045,29 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             </Button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                            <Input
-                                value={scope.pagination.css_selector}
-                                placeholder="Next selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
-                                onFocus={() => setSelectorFocus(paginationTarget, scope.pagination?.css_selector ?? '')}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
-                                        const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
-                                            ...current,
-                                            pagination: {
-                                                ...(current.pagination ?? { css_selector: '', max_pages: 0 }),
-                                                css_selector: value,
-                                            },
-                                        }));
-                                        return { ...phase, chain };
-                                    });
-                                    syncPreviewOnChange(paginationTarget, value);
-                                }}
-                            />
+                            <div className="col-span-2 flex items-center gap-1">
+                                <Input
+                                    value={scope.pagination.css_selector}
+                                    placeholder="Next selector"
+                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                    onFocus={() => setSelectorFocus(paginationTarget, scope.pagination?.css_selector ?? '')}
+                                    onChange={(event) => {
+                                        const value = event.target.value;
+                                        updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                            const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
+                                                ...current,
+                                                pagination: {
+                                                    ...(current.pagination ?? { css_selector: '', max_pages: 0 }),
+                                                    css_selector: value,
+                                                },
+                                            }));
+                                            return { ...phase, chain };
+                                        });
+                                        syncPreviewOnChange(paginationTarget, value);
+                                    }}
+                                />
+                                {renderPickButton(paginationTarget, scope.pagination.css_selector)}
+                            </div>
                             <Input
                                 type="number"
                                 value={scope.pagination.max_pages}
@@ -1702,6 +2102,23 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
     const renderPhaseEditor = () => (
         <div className="space-y-4">
+            {armedTarget && (
+                <section className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3">
+                    <div className="flex items-center justify-between gap-2 text-xs text-cyan-100">
+                        <span className="font-semibold">Armed: {describeTarget(armedTarget)}</span>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-cyan-100 hover:bg-cyan-500/20"
+                            onClick={cancelArmedTarget}
+                        >
+                            <X className="mr-1 h-3.5 w-3.5" />
+                            Cancel (Esc)
+                        </Button>
+                    </div>
+                </section>
+            )}
             <section className="rounded-lg border border-white/10 bg-white/5 p-3">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
                 <div className="space-y-3">
@@ -1791,16 +2208,28 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 </SelectContent>
                             </Select>
                             {activeTab === 'discovery' ? (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
-                                    disabled={!effectiveSelectedRepeaterId}
-                                    onClick={addSourceUrlStep}
-                                >
-                                    + Source URL
-                                </Button>
+                                <>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
+                                        disabled={!effectiveSelectedRepeaterId}
+                                        onClick={addSourceUrlStep}
+                                    >
+                                        + Source URL
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 border-sky-500/40 bg-transparent text-sky-100"
+                                        disabled={!effectiveSelectedRepeaterId}
+                                        onClick={addDocumentUrlStep}
+                                    >
+                                        + Document URL
+                                    </Button>
+                                </>
                             ) : (
                                 <Button
                                     type="button"

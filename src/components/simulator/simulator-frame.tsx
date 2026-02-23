@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Loader2, Globe, MousePointer2, X, RefreshCw, Zap, Eraser } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { Loader2, Globe, MousePointer2, X, RefreshCw, Zap, Eraser, Search, ChevronRight, ChevronDown, Sparkles } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { PageType, ElementSelector } from '@/lib/crawler-types';
+import type { SidebarQuickAction } from '@/components/simulator/simulator-sidebar';
 
 interface SimulatorFrameProps {
     url: string;
@@ -14,6 +15,7 @@ interface SimulatorFrameProps {
     onElementSelect?: (selector: string, elementInfo?: ElementSelector) => void;
     onPageTypeDetected?: (pageType: PageType) => void;
     onElementRemove?: (selector: string) => void;
+    onQuickAction?: (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => void;
     playwrightEnabled?: boolean;
     onPlaywrightToggleRequest?: (nextEnabled: boolean) => boolean;
     highlightSelector?: string | null;
@@ -34,6 +36,28 @@ interface ElementInfo {
 
 type RenderMode = 'proxy' | 'playwright' | 'loading';
 
+interface InspectorNode {
+    nodeId: string;
+    parentId: string | null;
+    tag: string;
+    text: string;
+    selector: string;
+    hasChildren: boolean;
+    badges: string[];
+    framePath?: string[];
+    attrs?: {
+        id?: string;
+        className?: string;
+    };
+}
+
+interface SelectorSuggestion {
+    kind: 'stable' | 'scoped' | 'strict';
+    selector: string;
+    score: number;
+    matches: number;
+}
+
 export function SimulatorFrame({
     url,
     onLoad,
@@ -42,6 +66,7 @@ export function SimulatorFrame({
     onElementSelect,
     onPageTypeDetected,
     onElementRemove,
+    onQuickAction,
     playwrightEnabled = false,
     onPlaywrightToggleRequest,
     highlightSelector = null,
@@ -55,10 +80,22 @@ export function SimulatorFrame({
     const [loadError, setLoadError] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
     const [reloadKey, setReloadKey] = useState(0);
+    const [inspectorOpen, setInspectorOpen] = useState(false);
+    const [inspectorWidth, setInspectorWidth] = useState(340);
+    const [inspectorSearch, setInspectorSearch] = useState('');
+    const [inspectorNodes, setInspectorNodes] = useState<InspectorNode[]>([]);
+    const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(() => new Set());
+    const [selectedInspectorNodeId, setSelectedInspectorNodeId] = useState<string | null>(null);
+    const [selectorSuggestions, setSelectorSuggestions] = useState<SelectorSuggestion[]>([]);
 
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const iframeLoadedRef = useRef(false);
+    const resizeStateRef = useRef<{ active: boolean; startX: number; startWidth: number }>({
+        active: false,
+        startX: 0,
+        startWidth: 340,
+    });
 
     const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
     const iframeAttemptKey = `${url}|${renderMode}|${retryCount}|${reloadKey}`;
@@ -109,6 +146,89 @@ export function SimulatorFrame({
         setReloadKey(prev => prev + 1);
         setIframeLoaded(false);
         setLoadError(null);
+        setInspectorNodes([]);
+        setExpandedNodeIds(new Set());
+        setSelectedInspectorNodeId(null);
+        setSelectorSuggestions([]);
+    }, []);
+
+    const mergeInspectorNodes = useCallback((nextNodes: InspectorNode[]) => {
+        if (!nextNodes || nextNodes.length < 1) return;
+        setInspectorNodes((prev) => {
+            const map = new Map(prev.map((node) => [node.nodeId, node]));
+            nextNodes.forEach((node) => {
+                map.set(node.nodeId, node);
+            });
+            return Array.from(map.values());
+        });
+    }, []);
+
+    const requestInspectorInit = useCallback(() => {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'inspector:init' }, '*');
+    }, []);
+
+    const requestInspectorChildren = useCallback((nodeId: string) => {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'inspector:request-children', nodeId }, '*');
+    }, []);
+
+    const requestSelectorSuggestions = useCallback((nodeId: string) => {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'selector:suggestions', nodeId }, '*');
+    }, []);
+
+    const requestInspectorHover = useCallback((selector: string | null) => {
+        if (!iframeRef.current?.contentWindow) return;
+        if (!selector) {
+            iframeRef.current.contentWindow.postMessage({ type: 'inspector:hover', selector: null }, '*');
+            return;
+        }
+        iframeRef.current.contentWindow.postMessage({ type: 'inspector:hover', selector }, '*');
+    }, []);
+
+    const requestInspectorSelect = useCallback((nodeId: string) => {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'inspector:select', nodeId }, '*');
+    }, []);
+
+    const handleQuickActionClick = useCallback((action: SidebarQuickAction) => {
+        if (!selectedElement) return;
+        const selectorInfo: ElementSelector = {
+            selector: selectedElement.selector,
+            localSelector: selectedElement.localSelector,
+            framePath: selectedElement.framePath,
+            inIframe: selectedElement.inIframe,
+            tagName: selectedElement.tagName,
+            textContent: selectedElement.textContent,
+            isList: selectedElement.isList,
+            listItemCount: selectedElement.listItemCount,
+            parentSelector: selectedElement.parentSelector,
+        };
+        onQuickAction?.(action, selectedElement.localSelector ?? selectedElement.selector, selectorInfo);
+    }, [onQuickAction, selectedElement]);
+
+    const handleInspectorResizeStart = useCallback((event: { clientX: number }) => {
+        resizeStateRef.current = {
+            active: true,
+            startX: event.clientX,
+            startWidth: inspectorWidth,
+        };
+    }, [inspectorWidth]);
+
+    useEffect(() => {
+        const onMove = (event: MouseEvent) => {
+            if (!resizeStateRef.current.active) return;
+            const delta = event.clientX - resizeStateRef.current.startX;
+            const nextWidth = Math.max(260, Math.min(600, resizeStateRef.current.startWidth + delta));
+            setInspectorWidth(nextWidth);
+        };
+        const onUp = () => {
+            if (!resizeStateRef.current.active) return;
+            resizeStateRef.current.active = false;
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        return () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
     }, []);
 
 
@@ -182,11 +302,36 @@ export function SimulatorFrame({
                     switchToPlaywright();
                 }
             }
+            else if (event.data.type === 'inspector:children') {
+                const nodes = Array.isArray(event.data.nodes) ? event.data.nodes as InspectorNode[] : [];
+                mergeInspectorNodes(nodes);
+            }
+            else if (event.data.type === 'selector:suggestions') {
+                const nextSuggestions = Array.isArray(event.data.suggestions) ? event.data.suggestions as SelectorSuggestion[] : [];
+                setSelectorSuggestions(nextSuggestions);
+            }
+            else if (event.data.type === 'inspector:select') {
+                const elementInfo = event.data.elementInfo as ElementInfo | undefined;
+                if (!elementInfo) return;
+                setSelectedElement(elementInfo);
+                const selectorInfo: ElementSelector = {
+                    selector: elementInfo.selector,
+                    localSelector: elementInfo.localSelector,
+                    framePath: elementInfo.framePath,
+                    inIframe: elementInfo.inIframe,
+                    tagName: elementInfo.tagName,
+                    textContent: elementInfo.textContent,
+                    isList: elementInfo.isList,
+                    listItemCount: elementInfo.listItemCount,
+                    parentSelector: elementInfo.parentSelector,
+                };
+                onElementSelect?.(elementInfo.selector, selectorInfo);
+            }
         };
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onElementSelect, onPageTypeDetected, renderMode, switchToPlaywright, interactionMode, onElementRemove, onLoad]);
+    }, [interactionMode, mergeInspectorNodes, onElementRemove, onElementSelect, onLoad, onPageTypeDetected, renderMode, switchToPlaywright]);
 
     // Enable/disable selection mode in iframe
     useEffect(() => {
@@ -217,6 +362,10 @@ export function SimulatorFrame({
         setLoadError(null);
         setRenderMode(playwrightEnabled ? 'playwright' : 'proxy');
         setRetryCount(0);
+        setInspectorNodes([]);
+        setExpandedNodeIds(new Set());
+        setSelectedInspectorNodeId(null);
+        setSelectorSuggestions([]);
     }, [playwrightEnabled]);
 
     // Reset state when URL changes
@@ -272,6 +421,11 @@ export function SimulatorFrame({
         iframeRef.current.contentWindow.postMessage({ type: 'clear-highlight-selector' }, '*');
     }, [highlightSelector, iframeLoaded]);
 
+    useEffect(() => {
+        if (!inspectorOpen || !iframeLoaded) return;
+        requestInspectorInit();
+    }, [iframeLoaded, inspectorOpen, requestInspectorInit]);
+
     const handleClearSelection = () => {
         setSelectedElement(null);
     };
@@ -292,6 +446,91 @@ export function SimulatorFrame({
     };
 
     const iframeSrc = getIframeSrc();
+    const nodesById = useMemo(() => new Map(inspectorNodes.map((node) => [node.nodeId, node])), [inspectorNodes]);
+    const childrenByParent = useMemo(() => {
+        const map = new Map<string | null, InspectorNode[]>();
+        inspectorNodes.forEach((node) => {
+            const current = map.get(node.parentId) ?? [];
+            current.push(node);
+            map.set(node.parentId, current);
+        });
+        return map;
+    }, [inspectorNodes]);
+    const selectedInspectorNode = selectedInspectorNodeId ? nodesById.get(selectedInspectorNodeId) ?? null : null;
+    const normalizedSearch = inspectorSearch.trim().toLowerCase();
+
+    const renderInspectorTree = (parentId: string | null, depth = 0): ReactNode[] => {
+        const children = childrenByParent.get(parentId) ?? [];
+        return children.flatMap((node) => {
+            const isExpanded = expandedNodeIds.has(node.nodeId);
+            const descendants = isExpanded ? renderInspectorTree(node.nodeId, depth + 1) : [];
+            const searchable = `${node.tag} ${node.attrs?.id ?? ''} ${node.attrs?.className ?? ''} ${node.text} ${node.selector}`.toLowerCase();
+            const matchesSearch = normalizedSearch.length < 1 || searchable.includes(normalizedSearch);
+            const hasVisibleDescendants = descendants.length > 0;
+            if (!matchesSearch && normalizedSearch.length > 0 && !hasVisibleDescendants) {
+                return [];
+            }
+
+            return [
+                <button
+                    key={node.nodeId}
+                    type="button"
+                    className={cn(
+                        'w-full rounded-md px-2 py-1 text-left text-[11px] hover:bg-white/10',
+                        selectedInspectorNodeId === node.nodeId ? 'bg-cyan-500/20 text-cyan-100' : 'text-white/80',
+                    )}
+                    style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                    onMouseEnter={() => requestInspectorHover(node.selector)}
+                    onMouseLeave={() => requestInspectorHover(null)}
+                    onClick={() => {
+                        setSelectedInspectorNodeId(node.nodeId);
+                        requestInspectorSelect(node.nodeId);
+                        requestSelectorSuggestions(node.nodeId);
+                    }}
+                >
+                    <span className="mr-1 inline-flex items-center align-middle">
+                        {node.hasChildren ? (
+                            <span
+                                className="inline-flex h-4 w-4 items-center justify-center rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setExpandedNodeIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(node.nodeId)) {
+                                            next.delete(node.nodeId);
+                                        } else {
+                                            next.add(node.nodeId);
+                                            requestInspectorChildren(node.nodeId);
+                                        }
+                                        return next;
+                                    });
+                                }}
+                            >
+                                {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            </span>
+                        ) : (
+                            <span className="inline-block h-4 w-4" />
+                        )}
+                    </span>
+                    <span className="font-mono text-cyan-200">{node.tag}</span>
+                    {node.attrs?.id && <span className="ml-1 text-purple-200">#{node.attrs.id}</span>}
+                    {node.attrs?.className && <span className="ml-1 text-white/50">.{node.attrs.className}</span>}
+                    {node.text && <span className="ml-2 text-white/60">{node.text}</span>}
+                    {node.badges.length > 0 && (
+                        <span className="ml-2 inline-flex gap-1">
+                            {node.badges.slice(0, 3).map((badge) => (
+                                <span key={`${node.nodeId}-${badge}`} className="rounded bg-white/10 px-1 py-0.5 text-[10px] uppercase tracking-wide">
+                                    {badge}
+                                </span>
+                            ))}
+                        </span>
+                    )}
+                </button>,
+                ...descendants,
+            ];
+        });
+    };
 
 
     return (
@@ -323,6 +562,24 @@ export function SimulatorFrame({
                     >
                         <Eraser className="w-3.5 h-3.5" />
                         {interactionMode === 'remove' ? 'Odebrat element' : 'Odebrat'}
+                    </button>
+                </div>
+
+                <div className={cn(
+                    "px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center gap-1 transition-all",
+                    inspectorOpen ? "bg-cyan-500/20 border-cyan-500/50" : "hover:bg-black/70",
+                )}>
+                    <button
+                        onClick={() => {
+                            setInspectorOpen((prev) => !prev);
+                            if (!inspectorOpen) {
+                                requestInspectorInit();
+                            }
+                        }}
+                        className={cn("text-xs font-medium flex items-center gap-1.5", inspectorOpen ? "text-cyan-200" : "text-white/70")}
+                    >
+                        <Search className="w-3.5 h-3.5" />
+                        Lupa
                     </button>
                 </div>
 
@@ -425,11 +682,105 @@ export function SimulatorFrame({
                             </div>
                         )}
                     </div>
+                    <div className="mt-3 grid grid-cols-2 gap-1">
+                        <button className="rounded bg-white/10 px-2 py-1 text-[11px] text-white/80 hover:bg-white/20" onClick={() => handleQuickActionClick('scope')}>Pouzit jako Scope</button>
+                        <button className="rounded bg-white/10 px-2 py-1 text-[11px] text-white/80 hover:bg-white/20" onClick={() => handleQuickActionClick('repeater')}>Pouzit jako Repeater</button>
+                        <button className="rounded bg-cyan-500/20 px-2 py-1 text-[11px] text-cyan-100 hover:bg-cyan-500/30" onClick={() => handleQuickActionClick('source_url')}>Pouzit jako Source URL</button>
+                        <button className="rounded bg-sky-500/20 px-2 py-1 text-[11px] text-sky-100 hover:bg-sky-500/30" onClick={() => handleQuickActionClick('document_url')}>Pouzit jako Document URL</button>
+                        <button className="rounded bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-100 hover:bg-emerald-500/30" onClick={() => handleQuickActionClick('download_url')}>Pouzit jako Download URL</button>
+                        <button className="rounded bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-100 hover:bg-emerald-500/30" onClick={() => handleQuickActionClick('filename_selector')}>Pouzit jako Filename</button>
+                        <button className="rounded bg-red-500/20 px-2 py-1 text-[11px] text-red-100 hover:bg-red-500/30" onClick={() => handleQuickActionClick('pagination')}>Pouzit jako Pagination</button>
+                        <button className="rounded bg-purple-500/20 px-2 py-1 text-[11px] text-purple-100 hover:bg-purple-500/30" onClick={() => handleQuickActionClick('auto_scaffold')}>Auto Scaffold</button>
+                    </div>
                 </div>
             )}
 
             {isValidUrl ? (
                 <div className="relative w-full h-full">
+                    {inspectorOpen && (
+                        <div
+                            className="absolute left-0 top-0 bottom-0 z-20 border-r border-white/10 bg-black/85 backdrop-blur-md"
+                            style={{ width: inspectorWidth }}
+                        >
+                            <div className="border-b border-white/10 p-2">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <div className="text-xs font-semibold uppercase tracking-wide text-cyan-200">DOM Inspector</div>
+                                    <button
+                                        className="text-white/50 hover:text-white"
+                                        onClick={() => setInspectorOpen(false)}
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                                <div className="relative">
+                                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40" />
+                                    <input
+                                        value={inspectorSearch}
+                                        onChange={(event) => setInspectorSearch(event.target.value)}
+                                        placeholder="Hledat tag/text/selector..."
+                                        className="h-8 w-full rounded border border-white/10 bg-black/40 pl-7 pr-2 text-xs text-white placeholder:text-white/40"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex h-[calc(100%-48px)] flex-col">
+                                <div className="min-h-0 flex-1 overflow-auto p-2">
+                                    {renderInspectorTree(null)}
+                                </div>
+                                <div className="border-t border-white/10 p-2">
+                                    <div className="mb-1 text-[10px] uppercase tracking-wide text-white/50">Selector Suggestions</div>
+                                    {selectedInspectorNode ? (
+                                        <div className="space-y-1">
+                                            {(selectorSuggestions.length > 0 ? selectorSuggestions : [{ kind: 'stable', selector: selectedInspectorNode.selector, score: 1, matches: 1 }]).map((item) => (
+                                                <button
+                                                    key={`${item.kind}-${item.selector}`}
+                                                    type="button"
+                                                    className="w-full rounded border border-white/10 bg-black/30 px-2 py-1 text-left hover:bg-white/10"
+                                                    onMouseEnter={() => requestInspectorHover(item.selector)}
+                                                    onMouseLeave={() => requestInspectorHover(null)}
+                                                    onClick={() => {
+                                                        requestInspectorHover(item.selector);
+                                                        onElementSelect?.(item.selector, {
+                                                            selector: item.selector,
+                                                            localSelector: item.selector,
+                                                            framePath: selectedInspectorNode.framePath,
+                                                            inIframe: Boolean(selectedInspectorNode.framePath?.length),
+                                                            tagName: selectedInspectorNode.tag,
+                                                            textContent: selectedInspectorNode.text,
+                                                            isList: selectedInspectorNode.badges.includes('list-item'),
+                                                        });
+                                                    }}
+                                                >
+                                                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                                                        <span className="font-medium text-cyan-200">{item.kind}</span>
+                                                        <span className="text-white/50">{Math.round(item.score * 100)}% / {item.matches}x</span>
+                                                    </div>
+                                                    <div className="truncate font-mono text-[11px] text-white/80">{item.selector}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs text-white/40">Vyber element ve stromu.</div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="mt-2 inline-flex items-center gap-1 rounded bg-purple-500/20 px-2 py-1 text-[11px] text-purple-100 hover:bg-purple-500/30"
+                                        onClick={() => handleQuickActionClick('auto_scaffold')}
+                                        disabled={!selectedElement}
+                                    >
+                                        <Sparkles className="h-3 w-3" />
+                                        Auto Scaffold
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div
+                                className="absolute right-0 top-0 h-full w-1 cursor-col-resize bg-white/10 hover:bg-cyan-500/60"
+                                onMouseDown={handleInspectorResizeStart}
+                            />
+                        </div>
+                    )}
+
                     {/* Page Type Indicator */}
                     {pageType && (
                         <div className="absolute top-4 right-4 z-20 bg-black/90 backdrop-blur-md border border-white/20 rounded-lg px-3 py-2 text-xs">

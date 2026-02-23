@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ChevronRight, Globe, Loader2, Rss, Search } from 'lucide-react';
 
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
-import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
+import { SimulatorSidebar, SimulatorSidebarRef, SidebarQuickAction } from '@/components/simulator/simulator-sidebar';
 import { generateUnifiedCrawlParams, hasPlaywrightBeforeAction } from '@/lib/crawler-export';
 import { BeforeAction, ElementSelector, PhaseConfig, RepeaterStep, ScopeModule, ScrapingWorkflow } from '@/lib/crawler-types';
 import {
@@ -72,9 +72,9 @@ function hasSelectorAction(action: BeforeAction): action is
     );
 }
 
-function validateWorkflow(workflow: ScrapingWorkflow): string | null {
+function validateWorkflow(workflow: ScrapingWorkflow): { error: string | null; warnings: string[] } {
     if (workflow.url_types.length < 1) {
-        return 'Musí existovat alespoň jeden URL Type.';
+        return { error: 'Musí existovat alespoň jeden URL Type.', warnings: [] };
     }
 
     const validUrlTypeIds = new Set(workflow.url_types.map((item) => item.id));
@@ -82,8 +82,11 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
     const sourceUrlSteps = getPhaseSteps(workflow.discovery).filter(
         (step) => step.type === 'source_url' && step.selector.trim().length > 0,
     );
-    if (sourceUrlSteps.length < 1) {
-        return 'Phase 1 musí obsahovat alespoň jeden source_url krok s CSS selektorem.';
+    const documentUrlSteps = getPhaseSteps(workflow.discovery).filter(
+        (step) => step.type === 'document_url' && step.selector.trim().length > 0,
+    );
+    if (sourceUrlSteps.length < 1 && documentUrlSteps.length < 1) {
+        return { error: 'Phase 1 musí obsahovat alespoň jeden source_url nebo document_url krok s CSS selektorem.', warnings: [] };
     }
 
     const allPhases: Array<{ phaseName: string; phase: PhaseConfig }> = [
@@ -93,76 +96,82 @@ function validateWorkflow(workflow: ScrapingWorkflow): string | null {
             phase: item.processing,
         })),
     ];
+    const warnings: string[] = [];
+    const hasDiscoverySourceUrls = sourceUrlSteps.length > 0;
+    const hasProcessingSteps = workflow.url_types.some((item) => getPhaseSteps(item.processing).length > 0);
 
     for (const { phaseName, phase } of allPhases) {
         const scopes = flattenScopes(phase.chain);
-        if (scopes.length > 1) {
-            return `${phaseName} obsahuje více Scope bloků. Aktuální worker export podporuje jednu Scope úroveň na fázi.`;
-        }
 
         for (const scope of scopes) {
             if (!scope.css_selector.trim()) {
-                return 'Každý Scope musí mít CSS selector.';
+                return { error: 'Každý Scope musí mít CSS selector.', warnings };
             }
             if (scope.repeater && !scope.repeater.css_selector.trim()) {
-                return 'Každý Repeater musí mít CSS selector.';
+                return { error: 'Každý Repeater musí mít CSS selector.', warnings };
             }
             if (scope.pagination && !scope.pagination.css_selector.trim()) {
-                return 'Pagination musí mít CSS selector.';
-            }
-            if (scope.children.length > 0) {
-                return `${phaseName} obsahuje vnořený Scope. Tento export zatím podporuje jen jednu Scope úroveň.`;
+                return { error: 'Pagination musí mít CSS selector.', warnings };
             }
         }
 
         const phaseSteps = getPhaseSteps(phase);
-        if (phaseSteps.length < 1) {
-            return `${phaseName} musí obsahovat alespoň jeden krok uvnitř Repeateru.`;
+        const isDiscovery = phaseName === 'Discovery';
+        if (phaseSteps.length < 1 && (isDiscovery || hasDiscoverySourceUrls)) {
+            return { error: `${phaseName} musí obsahovat alespoň jeden krok uvnitř Repeateru.`, warnings };
         }
 
         for (const step of phaseSteps) {
             if (step.type === 'source_url') {
                 if (!step.selector.trim()) {
-                    return 'source_url krok vyžaduje selector.';
+                    return { error: 'source_url krok vyžaduje selector.', warnings };
                 }
                 if (step.extract_type !== 'href') {
-                    return 'source_url krok musí mít extract_type=href.';
+                    return { error: 'source_url krok musí mít extract_type=href.', warnings };
                 }
                 if (step.url_type_id && !validUrlTypeIds.has(step.url_type_id)) {
-                    return 'source_url krok odkazuje na neexistující URL Type.';
+                    return { error: 'source_url krok odkazuje na neexistující URL Type.', warnings };
                 }
             }
 
+            if (step.type === 'document_url' && !step.selector.trim()) {
+                return { error: 'document_url krok vyžaduje selector.', warnings };
+            }
+
             if (step.type === 'download_file' && !step.url_selector.trim()) {
-                return 'download_file krok vyžaduje url_selector.';
+                return { error: 'download_file krok vyžaduje url_selector.', warnings };
             }
 
             if (step.type === 'data_extract') {
                 if (!step.key.trim() || !step.selector.trim()) {
-                    return 'data_extract krok vyžaduje key a selector.';
+                    return { error: 'data_extract krok vyžaduje key a selector.', warnings };
                 }
                 if (step.extract_type !== 'text' && step.extract_type !== 'href') {
-                    return 'data_extract podporuje jen extract_type text nebo href.';
+                    return { error: 'data_extract podporuje jen extract_type text nebo href.', warnings };
                 }
             }
         }
 
         if (!workflow.playwright_enabled && hasPlaywrightBeforeAction(phase.before)) {
-            return `${phaseName} obsahuje Playwright akce, ale Playwright režim je vypnutý.`;
+            return { error: `${phaseName} obsahuje Playwright akce, ale Playwright režim je vypnutý.`, warnings };
         }
 
         for (const action of phase.before) {
             if (hasSelectorAction(action) && !action.css_selector.trim()) {
-                return `${phaseName}: akce ${action.type} vyžaduje CSS selector.`;
+                return { error: `${phaseName}: akce ${action.type} vyžaduje CSS selector.`, warnings };
             }
 
             if (action.type === 'evaluate' && !action.script.trim()) {
-                return `${phaseName}: akce evaluate vyžaduje script.`;
+                return { error: `${phaseName}: akce evaluate vyžaduje script.`, warnings };
             }
         }
     }
 
-    return null;
+    if (!hasDiscoverySourceUrls && hasProcessingSteps) {
+        warnings.push('Phase 2 je vyplněná, ale Discovery neobsahuje source_url. Processing se nepoužije.');
+    }
+
+    return { error: null, warnings };
 }
 
 export function SourceEditor() {
@@ -278,6 +287,11 @@ export function SourceEditor() {
         toast.success('Přidán Before step: Remove Element.');
     };
 
+    const handleQuickAction = (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => {
+        sidebarRef.current?.applyQuickAction(action, selector, elementInfo);
+        toast.success('Workflow aktualizován z preview inspektoru.');
+    };
+
     const handlePlaywrightToggleRequest = (nextEnabled: boolean) => {
         if (crawlStrategy === 'rss' && nextEnabled) {
             toast.info('Playwright není pro RSS feed potřeba.');
@@ -373,11 +387,12 @@ export function SourceEditor() {
                 playwright_enabled: playwrightEnabled,
             };
 
-            const validationError = validateWorkflow(workflowToSave);
+            const { error: validationError, warnings } = validateWorkflow(workflowToSave);
             if (validationError) {
                 toast.error(validationError);
                 return;
             }
+            warnings.forEach((warning) => toast.warning(warning));
 
             crawlParams = generateUnifiedCrawlParams(workflowToSave);
         }
@@ -626,6 +641,7 @@ export function SourceEditor() {
                             className="h-full"
                             onElementSelect={handleElementSelect}
                             onElementRemove={handleElementRemove}
+                            onQuickAction={handleQuickAction}
                             playwrightEnabled={playwrightEnabled}
                             onPlaywrightToggleRequest={handlePlaywrightToggleRequest}
                             highlightSelector={selectorPreview}

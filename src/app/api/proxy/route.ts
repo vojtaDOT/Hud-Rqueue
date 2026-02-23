@@ -649,6 +649,141 @@ export async function GET(request: NextRequest) {
                             return { isList: false };
                         }
 
+                        const inspectorNodeMap = new Map();
+
+                        function getInspectorBadges(el) {
+                            const badges = [];
+                            if (el.tagName === 'A' && el.getAttribute('href')) badges.push('link');
+                            if (el.tagName === 'IFRAME') badges.push('iframe');
+                            const parent = el.parentElement;
+                            if (parent) {
+                                const siblings = Array.from(parent.children).filter(function(item) { return item.tagName === el.tagName; });
+                                if (siblings.length >= 2) badges.push('list-item');
+                            }
+                            if (el.tagName === 'A') {
+                                const href = (el.getAttribute('href') || '').toLowerCase();
+                                if (/\\.(pdf|docx?|xlsx?|pptx?|zip)(\\?|#|$)/.test(href)) badges.push('doc-link');
+                            }
+                            return badges;
+                        }
+
+                        function toInspectorNode(el, parentId) {
+                            const selector = getElementSelector(el);
+                            const nodeId = FRAME_PATH.join(' >>> ') + '::' + selector;
+                            inspectorNodeMap.set(nodeId, el);
+                            const cls = typeof el.className === 'string' ? el.className.trim().split(/\\s+/).filter(Boolean)[0] : '';
+                            return {
+                                nodeId: nodeId,
+                                parentId: parentId,
+                                tag: el.tagName.toLowerCase(),
+                                text: (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80),
+                                selector: selector,
+                                hasChildren: el.children.length > 0,
+                                badges: getInspectorBadges(el),
+                                framePath: FRAME_PATH,
+                                attrs: {
+                                    id: el.id || undefined,
+                                    className: cls || undefined,
+                                },
+                            };
+                        }
+
+                        function collectInspectorNodes(root, parentId, depth, maxDepth, sink) {
+                            if (!root || depth > maxDepth) return;
+                            const children = Array.from(root.children).slice(0, 120);
+                            children.forEach(function(child) {
+                                const node = toInspectorNode(child, parentId);
+                                sink.push(node);
+                                if (depth < maxDepth && child.children.length > 0) {
+                                    collectInspectorNodes(child, node.nodeId, depth + 1, maxDepth, sink);
+                                }
+                            });
+                        }
+
+                        function sendInspectorInit() {
+                            const nodes = [];
+                            const root = document.body || document.documentElement;
+                            if (root) {
+                                const rootNode = toInspectorNode(root, null);
+                                nodes.push(rootNode);
+                                collectInspectorNodes(root, rootNode.nodeId, 1, 2, nodes);
+                            }
+                            window.parent.postMessage({ type: 'inspector:children', nodes: nodes }, '*');
+                        }
+
+                        function sendInspectorChildren(nodeId) {
+                            const target = inspectorNodeMap.get(nodeId);
+                            if (!target) return;
+                            const nodes = [];
+                            collectInspectorNodes(target, nodeId, 1, 1, nodes);
+                            window.parent.postMessage({ type: 'inspector:children', nodes: nodes }, '*');
+                        }
+
+                        function getStableSelector(el) {
+                            if (el.id && /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(el.id)) return '#' + el.id;
+                            const attrs = ['data-testid', 'data-qa', 'data-test', 'aria-label', 'name', 'role'];
+                            for (const attr of attrs) {
+                                const value = el.getAttribute(attr);
+                                if (!value) continue;
+                                const escaped = String(value).replace(/"/g, '\\"');
+                                const selector = el.tagName.toLowerCase() + '[' + attr + '="' + escaped + '"]';
+                                try {
+                                    if (document.querySelectorAll(selector).length === 1) return selector;
+                                } catch {}
+                            }
+                            if (el.className && typeof el.className === 'string') {
+                                const classes = el.className.trim().split(/\\s+/).filter(function(cls) {
+                                    if (!cls) return false;
+                                    if (/^[a-f0-9]{6,}$/i.test(cls)) return false;
+                                    if (/^(css-|jsx-)/.test(cls)) return false;
+                                    return /^[a-zA-Z_-][\\w-]*$/.test(cls);
+                                });
+                                if (classes.length > 0) {
+                                    const selector = el.tagName.toLowerCase() + '.' + classes.slice(0, 2).join('.');
+                                    try {
+                                        if (document.querySelectorAll(selector).length === 1) return selector;
+                                    } catch {}
+                                }
+                            }
+                            return el.tagName.toLowerCase();
+                        }
+
+                        function buildSelectorSuggestions(nodeId) {
+                            const el = inspectorNodeMap.get(nodeId);
+                            if (!el) return [];
+
+                            const strictSelector = getElementSelector(el);
+                            const stableSelector = getStableSelector(el);
+                            const parentSelector = el.parentElement ? getStableSelector(el.parentElement) : '';
+                            const scopedSelector = parentSelector ? (parentSelector + ' > ' + el.tagName.toLowerCase()) : stableSelector;
+                            const rawSuggestions = [
+                                { kind: 'stable', selector: stableSelector },
+                                { kind: 'scoped', selector: scopedSelector },
+                                { kind: 'strict', selector: strictSelector },
+                            ];
+
+                            return rawSuggestions.map(function(item) {
+                                let matches = 0;
+                                try {
+                                    matches = document.querySelectorAll(item.selector).length;
+                                } catch {
+                                    matches = 0;
+                                }
+                                const includesNth = item.selector.includes(':nth-');
+                                const score = item.kind === 'strict'
+                                    ? (matches > 0 ? 0.55 : 0.05)
+                                    : includesNth
+                                        ? (matches === 1 ? 0.7 : 0.3)
+                                        : (matches === 1 ? 0.95 : matches > 1 ? 0.6 : 0.1);
+                                return {
+                                    kind: item.kind,
+                                    selector: item.selector,
+                                    score: score,
+                                    matches: matches,
+                                };
+                            });
+                        }
+
                         function getIframeSelector(iframe) {
                             if (iframe.id) return 'iframe#' + iframe.id;
                             if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
@@ -845,6 +980,77 @@ export async function GET(request: NextRequest) {
                             }
                             else if (event.data.type === 'clear-highlight-selector') {
                                 clearSelectorHighlights();
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'inspector:hover') {
+                                if (!event.data.selector) {
+                                    clearSelectorHighlights();
+                                } else {
+                                    highlightSelectorMatches(event.data.selector);
+                                }
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'inspector:children' && event.source !== window) {
+                                window.parent.postMessage(event.data, '*');
+                            }
+                            else if (event.data.type === 'selector:suggestions' && event.source !== window && Array.isArray(event.data.suggestions)) {
+                                window.parent.postMessage(event.data, '*');
+                            }
+                            else if (event.data.type === 'inspector:select' && event.source !== window && event.data.elementInfo) {
+                                window.parent.postMessage(event.data, '*');
+                            }
+                            else if (event.data.type === 'inspector:init') {
+                                sendInspectorInit();
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'inspector:request-children') {
+                                sendInspectorChildren(event.data.nodeId);
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'selector:suggestions') {
+                                const suggestions = buildSelectorSuggestions(event.data.nodeId);
+                                window.parent.postMessage({
+                                    type: 'selector:suggestions',
+                                    nodeId: event.data.nodeId,
+                                    suggestions: suggestions,
+                                }, '*');
+                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
+                                });
+                            }
+                            else if (event.data.type === 'inspector:select') {
+                                const element = inspectorNodeMap.get(event.data.nodeId);
+                                if (element) {
+                                    const selector = getElementSelector(element);
+                                    const listInfo = detectListPattern(element);
+                                    const localSelector = listInfo.isList ? listInfo.listSelector : selector;
+                                    let fullSelector = localSelector;
+                                    if (FRAME_PATH.length > 0) {
+                                        fullSelector = FRAME_PATH.join(' >>> ') + ' >>> ' + localSelector;
+                                    }
+                                    window.parent.postMessage({
+                                        type: 'inspector:select',
+                                        elementInfo: {
+                                            selector: fullSelector,
+                                            localSelector: localSelector,
+                                            framePath: FRAME_PATH,
+                                            inIframe: FRAME_PATH.length > 0,
+                                            tagName: element.tagName.toLowerCase(),
+                                            textContent: element.textContent?.substring(0, 100) || '',
+                                            isList: listInfo.isList,
+                                            listItemCount: listInfo.count,
+                                            parentSelector: listInfo.isList ? getElementSelector(element.parentElement) : undefined,
+                                        },
+                                    }, '*');
+                                }
                                 document.querySelectorAll('iframe').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });

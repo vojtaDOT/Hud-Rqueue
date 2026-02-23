@@ -37,3 +37,4 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+SCRAPY_WORKER_V2_AGENT.md

@@ -249,6 +249,13 @@ export interface SourceUrlStep {
     url_type_id?: string;
 }
 
+export interface DocumentUrlStep {
+    id: string;
+    type: 'document_url';
+    selector: string;
+    filename_selector?: string;
+}
+
 export interface DownloadFileStep {
     id: string;
     type: 'download_file';
@@ -265,7 +272,7 @@ export interface DataExtractStep {
     extract_type: ExtractType;
 }
 
-export type RepeaterStep = SourceUrlStep | DownloadFileStep | DataExtractStep;
+export type RepeaterStep = SourceUrlStep | DocumentUrlStep | DownloadFileStep | DataExtractStep;
 
 export interface RepeaterNode {
     id: string;
@@ -313,42 +320,67 @@ export type UnifiedWorkerBeforeAction =
     | { action: 'screenshot'; filename: string };
 
 export interface UnifiedWorkerDataItem {
+    type: 'data_extract';
     key: string;
     extract: ExtractType;
     selector: string;
 }
 
-export interface UnifiedWorkerSourceUrlItem {
+export interface UnifiedWorkerSourceUrlStepV2 {
+    type: 'source_url';
     selector: string;
     url_type: string;
 }
 
-export interface UnifiedWorkerDownloadItem {
+export interface UnifiedWorkerDocumentUrlStepV2 {
+    type: 'document_url';
+    selector: string;
+    filename_selector: string;
+}
+
+export interface UnifiedWorkerDownloadFileStepV2 {
+    type: 'download_file';
     url_selector: string;
     filename_selector: string;
 }
 
-export interface UnifiedWorkerPagination {
+export type UnifiedWorkerRepeaterStepV2 =
+    | UnifiedWorkerSourceUrlStepV2
+    | UnifiedWorkerDocumentUrlStepV2
+    | UnifiedWorkerDownloadFileStepV2
+    | UnifiedWorkerDataItem;
+
+export interface UnifiedWorkerPaginationV2 {
     selector: string;
     max_pages: number;
 }
 
-export interface UnifiedWorkerPhase {
-    before: UnifiedWorkerBeforeAction[];
-    scope: string | null;
-    repeater: string | null;
-    data: UnifiedWorkerDataItem[];
-    source_urls: UnifiedWorkerSourceUrlItem[];
-    downloads: UnifiedWorkerDownloadItem[];
-    pagination: UnifiedWorkerPagination | null;
+export interface UnifiedWorkerRepeaterNodeV2 {
+    selector: string;
+    label: string;
+    steps: UnifiedWorkerRepeaterStepV2[];
 }
 
-export interface UnifiedWorkerProcessingPhase extends UnifiedWorkerPhase {
+export interface UnifiedWorkerScopeNodeV2 {
+    selector: string;
+    label: string;
+    repeater: UnifiedWorkerRepeaterNodeV2 | null;
+    pagination: UnifiedWorkerPaginationV2 | null;
+    children: UnifiedWorkerScopeNodeV2[];
+}
+
+export interface UnifiedWorkerPhaseV2 {
+    before: UnifiedWorkerBeforeAction[];
+    chain: UnifiedWorkerScopeNodeV2[];
+}
+
+export interface UnifiedWorkerProcessingPhaseV2 extends UnifiedWorkerPhaseV2 {
     url_type: string;
 }
 
 export interface UnifiedWorkerCrawlParams {
+    schema_version: 2;
     playwright: boolean;
-    discovery: UnifiedWorkerPhase;
-    processing: UnifiedWorkerProcessingPhase[];
+    discovery: UnifiedWorkerPhaseV2;
+    processing: UnifiedWorkerProcessingPhaseV2[];
 }

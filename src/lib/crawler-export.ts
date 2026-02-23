@@ -14,13 +14,13 @@ import {
     WorkflowData,
     PhaseConfig,
     ScopeModule,
+    RepeaterStep,
     ScrapingWorkflow,
     UnifiedWorkerBeforeAction,
     UnifiedWorkerCrawlParams,
-    UnifiedWorkerDataItem,
-    UnifiedWorkerDownloadItem,
-    UnifiedWorkerPhase,
-    UnifiedWorkerSourceUrlItem,
+    UnifiedWorkerPhaseV2,
+    UnifiedWorkerScopeNodeV2,
+    UnifiedWorkerRepeaterStepV2,
 } from './crawler-types';
 
 function getConfigRecord(value: unknown): Record<string, unknown> {
@@ -384,18 +384,6 @@ const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
     'screenshot',
 ]);
 
-function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
-    const output: ScopeModule[] = [];
-    const walk = (items: ScopeModule[]) => {
-        for (const scope of items) {
-            output.push(scope);
-            walk(scope.children);
-        }
-    };
-    walk(scopes);
-    return output;
-}
-
 function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeAction[] {
     return before.map((action) => {
         switch (action.type) {
@@ -434,6 +422,66 @@ function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeActio
     });
 }
 
+function toWorkerRepeaterStep(
+    step: RepeaterStep,
+    resolveUrlTypeName: (urlTypeId?: string) => string,
+): UnifiedWorkerRepeaterStepV2 {
+    if (step.type === 'source_url') {
+        return {
+            type: 'source_url',
+            selector: step.selector,
+            url_type: resolveUrlTypeName(step.url_type_id),
+        };
+    }
+
+    if (step.type === 'document_url') {
+        return {
+            type: 'document_url',
+            selector: step.selector,
+            filename_selector: step.filename_selector?.trim() || 'self',
+        };
+    }
+
+    if (step.type === 'download_file') {
+        return {
+            type: 'download_file',
+            url_selector: step.url_selector,
+            filename_selector: step.filename_selector?.trim() || 'self',
+        };
+    }
+
+    return {
+        type: 'data_extract',
+        key: step.key,
+        extract: step.extract_type,
+        selector: step.selector,
+    };
+}
+
+function toWorkerScopeChain(
+    scopes: ScopeModule[],
+    resolveUrlTypeName: (urlTypeId?: string) => string,
+): UnifiedWorkerScopeNodeV2[] {
+    return scopes.map((scope) => ({
+        selector: scope.css_selector.trim(),
+        label: scope.label.trim(),
+        repeater: scope.repeater
+            ? {
+                selector: scope.repeater.css_selector.trim(),
+                label: scope.repeater.label.trim(),
+                steps: scope.repeater.steps.map((step) => toWorkerRepeaterStep(step, resolveUrlTypeName)),
+            }
+            : null,
+        pagination: scope.pagination
+            ? {
+                selector: scope.pagination.css_selector,
+                max_pages: scope.pagination.max_pages,
+            }
+            : null,
+        children: toWorkerScopeChain(scope.children, resolveUrlTypeName),
+    }));
+}
+
 function createUrlTypeNameResolver(urlTypes: ScrapingWorkflow['url_types']): (urlTypeId?: string) => string {
     const normalizedById = new Map(
         urlTypes.map((urlType) => [urlType.id, urlType.name.trim() || urlType.id]),
@@ -452,58 +500,11 @@ function createUrlTypeNameResolver(urlTypes: ScrapingWorkflow['url_types']): (ur
 
 function toWorkerPhase(
     phase: PhaseConfig,
-    phaseName: string,
     resolveUrlTypeName: (urlTypeId?: string) => string,
-): UnifiedWorkerPhase {
-    const allScopes = flattenScopes(phase.chain);
-    if (allScopes.length > 1) {
-        throw new Error(`${phaseName} obsahuje více Scope bloků. Aktuální worker export podporuje jen jeden Scope na fázi.`);
-    }
-
-    const scope = allScopes[0] ?? null;
-    const data: UnifiedWorkerDataItem[] = [];
-    const source_urls: UnifiedWorkerSourceUrlItem[] = [];
-    const downloads: UnifiedWorkerDownloadItem[] = [];
-
-    for (const step of scope?.repeater?.steps ?? []) {
-        if (step.type === 'data_extract') {
-            data.push({
-                key: step.key,
-                extract: step.extract_type,
-                selector: step.selector,
-            });
-            continue;
-        }
-
-        if (step.type === 'source_url') {
-            source_urls.push({
-                selector: step.selector,
-                url_type: resolveUrlTypeName(step.url_type_id),
-            });
-            continue;
-        }
-
-        if (step.type === 'download_file') {
-            downloads.push({
-                url_selector: step.url_selector,
-                filename_selector: step.filename_selector?.trim() || 'self',
-            });
-        }
-    }
-
+): UnifiedWorkerPhaseV2 {
     return {
         before: toWorkerBeforeActions(phase.before),
-        scope: scope?.css_selector?.trim() || null,
-        repeater: scope?.repeater?.css_selector?.trim() || null,
-        data,
-        source_urls,
-        downloads,
-        pagination: scope?.pagination
-            ? {
-                selector: scope.pagination.css_selector,
-                max_pages: scope.pagination.max_pages,
-            }
-            : null,
+        chain: toWorkerScopeChain(phase.chain, resolveUrlTypeName),
     };
 }
 
@@ -518,11 +519,12 @@ export function generateUnifiedCrawlParams(workflowData: ScrapingWorkflow): Unif
     const resolveUrlTypeName = createUrlTypeNameResolver(workflowData.url_types);
 
     return {
+        schema_version: 2,
         playwright: workflowData.playwright_enabled,
-        discovery: toWorkerPhase(workflowData.discovery, 'Discovery', resolveUrlTypeName),
+        discovery: toWorkerPhase(workflowData.discovery, resolveUrlTypeName),
         processing: workflowData.url_types.map((urlType) => ({
             url_type: urlType.name.trim() || urlType.id,
-            ...toWorkerPhase(urlType.processing, `Processing (${urlType.name})`, resolveUrlTypeName),
+            ...toWorkerPhase(urlType.processing, resolveUrlTypeName),
         })),
     };
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { redis } from '@/lib/redis';
+import { fromRedisBool } from '@/lib/redis-bool';
 
 const RequestSchema = z.object({
     job_ids: z.array(z.string().min(1)).min(1).max(1000),
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
                         oem: '',
                         min_text_chars: '',
                         ocr_addon: '',
+                        manual: false,
                     };
                 }
 
@@ -75,6 +77,7 @@ export async function POST(request: Request) {
                     oem: data.oem || '',
                     min_text_chars: data.min_text_chars || '',
                     ocr_addon: data.ocr_addon || '',
+                    manual: fromRedisBool(data.manual),
                 };
             }),
         );

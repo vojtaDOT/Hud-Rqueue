@@ -294,13 +294,10 @@ export function SimulatorFrame({
                 setIframeLoaded(true);
                 onLoad?.();
             }
-            // Handle proxy error - switch to Playwright
+            // Handle proxy error without automatic mode switching
             else if (event.data.type === 'proxy-error') {
-                console.log('[SimulatorFrame] Proxy error, switching to Playwright:', event.data.message);
-                setLoadError(event.data.message);
-                if (renderMode === 'proxy') {
-                    switchToPlaywright();
-                }
+                console.log('[SimulatorFrame] Proxy error:', event.data.message);
+                setLoadError(event.data.message ?? 'Proxy načtení selhalo.');
             }
             else if (event.data.type === 'inspector:children') {
                 const nodes = Array.isArray(event.data.nodes) ? event.data.nodes as InspectorNode[] : [];
@@ -331,7 +328,7 @@ export function SimulatorFrame({
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [interactionMode, mergeInspectorNodes, onElementRemove, onElementSelect, onLoad, onPageTypeDetected, renderMode, switchToPlaywright]);
+    }, [interactionMode, mergeInspectorNodes, onElementRemove, onElementSelect, onLoad, onPageTypeDetected]);
 
     // Enable/disable selection mode in iframe
     useEffect(() => {

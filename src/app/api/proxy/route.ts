@@ -83,8 +83,19 @@ function getUserAgentForDomain(domain: string): string {
     return USER_AGENTS[hash % USER_AGENTS.length];
 }
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Helper function to return HTML error page
 function htmlErrorResponse(message: string, status: number = 500) {
+    const safeMessageHtml = escapeHtml(message);
+    const safeMessageJson = JSON.stringify(message);
     const html = `
         <!DOCTYPE html>
         <html>
@@ -135,11 +146,21 @@ function htmlErrorResponse(message: string, status: number = 500) {
         <body>
             <div class="error-container">
                 <div class="error-title">Chyba načítání stránky</div>
-                <div class="error-message">${message}</div>
-                <button class="retry-btn" onclick="window.parent.postMessage({type:'proxy-error',message:'${message.replace(/'/g, "\\'")}'},'*')">
-                    Zkusit s Playwright
+                <div class="error-message">${safeMessageHtml}</div>
+                <div class="error-message">Pro Playwright přepněte režim v horním panelu preview.</div>
+                <button class="retry-btn" onclick="window.location.reload()">
+                    Načíst znovu
                 </button>
             </div>
+            <script>
+                (function notifyParent() {
+                    try {
+                        window.parent.postMessage({ type: 'proxy-error', message: ${safeMessageJson} }, '*');
+                    } catch (error) {
+                        console.warn('Could not post proxy error to parent frame', error);
+                    }
+                })();
+            </script>
         </body>
         </html>
     `;
@@ -212,20 +233,10 @@ export async function GET(request: NextRequest) {
 
             if (!response.ok) {
                 console.error(`Proxy fetch failed: ${response.status} ${response.statusText} for ${targetUrl}`);
-
-                if (isHtml) {
-                    return htmlErrorResponse(
-                        `Nepodařilo se načíst stránku: ${response.statusText} (${response.status})`,
-                        response.status
-                    );
-                } else {
-                    return new NextResponse('', {
-                        status: response.status,
-                        headers: {
-                            'Content-Type': contentType || 'application/octet-stream',
-                        },
-                    });
-                }
+                return htmlErrorResponse(
+                    `Nepodařilo se načíst stránku ${url.hostname}: ${response.statusText} (${response.status})`,
+                    response.status,
+                );
             }
 
             if (isHtml) {

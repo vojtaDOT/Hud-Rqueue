@@ -40,6 +40,13 @@ interface Obec {
 }
 
 type CrawlStrategy = 'list' | 'rss';
+type RssWarningReason = 'http_error' | 'not_feed' | 'network_error' | 'timeout';
+
+interface RssDetectionWarning {
+    url: string;
+    status: number | null;
+    reason: RssWarningReason;
+}
 
 function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
     const output: ScopeModule[] = [];
@@ -183,7 +190,7 @@ export function SourceEditor() {
     const [crawlStrategy, setCrawlStrategy] = useState<CrawlStrategy>('list');
     const [detectingRss, setDetectingRss] = useState(false);
     const [rssFeedOptions, setRssFeedOptions] = useState<string[]>([]);
-    const [lastAutoDetectedUrl, setLastAutoDetectedUrl] = useState<string | null>(null);
+    const [selectedRssFeed, setSelectedRssFeed] = useState<string>('');
 
     const [sourceTypes, setSourceTypes] = useState<SourceType[]>([]);
     const [obecResults, setObecResults] = useState<Obec[]>([]);
@@ -308,11 +315,9 @@ export function SourceEditor() {
         return true;
     };
 
-    const detectRssFeeds = useCallback(async (options?: { silentWhenNotFound?: boolean }) => {
+    const detectRssFeeds = useCallback(async () => {
         if (!/^https?:\/\//.test(baseUrl)) {
-            if (!options?.silentWhenNotFound) {
-                toast.error('Zadejte platnou URL začínající na http:// nebo https://');
-            }
+            toast.error('Zadejte platnou URL začínající na http:// nebo https://');
             return;
         }
 
@@ -328,39 +333,83 @@ export function SourceEditor() {
             const feedUrls: string[] = Array.isArray(data.feed_urls)
                 ? data.feed_urls.filter((item: unknown): item is string => typeof item === 'string')
                 : [];
+            const warnings: RssDetectionWarning[] = Array.isArray(data.warnings)
+                ? data.warnings.filter((item: unknown): item is RssDetectionWarning => (
+                    typeof item === 'object'
+                    && item !== null
+                    && typeof (item as { url?: unknown }).url === 'string'
+                    && (
+                        (item as { reason?: unknown }).reason === 'http_error'
+                        || (item as { reason?: unknown }).reason === 'not_feed'
+                        || (item as { reason?: unknown }).reason === 'network_error'
+                        || (item as { reason?: unknown }).reason === 'timeout'
+                    )
+                ))
+                : [];
 
             if (feedUrls.length < 1) {
-                setLastAutoDetectedUrl(baseUrl);
                 setRssFeedOptions([]);
-                if (!options?.silentWhenNotFound) {
-                    toast.info('RSS/Atom feed nebyl nalezen.');
-                }
+                setSelectedRssFeed('');
+                toast.info('RSS/Atom feed nebyl nalezen nebo dostupný.');
                 return;
             }
 
             setRssFeedOptions(feedUrls);
-            setCrawlStrategy('rss');
-            setPlaywrightEnabled(false);
-            setBaseUrl(feedUrls[0]);
-            setLastAutoDetectedUrl(feedUrls[0]);
+            setSelectedRssFeed(feedUrls[0]);
 
             toast.success(`Nalezen RSS/Atom feed (${feedUrls.length})`);
-        } catch (error) {
-            if (!options?.silentWhenNotFound) {
-                toast.error(error instanceof Error ? error.message : 'Nepodařilo se detekovat RSS feed');
+
+            if (warnings.length > 0) {
+                const reasonCounts = warnings.reduce<Record<RssWarningReason, number>>((acc, warning) => {
+                    acc[warning.reason] += 1;
+                    return acc;
+                }, {
+                    http_error: 0,
+                    not_feed: 0,
+                    network_error: 0,
+                    timeout: 0,
+                });
+
+                const statusCounts = warnings.reduce<Record<string, number>>((acc, warning) => {
+                    if (warning.reason !== 'http_error' || warning.status === null) {
+                        return acc;
+                    }
+                    const key = String(warning.status);
+                    acc[key] = (acc[key] ?? 0) + 1;
+                    return acc;
+                }, {});
+                const statusSummary = Object.entries(statusCounts)
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([status, count]) => (count > 1 ? `${status}x${count}` : status))
+                    .join('/');
+                const summaryParts = [
+                    statusSummary || null,
+                    reasonCounts.timeout ? 'timeout' : null,
+                    reasonCounts.network_error ? 'síť' : null,
+                    reasonCounts.not_feed ? 'není feed' : null,
+                ].filter((part): part is string => Boolean(part));
+
+                toast.warning(
+                    `${warnings.length} kandidátů zamítnuto${summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''}`,
+                );
             }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Nepodařilo se detekovat RSS feed');
         } finally {
             setDetectingRss(false);
         }
     }, [baseUrl]);
 
-    const maybeAutoDetectRss = useCallback(() => {
-        const normalizedUrl = baseUrl.trim();
-        if (!/^https?:\/\//.test(normalizedUrl)) return;
-        if (lastAutoDetectedUrl === normalizedUrl) return;
-        setLastAutoDetectedUrl(normalizedUrl);
-        void detectRssFeeds({ silentWhenNotFound: true });
-    }, [baseUrl, detectRssFeeds, lastAutoDetectedUrl]);
+    const applySelectedRssFeed = () => {
+        if (!selectedRssFeed) {
+            toast.info('Nejprve vyberte RSS/Atom feed.');
+            return;
+        }
+        setBaseUrl(selectedRssFeed);
+        setCrawlStrategy('rss');
+        setPlaywrightEnabled(false);
+        toast.success('Vybraný feed byl použit jako Base URL.');
+    };
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -430,7 +479,7 @@ export function SourceEditor() {
             setBaseUrl('');
             setCrawlStrategy('list');
             setRssFeedOptions([]);
-            setLastAutoDetectedUrl(null);
+            setSelectedRssFeed('');
             setWorkflowData(null);
             setPlaywrightEnabled(false);
             setSelectorPreview(null);
@@ -555,8 +604,8 @@ export function SourceEditor() {
                                 onChange={(e) => {
                                     setBaseUrl(e.target.value);
                                     setRssFeedOptions([]);
+                                    setSelectedRssFeed('');
                                 }}
-                                onBlur={maybeAutoDetectRss}
                                 placeholder="https://example.com/bulletin"
                                 className="border-white/20 bg-white/5 pl-10 text-white placeholder:text-white/40"
                             />
@@ -615,18 +664,29 @@ export function SourceEditor() {
                 {rssFeedOptions.length > 0 && (
                     <div className="rounded-md border border-white/15 bg-white/5 p-3">
                         <Label className="mb-1.5 block text-sm text-white/70">Nalezené RSS/Atom feedy</Label>
-                        <Select value={baseUrl} onValueChange={setBaseUrl}>
-                            <SelectTrigger className="border-white/20 bg-black/20 text-white">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {rssFeedOptions.map((feedUrl) => (
-                                    <SelectItem key={feedUrl} value={feedUrl}>
-                                        {feedUrl}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2">
+                            <Select value={selectedRssFeed} onValueChange={setSelectedRssFeed}>
+                                <SelectTrigger className="border-white/20 bg-black/20 text-white">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {rssFeedOptions.map((feedUrl) => (
+                                        <SelectItem key={feedUrl} value={feedUrl}>
+                                            {feedUrl}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={applySelectedRssFeed}
+                                disabled={!selectedRssFeed}
+                                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                            >
+                                Použít vybraný RSS feed
+                            </Button>
+                        </div>
                     </div>
                 )}
             </form>

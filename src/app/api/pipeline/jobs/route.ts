@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { redis } from '@/lib/redis';
+import { toRedisBool } from '@/lib/redis-bool';
 
 const JobSchema = z.object({
     task: z.enum(['discover', 'download', 'ocr']),
     source_id: z.string().min(1, 'source_id is required'),
     source_url_id: z.string().optional(),
     document_id: z.string().optional(),
+    manual: z.boolean().optional().default(false),
     max_attempts: z.number().int().min(1).max(20).optional().default(3),
     mode: z.string().optional(),
     lang: z.string().optional(),
@@ -103,6 +105,7 @@ export async function POST(request: Request) {
             oem: string;
             min_text_chars: string;
             ocr_addon: string;
+            manual: boolean;
         }> = [];
 
         for (let i = 0; i < jobs.length; i++) {
@@ -144,6 +147,7 @@ export async function POST(request: Request) {
                 oem: ocrTemplate.oem,
                 min_text_chars: ocrTemplate.min_text_chars,
                 ocr_addon: ocrTemplate.ocr_addon,
+                manual: toRedisBool(job.manual ?? false),
             };
 
             pipeline.hset(`job:${id}`, redisJob);
@@ -162,6 +166,7 @@ export async function POST(request: Request) {
                 oem: ocrTemplate.oem,
                 min_text_chars: ocrTemplate.min_text_chars,
                 ocr_addon: ocrTemplate.ocr_addon,
+                manual: job.manual ?? false,
             });
         }
 

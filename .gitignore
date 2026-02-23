@@ -38,3 +38,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 SCRAPY_WORKER_V2_AGENT.md
+SCRAPY_WORKER_MANUAL_AGENT.md

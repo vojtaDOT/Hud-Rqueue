@@ -37,6 +37,7 @@ interface JobListItem {
     error_message?: string;
     worker?: string;
     attempts?: string;
+    manual: boolean;
 }
 
 interface StatsResponse {
@@ -335,6 +336,7 @@ export function DashboardRedis() {
                                         <tr>
                                             <th className="text-left font-medium p-3">ID</th>
                                             <th className="text-left font-medium p-3">Task</th>
+                                            <th className="text-left font-medium p-3">Manual</th>
                                             <th className="text-left font-medium p-3">Status</th>
                                             <th className="text-left font-medium p-3">Created</th>
                                             <th className="text-left font-medium p-3">Started</th>
@@ -346,7 +348,7 @@ export function DashboardRedis() {
                                     <tbody>
                                         {stats.jobs.length === 0 ? (
                                             <tr>
-                                                <td colSpan={8} className="p-6 text-center text-muted-foreground">
+                                                <td colSpan={9} className="p-6 text-center text-muted-foreground">
                                                     No jobs in queue
                                                 </td>
                                             </tr>
@@ -355,6 +357,7 @@ export function DashboardRedis() {
                                                 <tr key={job.id} className="border-b border-border/50 hover:bg-muted/30">
                                                     <td className="p-3 font-mono text-xs">{job.id}</td>
                                                     <td className="p-3">{job.task || '—'}</td>
+                                                    <td className="p-3">{job.manual ? 'yes' : 'no'}</td>
                                                     <td className="p-3">
                                                         <span className="inline-flex items-center gap-1.5 capitalize">
                                                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot(job.status)}`} />

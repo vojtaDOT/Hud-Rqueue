@@ -9,6 +9,7 @@ export interface PipelineJobRequest {
     source_id: string;
     source_url_id?: string;
     document_id?: string;
+    manual?: boolean;
     max_attempts?: number;
     mode?: string;
     lang?: string;
@@ -25,6 +26,7 @@ export interface PipelineCreatedJob {
     source_id: string;
     source_url_id: string;
     document_id: string;
+    manual: boolean;
     mode?: string;
     lang?: string;
     dpi?: string;
@@ -45,6 +47,7 @@ export interface PipelineJobStatus {
     source_id?: string;
     source_url_id?: string;
     document_id?: string;
+    manual?: boolean;
     mode?: string;
     lang?: string;
     dpi?: string;

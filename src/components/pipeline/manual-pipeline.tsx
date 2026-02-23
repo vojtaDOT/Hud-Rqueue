@@ -236,6 +236,40 @@ function normalizeProgressPct(value: number | null | undefined): number {
     return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object';
+}
+
+function hasDiscoveryDownloadFileStep(crawlParams: unknown): boolean {
+    if (!isObjectRecord(crawlParams)) return false;
+    const discovery = crawlParams.discovery;
+    if (!isObjectRecord(discovery)) return false;
+    const chain = discovery.chain;
+    if (!Array.isArray(chain)) return false;
+
+    const visit = (nodes: unknown[]): boolean => {
+        for (const node of nodes) {
+            if (!isObjectRecord(node)) continue;
+            const repeater = node.repeater;
+            if (isObjectRecord(repeater) && Array.isArray(repeater.steps)) {
+                const hasDownloadFile = repeater.steps.some((step) => (
+                    isObjectRecord(step) && step.type === 'download_file'
+                ));
+                if (hasDownloadFile) return true;
+            }
+
+            const children = node.children;
+            if (Array.isArray(children) && visit(children)) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    return visit(chain);
+}
+
 function buildQueueOperatorUrl(pathname: string): string {
     const base = process.env.NEXT_PUBLIC_QUEUE_OPERATOR_URL?.trim();
     if (!base) return pathname;
@@ -285,6 +319,7 @@ function toPendingStatuses(jobs: PipelineCreatedJob[]): PipelineJobStatus[] {
         source_id: job.source_id,
         source_url_id: job.source_url_id,
         document_id: job.document_id,
+        manual: job.manual ?? false,
     }));
 }
 
@@ -326,10 +361,15 @@ export function ManualPipeline() {
     const [loadingDiscoveryDetails, setLoadingDiscoveryDetails] = React.useState(false);
     const [loadingDownloadDetails, setLoadingDownloadDetails] = React.useState(false);
     const [loadingOcrDetails, setLoadingOcrDetails] = React.useState(false);
+    const [downloadSkippedByDiscovery, setDownloadSkippedByDiscovery] = React.useState(false);
 
     const selectedSource = React.useMemo(
         () => sources.find((source) => String(source.id) === runState.selectedSourceId) ?? null,
         [sources, runState.selectedSourceId],
+    );
+    const selectedSourceHasDiscoveryDownloadFile = React.useMemo(
+        () => hasDiscoveryDownloadFileStep(selectedSource?.crawl_params),
+        [selectedSource?.crawl_params],
     );
 
     const sourceStats = React.useMemo(() => {
@@ -352,6 +392,7 @@ export function ManualPipeline() {
 
     const discoverCompleted = discoverJobs.length > 0 && discoverJobs.every((job) => job.status === 'completed');
     const downloadCompleted = downloadJobs.length > 0 && downloadJobs.every((job) => job.status === 'completed');
+    const downloadStageCompleted = downloadCompleted || downloadSkippedByDiscovery;
     const ocrCompleted = ocrJobs.length > 0 && ocrJobs.every((job) => job.status === 'completed');
 
     const allJobs = React.useMemo(
@@ -812,6 +853,12 @@ export function ManualPipeline() {
         return data.jobs as PipelineJobStatus[];
     }, []);
 
+    const unlockStage = React.useCallback((stage: PipelineStage) => {
+        setMaxVisitedStage((prev) => (
+            getStageIndex(stage) > getStageIndex(prev) ? stage : prev
+        ));
+    }, []);
+
     const resetRunStateForSource = React.useCallback((sourceId: string, runStartedAt: string) => {
         setRunState({
             selectedSourceId: sourceId,
@@ -838,6 +885,7 @@ export function ManualPipeline() {
         setLoadingDiscoveryDetails(false);
         setLoadingDownloadDetails(false);
         setLoadingOcrDetails(false);
+        setDownloadSkippedByDiscovery(false);
     }, []);
 
     const handleStartDiscovery = React.useCallback(async (source: Source) => {
@@ -849,7 +897,7 @@ export function ManualPipeline() {
 
         try {
             const jobs = await enqueueJobs([
-                { task: 'discover', source_id: sourceId, max_attempts: 3 },
+                { task: 'discover', source_id: sourceId, max_attempts: 3, manual: true },
             ]);
             setDiscoverJobs(toPendingStatuses(jobs));
             toast.success(`Discovery zařazeno do fronty pro source #${sourceId}`);
@@ -862,9 +910,8 @@ export function ManualPipeline() {
     }, [enqueueJobs, resetRunStateForSource]);
 
     const handleStartDownload = React.useCallback(async () => {
-        if (!runState.selectedSourceId || discoveredSourceUrls.length === 0) return;
+        if (!runState.selectedSourceId || discoveredSourceUrls.length === 0 || downloadSkippedByDiscovery) return;
         setSubmittingDownload(true);
-        setRunState((prev) => ({ ...prev, activeStage: 'download' }));
 
         try {
             const jobs = await enqueueJobs(
@@ -873,9 +920,10 @@ export function ManualPipeline() {
                     source_id: runState.selectedSourceId!,
                     source_url_id: String(sourceUrl.id),
                     max_attempts: 3,
+                    manual: true,
                 })),
             );
-            setDownloadJobs(toPendingStatuses(jobs));
+            setDownloadJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
             setDownloadSettled(false);
             toast.success(`Download jobs vytvořeny: ${jobs.length}`);
         } catch (error) {
@@ -884,12 +932,37 @@ export function ManualPipeline() {
         } finally {
             setSubmittingDownload(false);
         }
-    }, [discoveredSourceUrls, enqueueJobs, runState.selectedSourceId]);
+    }, [discoveredSourceUrls, downloadSkippedByDiscovery, enqueueJobs, runState.selectedSourceId]);
+
+    const handleStartDownloadForSourceUrl = React.useCallback(async (sourceUrlId: string) => {
+        if (!runState.selectedSourceId || downloadSkippedByDiscovery) return;
+        setSubmittingDownload(true);
+
+        try {
+            const jobs = await enqueueJobs([
+                {
+                    task: 'download',
+                    source_id: runState.selectedSourceId,
+                    source_url_id: sourceUrlId,
+                    max_attempts: 3,
+                    manual: true,
+                },
+            ]);
+            setDownloadJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setDownloadSettled(false);
+            unlockStage('download');
+            toast.success('Download job vytvořen');
+        } catch (error) {
+            console.error('Single download enqueue failed:', error);
+            toast.error(error instanceof Error ? error.message : 'Nepodařilo se spustit download');
+        } finally {
+            setSubmittingDownload(false);
+        }
+    }, [downloadSkippedByDiscovery, enqueueJobs, runState.selectedSourceId, unlockStage]);
 
     const handleStartOcr = React.useCallback(async () => {
         if (!runState.selectedSourceId || changedDocuments.length === 0) return;
         setSubmittingOcr(true);
-        setRunState((prev) => ({ ...prev, activeStage: 'ocr' }));
 
         try {
             const jobs = await enqueueJobs(
@@ -899,10 +972,11 @@ export function ManualPipeline() {
                     source_url_id: String(document.source_url_id),
                     document_id: String(document.id),
                     max_attempts: 3,
+                    manual: true,
                     ...OCR_JOB_DEFAULTS,
                 })),
             );
-            setOcrJobs(toPendingStatuses(jobs));
+            setOcrJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
             setOcrSettled(false);
             toast.success(`OCR jobs vytvořeny: ${jobs.length}`);
         } catch (error) {
@@ -912,6 +986,34 @@ export function ManualPipeline() {
             setSubmittingOcr(false);
         }
     }, [changedDocuments, enqueueJobs, runState.selectedSourceId]);
+
+    const handleStartOcrForDocument = React.useCallback(async (document: DocumentItem) => {
+        if (!runState.selectedSourceId) return;
+        setSubmittingOcr(true);
+
+        try {
+            const jobs = await enqueueJobs([
+                {
+                    task: 'ocr',
+                    source_id: runState.selectedSourceId,
+                    source_url_id: String(document.source_url_id),
+                    document_id: String(document.id),
+                    max_attempts: 3,
+                    manual: true,
+                    ...OCR_JOB_DEFAULTS,
+                },
+            ]);
+            setOcrJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setOcrSettled(false);
+            unlockStage('ocr');
+            toast.success('OCR job vytvořen');
+        } catch (error) {
+            console.error('Single OCR enqueue failed:', error);
+            toast.error(error instanceof Error ? error.message : 'Nepodařilo se spustit OCR');
+        } finally {
+            setSubmittingOcr(false);
+        }
+    }, [enqueueJobs, runState.selectedSourceId, unlockStage]);
 
     React.useEffect(() => {
         fetchAllSourceUrlMeta();
@@ -1046,15 +1148,27 @@ export function ManualPipeline() {
         if (!discoverCompleted || discoverySettled || !runState.selectedSourceId || !runState.runStartedAt) return;
 
         setDiscoverySettled(true);
-        setRunState((prev) => ({ ...prev, activeStage: 'download' }));
         setLoadingDiscoveryDetails(true);
 
         (async () => {
             try {
-                await fetchDiscoveredSourceUrls(runState.selectedSourceId!, runState.runStartedAt!);
+                const discovered = await fetchDiscoveredSourceUrls(runState.selectedSourceId!, runState.runStartedAt!);
                 await fetchIngestionDiagnostics(runState.selectedSourceId!, runState.runStartedAt!);
                 await fetchAllSourceUrlMeta();
-                toast.success('Discovery dokončeno');
+                if (selectedSourceHasDiscoveryDownloadFile) {
+                    const discoveredIds = discovered.map((item) => String(item.id));
+                    const docs = await fetchDocumentsForSourceUrlIds(discoveredIds);
+                    setDownloadDocuments(docs);
+                    await fetchChangedDocuments(runState.selectedSourceId!, runState.runStartedAt!);
+                    setDownloadSkippedByDiscovery(true);
+                    setDownloadSettled(true);
+                    unlockStage('ocr');
+                    toast.success('Discovery dokončeno. Download krok přeskočen, soubory připravené pro OCR.');
+                } else {
+                    setDownloadSkippedByDiscovery(false);
+                    unlockStage('download');
+                    toast.success('Discovery dokončeno');
+                }
             } catch (error) {
                 console.error('Failed to load discovered URLs:', error);
                 toast.error('Nepodařilo se načíst discovered source URLs');
@@ -1066,10 +1180,14 @@ export function ManualPipeline() {
         discoverCompleted,
         discoverySettled,
         fetchAllSourceUrlMeta,
+        fetchChangedDocuments,
         fetchDiscoveredSourceUrls,
+        fetchDocumentsForSourceUrlIds,
         fetchIngestionDiagnostics,
         runState.runStartedAt,
         runState.selectedSourceId,
+        selectedSourceHasDiscoveryDownloadFile,
+        unlockStage,
     ]);
 
     React.useEffect(() => {
@@ -1084,7 +1202,6 @@ export function ManualPipeline() {
         if (!downloadCompleted || downloadSettled || !runState.selectedSourceId || !runState.runStartedAt) return;
 
         setDownloadSettled(true);
-        setRunState((prev) => ({ ...prev, activeStage: 'ocr' }));
         setLoadingDownloadDetails(true);
 
         (async () => {
@@ -1094,6 +1211,7 @@ export function ManualPipeline() {
                 setDownloadDocuments(docs);
                 await fetchChangedDocuments(runState.selectedSourceId!, runState.runStartedAt!);
                 await fetchIngestionDiagnostics(runState.selectedSourceId!, runState.runStartedAt!);
+                unlockStage('ocr');
                 toast.success('Download fáze dokončena');
             } catch (error) {
                 console.error('Failed to load download results:', error);
@@ -1111,23 +1229,24 @@ export function ManualPipeline() {
         fetchIngestionDiagnostics,
         runState.runStartedAt,
         runState.selectedSourceId,
+        unlockStage,
     ]);
 
     React.useEffect(() => {
         const hasFailure = ocrJobs.some((job) => job.status === 'failed');
         if (hasFailure && !ocrSettled) {
             setOcrSettled(true);
-            setRunState((prev) => ({ ...prev, activeStage: 'summary' }));
+            unlockStage('summary');
             toast.error('Některé OCR joby selhaly');
         }
-    }, [ocrJobs, ocrSettled]);
+    }, [ocrJobs, ocrSettled, unlockStage]);
 
     React.useEffect(() => {
         if (!ocrCompleted || ocrSettled) return;
         setOcrSettled(true);
-        setRunState((prev) => ({ ...prev, activeStage: 'summary' }));
+        unlockStage('summary');
         toast.success('OCR fáze dokončena');
-    }, [ocrCompleted, ocrSettled]);
+    }, [ocrCompleted, ocrSettled, unlockStage]);
 
     React.useEffect(() => {
         if (!ocrSettled || !runState.selectedSourceId || !runState.runStartedAt) return;
@@ -1206,7 +1325,7 @@ export function ManualPipeline() {
     const stageDone = (stage: PipelineStage): boolean => {
         if (stage === 'sources') return Boolean(runState.selectedSourceId);
         if (stage === 'discovery') return discoverCompleted;
-        if (stage === 'download') return downloadCompleted;
+        if (stage === 'download') return downloadStageCompleted;
         if (stage === 'ocr') return ocrCompleted;
         if (stage === 'summary') return ocrSettled || ocrCompleted || ocrJobs.some((job) => job.status === 'failed');
         return false;
@@ -1465,19 +1584,29 @@ export function ManualPipeline() {
                     discoveryOperatorState,
                 )}
                 {renderErrorPanel('Chyby discovery', discoveryErrors)}
+                {downloadSkippedByDiscovery && (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                        Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
+                    </div>
+                )}
 
                 <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                         <h3 className="text-sm font-semibold">Discovered source URLs (aktuální run)</h3>
                         <Button
                             onClick={handleStartDownload}
-                            disabled={!discoverCompleted || discoveredSourceUrls.length === 0 || submittingDownload}
+                            disabled={!discoverCompleted || discoveredSourceUrls.length === 0 || submittingDownload || downloadSkippedByDiscovery}
                             size="sm"
                         >
                             {submittingDownload ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                     Enqueue...
+                                </>
+                            ) : downloadSkippedByDiscovery ? (
+                                <>
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                    Download skipnuto
                                 </>
                             ) : (
                                 <>
@@ -1497,9 +1626,14 @@ export function ManualPipeline() {
                                 <div key={item.id} className="p-3 text-sm flex items-center gap-2">
                                     <span className="font-mono text-xs text-muted-foreground w-20">{item.id}</span>
                                     <span className="flex-1 truncate">{item.label || item.url}</span>
-                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleStartDownloadForSourceUrl(String(item.id))}
+                                        disabled={!discoverCompleted || submittingDownload || downloadSkippedByDiscovery}
+                                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
                                         <Play className="h-3 w-3 text-muted-foreground" />
-                                    </span>
+                                    </button>
                                 </div>
                             ))
                         )}
@@ -1516,6 +1650,11 @@ export function ManualPipeline() {
                 <CardDescription>Výsledek download fáze pro discovered URL</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+                {downloadSkippedByDiscovery && (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                        Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
+                    </div>
+                )}
                 {renderJobsTable(downloadJobs, 'Download jobs zatím nebyly vytvořeny')}
                 {renderStepProgress(
                     'Stav download kroku',
@@ -1540,6 +1679,15 @@ export function ManualPipeline() {
                                 )}>
                                     {hasBlobStorage(doc.external_storage) ? 'Blob OK' : 'Blob missing'}
                                 </span>
+                                <button
+                                    type="button"
+                                    onClick={() => handleStartOcrForDocument(doc)}
+                                    disabled={!downloadStageCompleted || submittingOcr}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Spustit OCR pro tento dokument"
+                                >
+                                    <Play className="h-3 w-3 text-muted-foreground" />
+                                </button>
                             </div>
                         ))
                     )}
@@ -1561,7 +1709,7 @@ export function ManualPipeline() {
                     </span>
                     <Button
                         onClick={handleStartOcr}
-                        disabled={!downloadCompleted || changedDocuments.length === 0 || submittingOcr}
+                        disabled={!downloadStageCompleted || changedDocuments.length === 0 || submittingOcr}
                         size="sm"
                     >
                         {submittingOcr ? (

@@ -26,6 +26,19 @@ interface FetchSnapshot {
     body: string;
 }
 
+type FeedWarningReason = 'http_error' | 'not_feed' | 'network_error' | 'timeout';
+
+interface FeedDetectionWarning {
+    url: string;
+    status: number | null;
+    reason: FeedWarningReason;
+}
+
+interface FetchAttemptResult {
+    snapshot: FetchSnapshot | null;
+    errorReason: 'network_error' | 'timeout' | null;
+}
+
 function normalizeUrl(value: string): string {
     try {
         return new URL(value).href;
@@ -118,7 +131,7 @@ function extractFeedLinksFromHtml(html: string, baseUrl: string): string[] {
     return uniqueUrls(discovered);
 }
 
-async function fetchSnapshot(url: string, timeoutMs = 8000): Promise<FetchSnapshot | null> {
+async function fetchSnapshot(url: string, timeoutMs = 8000): Promise<FetchAttemptResult> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -133,14 +146,21 @@ async function fetchSnapshot(url: string, timeoutMs = 8000): Promise<FetchSnapsh
         const body = (await response.text()).slice(0, 16000);
 
         return {
-            ok: response.ok,
-            status: response.status,
-            finalUrl: response.url,
-            contentType,
-            body,
+            snapshot: {
+                ok: response.ok,
+                status: response.status,
+                finalUrl: response.url,
+                contentType,
+                body,
+            },
+            errorReason: null,
         };
-    } catch {
-        return null;
+    } catch (error) {
+        const isTimeout = (error as { name?: string }).name === 'AbortError';
+        return {
+            snapshot: null,
+            errorReason: isTimeout ? 'timeout' : 'network_error',
+        };
     } finally {
         clearTimeout(timeoutId);
     }
@@ -182,34 +202,74 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Povolené jsou pouze HTTP a HTTPS URL' }, { status: 400 });
     }
 
-    const discovered: string[] = [];
-    const inspected: string[] = [];
+    const candidateSet = new Set<string>();
+    const candidates: string[] = [];
+    const enqueueCandidate = (candidate: string | null | undefined) => {
+        if (!candidate) return;
+        const normalized = normalizeUrl(candidate);
+        if (candidateSet.has(normalized)) return;
+        candidateSet.add(normalized);
+        candidates.push(normalized);
+    };
 
-    const initialSnapshot = await fetchSnapshot(parsedUrl.href);
-    if (initialSnapshot) {
-        inspected.push(parsedUrl.href);
+    enqueueCandidate(parsedUrl.href);
 
-        if (initialSnapshot.ok && isFeedSnapshot(initialSnapshot)) {
-            discovered.push(initialSnapshot.finalUrl);
-        } else if (initialSnapshot.ok) {
-            discovered.push(...extractFeedLinksFromHtml(initialSnapshot.body, initialSnapshot.finalUrl));
-        }
+    const attemptCache = new Map<string, FetchAttemptResult>();
+    const probeCandidate = async (candidate: string, timeoutMs = 6000): Promise<FetchAttemptResult> => {
+        const normalized = normalizeUrl(candidate);
+        const cached = attemptCache.get(normalized);
+        if (cached) return cached;
+        const attempt = await fetchSnapshot(normalized, timeoutMs);
+        attemptCache.set(normalized, attempt);
+        return attempt;
+    };
+
+    const initialAttempt = await probeCandidate(parsedUrl.href, 8000);
+    const initialSnapshot = initialAttempt.snapshot;
+    if (initialSnapshot?.finalUrl) {
+        enqueueCandidate(initialSnapshot.finalUrl);
+    }
+    if (initialSnapshot?.ok && !isFeedSnapshot(initialSnapshot)) {
+        extractFeedLinksFromHtml(initialSnapshot.body, initialSnapshot.finalUrl)
+            .forEach((candidate) => enqueueCandidate(candidate));
     }
 
-    const guessedCandidates = buildGuessedFeedUrls(parsedUrl)
-        .filter((candidate) => !inspected.includes(normalizeUrl(candidate)));
+    buildGuessedFeedUrls(parsedUrl).forEach((candidate) => enqueueCandidate(candidate));
 
-    if (guessedCandidates.length > 0) {
-        const probeResults = await Promise.all(
-            guessedCandidates.map(async (candidate) => {
-                const snapshot = await fetchSnapshot(candidate, 6000);
-                if (!snapshot || !snapshot.ok) return null;
-                if (!isFeedSnapshot(snapshot)) return null;
-                return snapshot.finalUrl;
-            }),
-        );
+    const discovered: string[] = [];
+    const warnings: FeedDetectionWarning[] = [];
 
-        discovered.push(...probeResults.filter((value): value is string => Boolean(value)));
+    for (const candidate of candidates) {
+        const attempt = await probeCandidate(candidate);
+        const snapshot = attempt.snapshot;
+        if (!snapshot) {
+            warnings.push({
+                url: candidate,
+                status: null,
+                reason: attempt.errorReason ?? 'network_error',
+            });
+            continue;
+        }
+
+        if (!snapshot.ok) {
+            warnings.push({
+                url: candidate,
+                status: snapshot.status,
+                reason: 'http_error',
+            });
+            continue;
+        }
+
+        if (!isFeedSnapshot(snapshot)) {
+            warnings.push({
+                url: candidate,
+                status: snapshot.status,
+                reason: 'not_feed',
+            });
+            continue;
+        }
+
+        discovered.push(snapshot.finalUrl);
     }
 
     const feeds = uniqueUrls(discovered);
@@ -218,5 +278,6 @@ export async function GET(request: NextRequest) {
         detected: feeds.length > 0,
         feed_urls: feeds,
         checked_url: parsedUrl.href,
+        warnings,
     });
 }

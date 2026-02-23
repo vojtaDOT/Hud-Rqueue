@@ -1,4 +1,5 @@
 import { redis } from '@/lib/redis';
+import { fromRedisBool } from '@/lib/redis-bool';
 
 export interface JobStats {
     total: number;
@@ -31,6 +32,7 @@ export interface JobListItem {
     error_message?: string;
     worker?: string;
     attempts?: string;
+    manual: boolean;
 }
 
 export interface QueueStatsResponse {
@@ -57,6 +59,7 @@ export async function fetchQueueStats(): Promise<QueueStatsResponse> {
         error_message?: string;
         worker?: string;
         attempts?: string;
+        manual: boolean;
     }> = [];
 
     do {
@@ -78,6 +81,7 @@ export async function fetchQueueStats(): Promise<QueueStatsResponse> {
                     error_message: jobData.error_message,
                     worker: jobData.worker,
                     attempts: jobData.attempts,
+                    manual: fromRedisBool(jobData.manual),
                 });
             }
         }

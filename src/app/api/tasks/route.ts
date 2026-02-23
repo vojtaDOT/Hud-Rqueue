@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { redis } from '@/lib/redis';
 import { z } from 'zod';
+import { toRedisBool } from '@/lib/redis-bool';
 
 const TaskSchema = z.object({
     document_id: z.string().optional(),
@@ -10,6 +11,7 @@ const TaskSchema = z.object({
     max_attempts: z.number().int().default(3),
     cron_time: z.string().optional(),
     count: z.number().int().min(1).max(1000).optional().default(1),
+    manual: z.boolean().optional().default(false),
     // Scrapy-specific
     method: z.string().optional(),
     source_url: z.string().optional(),
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
 
         const {
             document_id, source_id, source_url_id, task, max_attempts, cron_time, count,
-            method, source_url, ocr_language, ocr_psm, ocr_oem,
+            method, source_url, ocr_language, ocr_psm, ocr_oem, manual,
         } = result.data;
 
         // Validate connection string availability
@@ -51,7 +53,28 @@ export async function POST(request: Request) {
         // Use pipeline for atomic-like batch insertion
         const pipeline = redis.pipeline();
 
-        const createdJobs = [];
+        const createdJobs: Array<{
+            id: number;
+            document_id: string;
+            source_id: string;
+            source_url_id: string;
+            status: string;
+            attempts: number;
+            max_attempts: number;
+            error_message: string;
+            created_at: string;
+            started_at: string;
+            completed_at: string;
+            worker: string;
+            task: string;
+            cron_time: string;
+            method: string;
+            source_url: string;
+            ocr_language: string;
+            ocr_psm: number | string;
+            ocr_oem: number | string;
+            manual: boolean;
+        }> = [];
 
         for (let i = 0; i < count; i++) {
             const id = firstId + i;
@@ -75,6 +98,7 @@ export async function POST(request: Request) {
                 ocr_language: ocr_language || '',
                 ocr_psm: ocr_psm ?? '',
                 ocr_oem: ocr_oem ?? '',
+                manual: toRedisBool(manual ?? false),
             };
 
             // Store hash
@@ -83,7 +107,28 @@ export async function POST(request: Request) {
             pipeline.rpush(queueName, id);
 
             if (count === 1) {
-                createdJobs.push(jobData);
+                createdJobs.push({
+                    id,
+                    document_id: document_id || '',
+                    source_id: source_id || '',
+                    source_url_id: source_url_id || '',
+                    status: 'pending',
+                    attempts: 0,
+                    max_attempts,
+                    error_message: '',
+                    created_at: now,
+                    started_at: '',
+                    completed_at: '',
+                    worker: '',
+                    task,
+                    cron_time: cron_time || '',
+                    method: method || '',
+                    source_url: source_url || '',
+                    ocr_language: ocr_language || '',
+                    ocr_psm: ocr_psm ?? '',
+                    ocr_oem: ocr_oem ?? '',
+                    manual: manual ?? false,
+                });
             } else if (i === 0 || i === count - 1) {
                 // For large batches, strictly return first and last for verification to save bandwidth if needed, 
                 // but user wants to "test", so knowing it succeeded is enough. 

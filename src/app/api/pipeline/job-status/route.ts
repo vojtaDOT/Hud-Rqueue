@@ -47,6 +47,13 @@ export async function POST(request: Request) {
                         source_id: '',
                         source_url_id: '',
                         document_id: '',
+                        mode: '',
+                        lang: '',
+                        dpi: '',
+                        psm: '',
+                        oem: '',
+                        min_text_chars: '',
+                        ocr_addon: '',
                     };
                 }
 
@@ -61,6 +68,13 @@ export async function POST(request: Request) {
                     source_id: data.source_id || '',
                     source_url_id: data.source_url_id || '',
                     document_id: data.document_id || '',
+                    mode: data.mode || '',
+                    lang: data.lang || '',
+                    dpi: data.dpi || '',
+                    psm: data.psm || '',
+                    oem: data.oem || '',
+                    min_text_chars: data.min_text_chars || '',
+                    ocr_addon: data.ocr_addon || '',
                 };
             }),
         );

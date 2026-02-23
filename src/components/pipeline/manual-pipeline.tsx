@@ -123,6 +123,15 @@ const STAGE_ORDER: PipelineStage[] = ['sources', 'discovery', 'download', 'ocr',
 const QUEUE_OPERATOR_TIMEOUT_MS = 4000;
 const QUEUE_OPERATOR_POLL_MS = 3000;
 const QUEUE_OPERATOR_STALE_MS = 15000;
+const OCR_JOB_DEFAULTS = {
+    mode: 'hybrid',
+    lang: 'ces+eng',
+    dpi: '300',
+    psm: '3',
+    oem: '3',
+    min_text_chars: '30',
+    ocr_addon: '1',
+} as const;
 
 const TERMINAL_STATUSES: PipelineJobStatusValue[] = ['completed', 'failed', 'unknown'];
 
@@ -887,8 +896,10 @@ export function ManualPipeline() {
                 changedDocuments.map((document) => ({
                     task: 'ocr',
                     source_id: runState.selectedSourceId!,
+                    source_url_id: String(document.source_url_id),
                     document_id: String(document.id),
                     max_attempts: 3,
+                    ...OCR_JOB_DEFAULTS,
                 })),
             );
             setOcrJobs(toPendingStatuses(jobs));
@@ -1565,6 +1576,35 @@ export function ManualPipeline() {
                             </>
                         )}
                     </Button>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                    <span>
+                        Stažené dokumenty (download): <span className="font-semibold text-foreground">{downloadDocuments.length}</span>
+                    </span>
+                    <span>
+                        OCR kandidáti: <span className="font-semibold text-foreground">{changedDocuments.length}</span>
+                    </span>
+                </div>
+                <div className="border rounded-md divide-y">
+                    {downloadDocuments.length === 0 ? (
+                        <p className="p-3 text-sm text-muted-foreground">Po download kroku zatím nejsou dostupné žádné soubory.</p>
+                    ) : (
+                        downloadDocuments.map((doc) => {
+                            const isCandidate = changedDocumentIds.has(String(doc.id));
+                            return (
+                                <div key={doc.id} className="p-3 text-sm flex items-center gap-2">
+                                    <span className="font-mono text-xs text-muted-foreground w-20">{doc.id}</span>
+                                    <span className="flex-1 truncate">{doc.filename || doc.url}</span>
+                                    <span className={cn(
+                                        'text-xs font-medium px-2 py-1 rounded-full',
+                                        isCandidate ? 'bg-blue-500/15 text-blue-300' : 'bg-zinc-500/20 text-zinc-300',
+                                    )}>
+                                        {isCandidate ? 'OCR candidate' : 'beze změny'}
+                                    </span>
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
                 {renderJobsTable(ocrJobs, 'OCR jobs zatím nebyly vytvořeny')}
                 {renderStepProgress(

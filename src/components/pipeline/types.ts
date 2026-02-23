@@ -10,6 +10,13 @@ export interface PipelineJobRequest {
     source_url_id?: string;
     document_id?: string;
     max_attempts?: number;
+    mode?: string;
+    lang?: string;
+    dpi?: string;
+    psm?: string;
+    oem?: string;
+    min_text_chars?: string;
+    ocr_addon?: string;
 }
 
 export interface PipelineCreatedJob {
@@ -18,6 +25,13 @@ export interface PipelineCreatedJob {
     source_id: string;
     source_url_id: string;
     document_id: string;
+    mode?: string;
+    lang?: string;
+    dpi?: string;
+    psm?: string;
+    oem?: string;
+    min_text_chars?: string;
+    ocr_addon?: string;
 }
 
 export interface PipelineJobStatus {
@@ -31,6 +45,13 @@ export interface PipelineJobStatus {
     source_id?: string;
     source_url_id?: string;
     document_id?: string;
+    mode?: string;
+    lang?: string;
+    dpi?: string;
+    psm?: string;
+    oem?: string;
+    min_text_chars?: string;
+    ocr_addon?: string;
 }
 
 export interface PipelineSummary {

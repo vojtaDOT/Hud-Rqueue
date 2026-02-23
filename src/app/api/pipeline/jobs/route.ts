@@ -8,6 +8,13 @@ const JobSchema = z.object({
     source_url_id: z.string().optional(),
     document_id: z.string().optional(),
     max_attempts: z.number().int().min(1).max(20).optional().default(3),
+    mode: z.string().optional(),
+    lang: z.string().optional(),
+    dpi: z.string().optional(),
+    psm: z.string().optional(),
+    oem: z.string().optional(),
+    min_text_chars: z.string().optional(),
+    ocr_addon: z.string().optional(),
 });
 
 const RequestSchema = z.object({
@@ -15,6 +22,25 @@ const RequestSchema = z.object({
 });
 
 type JobInput = z.infer<typeof JobSchema>;
+type OcrTemplate = {
+    mode: string;
+    lang: string;
+    dpi: string;
+    psm: string;
+    oem: string;
+    min_text_chars: string;
+    ocr_addon: string;
+};
+
+const DEFAULT_OCR_TEMPLATE: OcrTemplate = {
+    mode: 'hybrid',
+    lang: 'ces+eng',
+    dpi: '300',
+    psm: '3',
+    oem: '3',
+    min_text_chars: '30',
+    ocr_addon: '1',
+};
 
 function validateTaskSpecificFields(job: JobInput): string | null {
     if (job.task === 'download' && !job.source_url_id) {
@@ -24,6 +50,18 @@ function validateTaskSpecificFields(job: JobInput): string | null {
         return 'ocr job requires document_id';
     }
     return null;
+}
+
+function resolveOcrTemplate(job: JobInput): OcrTemplate {
+    return {
+        mode: job.mode || DEFAULT_OCR_TEMPLATE.mode,
+        lang: job.lang || DEFAULT_OCR_TEMPLATE.lang,
+        dpi: job.dpi || DEFAULT_OCR_TEMPLATE.dpi,
+        psm: job.psm || DEFAULT_OCR_TEMPLATE.psm,
+        oem: job.oem || DEFAULT_OCR_TEMPLATE.oem,
+        min_text_chars: job.min_text_chars || DEFAULT_OCR_TEMPLATE.min_text_chars,
+        ocr_addon: job.ocr_addon || DEFAULT_OCR_TEMPLATE.ocr_addon,
+    };
 }
 
 export async function POST(request: Request) {
@@ -58,6 +96,13 @@ export async function POST(request: Request) {
             source_id: string;
             source_url_id: string;
             document_id: string;
+            mode: string;
+            lang: string;
+            dpi: string;
+            psm: string;
+            oem: string;
+            min_text_chars: string;
+            ocr_addon: string;
         }> = [];
 
         for (let i = 0; i < jobs.length; i++) {
@@ -65,6 +110,17 @@ export async function POST(request: Request) {
             const id = String(firstId + i);
             const sourceUrlId = job.source_url_id ?? '';
             const documentId = job.document_id ?? '';
+            const ocrTemplate = job.task === 'ocr'
+                ? resolveOcrTemplate(job)
+                : {
+                    mode: '',
+                    lang: '',
+                    dpi: '',
+                    psm: '',
+                    oem: '',
+                    min_text_chars: '',
+                    ocr_addon: '',
+                };
 
             const redisJob = {
                 id,
@@ -81,6 +137,13 @@ export async function POST(request: Request) {
                 completed_at: '',
                 error_message: '',
                 cron_time: '',
+                mode: ocrTemplate.mode,
+                lang: ocrTemplate.lang,
+                dpi: ocrTemplate.dpi,
+                psm: ocrTemplate.psm,
+                oem: ocrTemplate.oem,
+                min_text_chars: ocrTemplate.min_text_chars,
+                ocr_addon: ocrTemplate.ocr_addon,
             };
 
             pipeline.hset(`job:${id}`, redisJob);
@@ -92,6 +155,13 @@ export async function POST(request: Request) {
                 source_id: job.source_id,
                 source_url_id: sourceUrlId,
                 document_id: documentId,
+                mode: ocrTemplate.mode,
+                lang: ocrTemplate.lang,
+                dpi: ocrTemplate.dpi,
+                psm: ocrTemplate.psm,
+                oem: ocrTemplate.oem,
+                min_text_chars: ocrTemplate.min_text_chars,
+                ocr_addon: ocrTemplate.ocr_addon,
             });
         }
 

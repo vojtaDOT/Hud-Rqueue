@@ -1,0 +1,32 @@
+{
+    "discovery": {
+      "scope": ".official-desk-section__posts.row",
+      "before": [],
+      "fields": [
+        {
+          "name": "source_url",
+          "type": "href",
+          "selector": "ul.official-desk-section__posts > li.col-md-6 > article.official-post > h2.official-post_heading > a"
+        }
+      ],
+      "repeater": "section.base-section > div.container > ul.official-desk-section__posts > li.col-md-6 > article.official-post",
+      "pagination": null
+    },
+    "playwright": true,
+    "processing": [
+      {
+        "scope": "section#documents-section > div.container",
+        "before": [],
+        "fields": [
+          {
+            "name": "file_url",
+            "type": "href",
+            "selector": ".base-text"
+          }
+        ],
+        "repeater": ".file-download.download-button",
+        "url_type": "Default Documents",
+        "pagination": null
+      }
+    ]
+  }

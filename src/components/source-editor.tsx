@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ChevronRight, Globe, Loader2, Search } from 'lucide-react';
+import { ChevronRight, Globe, Loader2, Rss, Search } from 'lucide-react';
 
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import { SimulatorSidebar, SimulatorSidebarRef } from '@/components/simulator/simulator-sidebar';
@@ -38,6 +38,8 @@ interface Obec {
     kraj_id: string;
     kraj_nazev: string;
 }
+
+type CrawlStrategy = 'list' | 'rss';
 
 function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
     const output: ScopeModule[] = [];
@@ -169,6 +171,10 @@ export function SourceEditor() {
     const [obec, setObec] = useState<Obec | null>(null);
     const [obecSearch, setObecSearch] = useState('');
     const [baseUrl, setBaseUrl] = useState('');
+    const [crawlStrategy, setCrawlStrategy] = useState<CrawlStrategy>('list');
+    const [detectingRss, setDetectingRss] = useState(false);
+    const [rssFeedOptions, setRssFeedOptions] = useState<string[]>([]);
+    const [lastAutoDetectedUrl, setLastAutoDetectedUrl] = useState<string | null>(null);
 
     const [sourceTypes, setSourceTypes] = useState<SourceType[]>([]);
     const [obecResults, setObecResults] = useState<Obec[]>([]);
@@ -273,6 +279,10 @@ export function SourceEditor() {
     };
 
     const handlePlaywrightToggleRequest = (nextEnabled: boolean) => {
+        if (crawlStrategy === 'rss' && nextEnabled) {
+            toast.info('Playwright není pro RSS feed potřeba.');
+            return false;
+        }
         if (!nextEnabled && sidebarRef.current?.hasAnyPlaywrightActions()) {
             const confirmed = window.confirm(
                 'Vypnutí Playwright odstraní Playwright kroky ve Phase 1 i Phase 2. Pokračovat?',
@@ -283,6 +293,60 @@ export function SourceEditor() {
         setPlaywrightEnabled(nextEnabled);
         return true;
     };
+
+    const detectRssFeeds = useCallback(async (options?: { silentWhenNotFound?: boolean }) => {
+        if (!/^https?:\/\//.test(baseUrl)) {
+            if (!options?.silentWhenNotFound) {
+                toast.error('Zadejte platnou URL začínající na http:// nebo https://');
+            }
+            return;
+        }
+
+        setDetectingRss(true);
+        try {
+            const response = await fetch(`/api/sources/rss-detect?url=${encodeURIComponent(baseUrl)}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Detekce RSS selhala');
+            }
+
+            const feedUrls: string[] = Array.isArray(data.feed_urls)
+                ? data.feed_urls.filter((item: unknown): item is string => typeof item === 'string')
+                : [];
+
+            if (feedUrls.length < 1) {
+                setLastAutoDetectedUrl(baseUrl);
+                setRssFeedOptions([]);
+                if (!options?.silentWhenNotFound) {
+                    toast.info('RSS/Atom feed nebyl nalezen.');
+                }
+                return;
+            }
+
+            setRssFeedOptions(feedUrls);
+            setCrawlStrategy('rss');
+            setPlaywrightEnabled(false);
+            setBaseUrl(feedUrls[0]);
+            setLastAutoDetectedUrl(feedUrls[0]);
+
+            toast.success(`Nalezen RSS/Atom feed (${feedUrls.length})`);
+        } catch (error) {
+            if (!options?.silentWhenNotFound) {
+                toast.error(error instanceof Error ? error.message : 'Nepodařilo se detekovat RSS feed');
+            }
+        } finally {
+            setDetectingRss(false);
+        }
+    }, [baseUrl]);
+
+    const maybeAutoDetectRss = useCallback(() => {
+        const normalizedUrl = baseUrl.trim();
+        if (!/^https?:\/\//.test(normalizedUrl)) return;
+        if (lastAutoDetectedUrl === normalizedUrl) return;
+        setLastAutoDetectedUrl(normalizedUrl);
+        void detectRssFeeds({ silentWhenNotFound: true });
+    }, [baseUrl, detectRssFeeds, lastAutoDetectedUrl]);
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -295,26 +359,31 @@ export function SourceEditor() {
             toast.error('Base URL musí začínat na http:// nebo https://');
             return;
         }
-        if (!workflowData) {
-            toast.error('Workflow není připravený.');
-            return;
-        }
+        let workflowToSave: ScrapingWorkflow | null = null;
+        let crawlParams: ReturnType<typeof generateUnifiedCrawlParams> | null = null;
 
-        const workflowToSave: ScrapingWorkflow = {
-            ...workflowData,
-            playwright_enabled: playwrightEnabled,
-        };
+        if (crawlStrategy === 'list') {
+            if (!workflowData) {
+                toast.error('Workflow není připravený.');
+                return;
+            }
 
-        const validationError = validateWorkflow(workflowToSave);
-        if (validationError) {
-            toast.error(validationError);
-            return;
+            workflowToSave = {
+                ...workflowData,
+                playwright_enabled: playwrightEnabled,
+            };
+
+            const validationError = validateWorkflow(workflowToSave);
+            if (validationError) {
+                toast.error(validationError);
+                return;
+            }
+
+            crawlParams = generateUnifiedCrawlParams(workflowToSave);
         }
 
         setSubmitting(true);
         try {
-            const crawlParams = generateUnifiedCrawlParams(workflowToSave);
-
             const response = await fetch('/api/sources', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -322,7 +391,7 @@ export function SourceEditor() {
                     name,
                     base_url: baseUrl,
                     enabled: true,
-                    crawl_strategy: 'list',
+                    crawl_strategy: crawlStrategy,
                     extraction_data: workflowToSave,
                     crawl_params: crawlParams,
                     crawl_interval: '1 day',
@@ -344,6 +413,9 @@ export function SourceEditor() {
             setObec(null);
             setObecSearch('');
             setBaseUrl('');
+            setCrawlStrategy('list');
+            setRssFeedOptions([]);
+            setLastAutoDetectedUrl(null);
             setWorkflowData(null);
             setPlaywrightEnabled(false);
             setSelectorPreview(null);
@@ -364,6 +436,12 @@ export function SourceEditor() {
             setSimulatorLoading(true);
         }
     }, [baseUrl]);
+
+    useEffect(() => {
+        if (crawlStrategy === 'rss' && playwrightEnabled) {
+            setPlaywrightEnabled(false);
+        }
+    }, [crawlStrategy, playwrightEnabled]);
 
     return (
         <div className="flex h-full w-full flex-col">
@@ -459,12 +537,47 @@ export function SourceEditor() {
                             <Input
                                 id="baseUrl"
                                 value={baseUrl}
-                                onChange={(e) => setBaseUrl(e.target.value)}
+                                onChange={(e) => {
+                                    setBaseUrl(e.target.value);
+                                    setRssFeedOptions([]);
+                                }}
+                                onBlur={maybeAutoDetectRss}
                                 placeholder="https://example.com/bulletin"
                                 className="border-white/20 bg-white/5 pl-10 text-white placeholder:text-white/40"
                             />
                         </div>
                     </div>
+                    <div className="w-40">
+                        <Label htmlFor="crawlStrategy" className="mb-1.5 block text-sm text-white/70">Strategie</Label>
+                        <Select value={crawlStrategy} onValueChange={(value) => setCrawlStrategy(value as CrawlStrategy)}>
+                            <SelectTrigger id="crawlStrategy" className="border-white/20 bg-white/5 text-white">
+                                <SelectValue placeholder="Strategie" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="list">List</SelectItem>
+                                <SelectItem value="rss">RSS</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void detectRssFeeds()}
+                        disabled={detectingRss || !/^https?:\/\//.test(baseUrl)}
+                        className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                    >
+                        {detectingRss ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Hledám RSS...
+                            </>
+                        ) : (
+                            <>
+                                <Rss className="mr-2 h-4 w-4" />
+                                Detekovat RSS
+                            </>
+                        )}
+                    </Button>
                     <Button
                         type="submit"
                         disabled={submitting}
@@ -483,6 +596,24 @@ export function SourceEditor() {
                         )}
                     </Button>
                 </div>
+
+                {rssFeedOptions.length > 0 && (
+                    <div className="rounded-md border border-white/15 bg-white/5 p-3">
+                        <Label className="mb-1.5 block text-sm text-white/70">Nalezené RSS/Atom feedy</Label>
+                        <Select value={baseUrl} onValueChange={setBaseUrl}>
+                            <SelectTrigger className="border-white/20 bg-black/20 text-white">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {rssFeedOptions.map((feedUrl) => (
+                                    <SelectItem key={feedUrl} value={feedUrl}>
+                                        {feedUrl}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
             </form>
 
             <div className="flex-1 overflow-hidden">

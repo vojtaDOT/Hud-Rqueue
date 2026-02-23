@@ -3,7 +3,8 @@
 import * as React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, XCircle, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { RefreshCw, XCircle, Loader2, Trash2 } from 'lucide-react';
 
 interface WorkerStats {
     total: number;
@@ -136,6 +137,7 @@ const POLL_INTERVAL_MS = 30000;
 export function DashboardRedis() {
     const [stats, setStats] = React.useState<StatsResponse | null>(null);
     const [loading, setLoading] = React.useState(true);
+    const [flushing, setFlushing] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
     const [live, setLive] = React.useState(false);
@@ -200,6 +202,32 @@ export function DashboardRedis() {
             eventSource?.close();
         };
     }, [fetchStats]);
+
+    const handleFlushQueue = async () => {
+        const confirmed = window.confirm(
+            'Opravdu chcete kompletně vymazat celou Redis queue? Tato akce je nevratná.',
+        );
+
+        if (!confirmed) return;
+
+        try {
+            setFlushing(true);
+
+            const response = await fetch('/api/tasks', { method: 'DELETE' });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to flush queue');
+            }
+
+            toast.success(data.message || 'Redis queue byla úspěšně vymazána');
+            await fetchStats();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Nepodařilo se vymazat Redis queue');
+        } finally {
+            setFlushing(false);
+        }
+    };
 
     if (error) {
         return (
@@ -271,10 +299,20 @@ export function DashboardRedis() {
                         </span>
                     )}
                 </div>
-                <Button onClick={fetchStats} variant="outline" size="sm" disabled={loading}>
-                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    Refresh
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button onClick={fetchStats} variant="outline" size="sm" disabled={loading || flushing}>
+                        <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </Button>
+                    <Button onClick={handleFlushQueue} variant="destructive" size="sm" disabled={flushing || loading}>
+                        {flushing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <Trash2 className="mr-2 h-4 w-4" />
+                        )}
+                        {flushing ? 'Flushing...' : 'Flush queue'}
+                    </Button>
+                </div>
             </div>
 
             {loading && !stats ? (

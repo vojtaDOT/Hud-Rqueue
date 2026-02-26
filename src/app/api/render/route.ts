@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+    buildRenderUrl,
+    clampRenderDepth,
+    relaxIframeAttributes,
+    stripIframeSandboxAttributes,
+    stripSecurityMetaTags,
+} from '@/lib/preview-html-utils';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -31,6 +38,7 @@ function stripInlineEventHandlers(html: string): string {
     // Removed scripts often leave broken inline handlers (onload/onclick...) that throw runtime errors.
     return html.replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
 }
+
 
 function parseOriginCandidate(value: string | null): string | null {
     if (!value) return null;
@@ -157,9 +165,16 @@ export async function GET(request: NextRequest) {
     const appOrigin = getRequestOrigin(request);
     const searchParams = request.nextUrl.searchParams;
     const targetUrl = searchParams.get('url');
+    const maxDepth = 3;
+    const rawDepth = Number.parseInt(searchParams.get('depth') ?? '0', 10);
+    const depth = clampRenderDepth(rawDepth, maxDepth + 1);
 
     if (!targetUrl) {
         return NextResponse.json({ error: 'URL parameter is required' }, { status: 400 });
+    }
+
+    if (depth > maxDepth) {
+        return NextResponse.json({ error: 'Render depth limit exceeded' }, { status: 400 });
     }
 
     // Validate URL
@@ -237,9 +252,11 @@ export async function GET(request: NextRequest) {
         // and frequently break preview interaction (consent/chat overlays, frame busting).
         html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
         html = stripInlineEventHandlers(html);
+        html = stripSecurityMetaTags(html);
+        html = stripIframeSandboxAttributes(html);
 
-        // Rewrite iframe src to proxy through our endpoint (fixes cross-origin)
-        const renderBaseUrl = `${appOrigin}/api/render?url=`;
+        const toRenderUrl = (absoluteUrl: string, nextDepth: number) =>
+            buildRenderUrl(appOrigin, absoluteUrl, nextDepth);
 
         // Rewrite anchor hrefs to keep navigation inside preview renderer
         html = html.replace(
@@ -265,7 +282,7 @@ export async function GET(request: NextRequest) {
                     }
                 } catch {}
 
-                const renderedHref = renderBaseUrl + encodeURIComponent(targetHref);
+                const renderedHref = toRenderUrl(targetHref, depth);
                 const attrsWithoutTarget = (before + after).replace(/\s+target=["'][^"']*["']/gi, '');
                 return `<a${attrsWithoutTarget} href="${renderedHref}" target="_self">`;
             }
@@ -286,16 +303,13 @@ export async function GET(request: NextRequest) {
                 } catch {
                     return match;
                 }
-                // Only proxy same-origin frames. Third-party ad/tracker iframes cause noisy recursive render failures.
-                try {
-                    if (new URL(absoluteSrc).origin !== url.origin) {
-                        return match;
-                    }
-                } catch {
+                if (depth >= maxDepth) {
                     return match;
                 }
-                const proxiedSrc = renderBaseUrl + encodeURIComponent(absoluteSrc);
-                return '<iframe' + before + ' src="' + proxiedSrc + '"' + after + ' data-original-src="' + absoluteSrc + '">';
+                const proxiedSrc = toRenderUrl(absoluteSrc, depth + 1);
+                const relaxedBefore = relaxIframeAttributes(before);
+                const relaxedAfter = relaxIframeAttributes(after);
+                return '<iframe' + relaxedBefore + ' src="' + proxiedSrc + '"' + relaxedAfter + ' data-original-src="' + absoluteSrc + '">';
             }
         );
 
@@ -309,6 +323,7 @@ export async function GET(request: NextRequest) {
                 window.__PLAYWRIGHT_RENDERED__ = true;
                 window.__FRAME_PATH__ = window.__FRAME_PATH__ || [];
                 window.__ORIGINAL_URL__ = '${safeTargetUrl}';
+                window.parent.postMessage({ type: 'bridge-ready', mode: 'playwright' }, '*');
                 // Only send loaded message from top frame
                 if (window.__FRAME_PATH__.length === 0) {
                     window.parent.postMessage({ type: 'playwright-loaded', url: '${safeTargetUrl}' }, '*');
@@ -330,6 +345,7 @@ export async function GET(request: NextRequest) {
                         if (e.data.type === 'set-frame-path' && Array.isArray(e.data.framePath)) {
                             FRAME_PATH = e.data.framePath;
                             window.__FRAME_PATH__ = FRAME_PATH;
+                            setTimeout(setupIframes, 0);
                         }
                     });
 
@@ -438,10 +454,13 @@ export async function GET(request: NextRequest) {
                     function getIframeSelector(iframe) {
                         if (iframe.id) return 'iframe#' + iframe.id;
                         if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
-                        const iframes = Array.from(document.querySelectorAll('iframe'));
-                        const idx = iframes.indexOf(iframe);
-                        if (idx >= 0) return 'iframe:nth-of-type(' + (idx + 1) + ')';
-                        return 'iframe';
+                        let idx = 1;
+                        let prev = iframe.previousElementSibling;
+                        while (prev) {
+                            if (prev.tagName === 'IFRAME') idx++;
+                            prev = prev.previousElementSibling;
+                        }
+                        return 'iframe:nth-of-type(' + idx + ')';
                     }
 
                     function detectList(el) {
@@ -629,43 +648,50 @@ export async function GET(request: NextRequest) {
                     function setupIframes() {
                         const iframes = document.querySelectorAll('iframe');
                         iframes.forEach(function(iframe) {
-                            if (iframe.dataset.framePathSent) return;
-                            
-                            const iframeSel = getIframeSelector(iframe);
-                            const newFramePath = FRAME_PATH.concat([iframeSel]);
-                            
-                            // For proxied iframes, send frame path via postMessage
-                            iframe.addEventListener('load', function() {
+                            const getFramePath = function() {
+                                const iframeSel = getIframeSelector(iframe);
+                                return FRAME_PATH.concat([iframeSel]);
+                            };
+
+                            const sendFramePath = function(framePath) {
                                 try {
-                                    iframe.contentWindow?.postMessage({ 
-                                        type: 'set-frame-path', 
-                                        framePath: newFramePath 
+                                    iframe.contentWindow?.postMessage({
+                                        type: 'set-frame-path',
+                                        framePath: framePath,
                                     }, '*');
-                                    if (isSelectionMode) {
-                                        iframe.contentWindow?.postMessage({
-                                            type: 'enable-selection',
-                                            mode: selectionMode,
-                                        }, '*');
-                                    }
                                 } catch {}
-                            });
-                            
-                            // Send immediately if already loaded
-                            try {
-                                if (iframe.contentDocument?.readyState === 'complete') {
-                                    iframe.contentWindow?.postMessage({ 
-                                        type: 'set-frame-path', 
-                                        framePath: newFramePath 
-                                    }, '*');
+                            };
+
+                            if (iframe.dataset.framePathBound !== 'true') {
+                                iframe.addEventListener('load', function() {
+                                    const framePath = getFramePath();
+                                    sendFramePath(framePath);
                                     if (isSelectionMode) {
                                         iframe.contentWindow?.postMessage({
                                             type: 'enable-selection',
                                             mode: selectionMode,
                                         }, '*');
                                     }
-                                }
-                            } catch {}
-                            
+                                });
+                                iframe.dataset.framePathBound = 'true';
+                            }
+
+                            const framePath = getFramePath();
+                            const framePathKey = JSON.stringify(framePath);
+                            if (iframe.dataset.framePathSent !== framePathKey) {
+                                sendFramePath(framePath);
+                                iframe.dataset.framePathSent = framePathKey;
+                            }
+
+                            if (isSelectionMode) {
+                                try {
+                                    iframe.contentWindow?.postMessage({
+                                        type: 'enable-selection',
+                                        mode: selectionMode,
+                                    }, '*');
+                                } catch {}
+                            }
+
                             // Also try to inject directly for same-origin
                             try {
                                 const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
@@ -676,15 +702,13 @@ export async function GET(request: NextRequest) {
                                     iframeDoc.body.appendChild(marker);
                                     
                                     // Set frame path before running script
-                                    iframeDoc.defaultView.__FRAME_PATH__ = newFramePath;
+                                    iframeDoc.defaultView.__FRAME_PATH__ = framePath;
                                     
                                     const script = iframeDoc.createElement('script');
-                                    script.textContent = 'window.__FRAME_PATH__ = ' + JSON.stringify(newFramePath) + ';' + document.getElementById('element-selector').textContent;
+                                    script.textContent = 'window.__FRAME_PATH__ = ' + JSON.stringify(framePath) + ';' + document.getElementById('element-selector').textContent;
                                     iframeDoc.head?.appendChild(script);
                                 }
                             } catch (e) { /* cross-origin - use postMessage */ }
-                            
-                            iframe.dataset.framePathSent = 'true';
                         });
                     }
 
@@ -741,7 +765,7 @@ export async function GET(request: NextRequest) {
                                 targetHref = decodeURIComponent(nestedTarget);
                             }
                         } catch {}
-                        const nextHref = renderPrefix + encodeURIComponent(targetHref);
+                        const nextHref = renderPrefix + encodeURIComponent(targetHref) + '&depth=${depth}';
                         window.location.href = nextHref;
                     }, true);
 
@@ -777,8 +801,6 @@ export async function GET(request: NextRequest) {
                             fullSelector = FRAME_PATH.join(' >>> ') + ' >>> ' + finalSelector;
                         }
                         
-                        // Send to top window
-                        let win = window;
                         const msg = {
                             type: 'element-select',
                             elementInfo: { 
@@ -792,12 +814,13 @@ export async function GET(request: NextRequest) {
                                 inIframe: FRAME_PATH.length > 0
                             }
                         };
-                        
-                        // Bubble up through all parent frames
-                        while (win !== win.parent) {
-                            try { win = win.parent; } catch { break; }
+
+                        // Post only to direct parent; intermediate frames forward it up.
+                        try {
+                            window.parent.postMessage(msg, '*');
+                        } catch {
+                            window.postMessage(msg, '*');
                         }
-                        win.postMessage(msg, '*');
                     }, true);
 
                     window.addEventListener('scroll', updateSelectorHighlightPositions, true);

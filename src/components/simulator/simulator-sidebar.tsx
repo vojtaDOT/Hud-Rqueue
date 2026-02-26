@@ -4,8 +4,6 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useSt
 import {
     ArrowDown,
     ArrowUp,
-    Bot,
-    Clock3,
     Crosshair,
     Download,
     FileText,
@@ -15,25 +13,53 @@ import {
     Settings2,
     Trash2,
     Workflow,
-    X,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type {
     BeforeAction,
-    DataExtractStep,
-    DocumentUrlStep,
-    DownloadFileStep,
     ElementSelector,
     PhaseConfig,
     PlaywrightAction,
     RepeaterNode,
     RepeaterStep,
-    ScopeModule,
     ScrapingWorkflow,
-    SourceUrlStep,
+    ScopeModule,
     SourceUrlType,
 } from '@/lib/crawler-types';
+import {
+    actionHasSelector,
+    appendChildScope,
+    collectRepeaters,
+    collectScopes,
+    createDataExtractStep,
+    createDefaultBeforeAction,
+    createDocumentUrlStep,
+    createDownloadFileStep,
+    createEmptyPhase,
+    createId,
+    createRepeaterNode,
+    createScopeModule,
+    createSourceUrlStep,
+    describeTarget,
+    ensureScopeAndRepeater,
+    findScopeForRepeater,
+    findScopeForStep,
+    findScopeInTree,
+    firstStepTarget,
+    FocusTarget,
+    isPlaywrightBeforeAction,
+    isSameTarget,
+    mapStepsInTree,
+    moveItem,
+    normalizeSelectorWithinScope,
+    removeScopeFromTree,
+    removeStepFromTree,
+    SelectorKey,
+    updateRepeaterInTree,
+    updateScopeInTree,
+    updateStepInTree,
+} from '@/lib/workflow-tree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -44,11 +70,16 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { BeforeActionCard } from '@/components/simulator/sidebar/before-action-card';
+import { RepeaterStepCard } from '@/components/simulator/sidebar/repeater-step-card';
+import { ScopeNodeCard } from '@/components/simulator/sidebar/scope-node-card';
+import { StepChooser } from '@/components/simulator/sidebar/step-chooser';
+import { PhaseEditor } from '@/components/simulator/sidebar/phase-editor';
 
 type PhaseTab = 'discovery' | 'processing';
 type BasicBeforeStepType = 'remove_element' | 'wait_timeout';
 type PlaywrightBeforeStepType = PlaywrightAction['type'];
-type SelectorKey = 'selector' | 'url_selector' | 'filename_selector';
+
 export type SidebarQuickAction =
     | 'scope'
     | 'repeater'
@@ -58,30 +89,6 @@ export type SidebarQuickAction =
     | 'filename_selector'
     | 'pagination'
     | 'auto_scaffold';
-
-type FocusTarget =
-    | { phase: 'discovery'; section: 'before'; index: number }
-    | { phase: 'discovery'; section: 'scope'; scopeId: string }
-    | { phase: 'discovery'; section: 'repeater'; repeaterId: string }
-    | { phase: 'discovery'; section: 'step'; stepId: string; selectorKey: SelectorKey }
-    | { phase: 'discovery'; section: 'pagination'; scopeId: string }
-    | { phase: 'processing'; urlTypeId: string; section: 'before'; index: number }
-    | { phase: 'processing'; urlTypeId: string; section: 'scope'; scopeId: string }
-    | { phase: 'processing'; urlTypeId: string; section: 'repeater'; repeaterId: string }
-    | { phase: 'processing'; urlTypeId: string; section: 'step'; stepId: string; selectorKey: SelectorKey }
-    | { phase: 'processing'; urlTypeId: string; section: 'pagination'; scopeId: string };
-
-interface RepeaterRef {
-    scopeId: string;
-    scopeLabel: string;
-    repeaterId: string;
-    repeaterLabel: string;
-}
-
-interface ScopeRef {
-    scopeId: string;
-    scopeLabel: string;
-}
 
 interface SimulatorSidebarProps {
     onWorkflowChange?: (workflowData: ScrapingWorkflow) => void;
@@ -113,146 +120,6 @@ const PLAYWRIGHT_BEFORE_STEP_TYPES: Array<{ value: PlaywrightBeforeStepType; lab
     { value: 'screenshot', label: 'Screenshot' },
 ];
 
-const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
-    'wait_selector',
-    'wait_network',
-    'click',
-    'scroll',
-    'fill',
-    'select_option',
-    'evaluate',
-    'screenshot',
-]);
-
-function createId(prefix: string): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return `${prefix}-${crypto.randomUUID()}`;
-    }
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
-        return items;
-    }
-    const next = [...items];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    return next;
-}
-
-function isPlaywrightBeforeAction(action: BeforeAction): action is PlaywrightAction {
-    return PLAYWRIGHT_ACTION_TYPES.has(action.type);
-}
-
-function actionHasSelector(action: BeforeAction): action is
-    | { type: 'remove_element'; css_selector: string }
-    | { type: 'wait_selector'; css_selector: string; timeout_ms: number }
-    | { type: 'click'; css_selector: string; wait_after_ms?: number }
-    | { type: 'fill'; css_selector: string; value: string; press_enter: boolean }
-    | { type: 'select_option'; css_selector: string; value: string } {
-    return (
-        action.type === 'remove_element'
-        || action.type === 'wait_selector'
-        || action.type === 'click'
-        || action.type === 'fill'
-        || action.type === 'select_option'
-    );
-}
-
-function createDefaultBeforeAction(type: BeforeAction['type']): BeforeAction {
-    switch (type) {
-        case 'remove_element':
-            return { type: 'remove_element', css_selector: '' };
-        case 'wait_timeout':
-            return { type: 'wait_timeout', ms: 1000 };
-        case 'wait_selector':
-            return { type: 'wait_selector', css_selector: '', timeout_ms: 10000 };
-        case 'wait_network':
-            return { type: 'wait_network', state: 'networkidle' };
-        case 'click':
-            return { type: 'click', css_selector: '', wait_after_ms: 500 };
-        case 'scroll':
-            return { type: 'scroll', count: 3, delay_ms: 500 };
-        case 'fill':
-            return { type: 'fill', css_selector: '', value: '', press_enter: false };
-        case 'select_option':
-            return { type: 'select_option', css_selector: '', value: '' };
-        case 'evaluate':
-            return { type: 'evaluate', script: '' };
-        case 'screenshot':
-            return { type: 'screenshot', filename: 'debug.png' };
-        default:
-            return { type: 'wait_timeout', ms: 1000 };
-    }
-}
-
-function createScopeModule(): ScopeModule {
-    return {
-        id: createId('scope'),
-        css_selector: '',
-        label: '',
-        repeater: null,
-        pagination: null,
-        children: [],
-    };
-}
-
-function createRepeaterNode(): RepeaterNode {
-    return {
-        id: createId('repeater'),
-        css_selector: '',
-        label: '',
-        steps: [],
-    };
-}
-
-function createSourceUrlStep(defaultUrlTypeId?: string): SourceUrlStep {
-    return {
-        id: createId('step'),
-        type: 'source_url',
-        selector: '',
-        extract_type: 'href',
-        url_type_id: defaultUrlTypeId,
-    };
-}
-
-function createDocumentUrlStep(): DocumentUrlStep {
-    return {
-        id: createId('step'),
-        type: 'document_url',
-        selector: '',
-        filename_selector: '',
-    };
-}
-
-function createDownloadFileStep(): DownloadFileStep {
-    return {
-        id: createId('step'),
-        type: 'download_file',
-        url_selector: '',
-        filename_selector: '',
-        file_type_hint: '',
-    };
-}
-
-function createDataExtractStep(defaultKey = ''): DataExtractStep {
-    return {
-        id: createId('step'),
-        type: 'data_extract',
-        key: defaultKey,
-        selector: '',
-        extract_type: 'text',
-    };
-}
-
-function createEmptyPhase(): PhaseConfig {
-    return {
-        before: [],
-        chain: [],
-    };
-}
-
 function createDefaultWorkflow(playwrightEnabled: boolean): ScrapingWorkflow {
     return {
         playwright_enabled: playwrightEnabled,
@@ -271,311 +138,6 @@ function getActionLabel(action: BeforeAction): string {
     if (action.type === 'remove_element') return 'Remove Element';
     if (action.type === 'wait_timeout') return 'Wait Timeout';
     return PLAYWRIGHT_BEFORE_STEP_TYPES.find((item) => item.value === action.type)?.label ?? action.type;
-}
-
-function updateScopeInTree(
-    scopes: ScopeModule[],
-    scopeId: string,
-    updater: (scope: ScopeModule) => ScopeModule,
-): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.id === scopeId) {
-            changed = true;
-            return updater(scope);
-        }
-        const [children, childChanged] = updateScopeInTree(scope.children, scopeId, updater);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function updateRepeaterInTree(
-    scopes: ScopeModule[],
-    repeaterId: string,
-    updater: (repeater: RepeaterNode) => RepeaterNode,
-): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.repeater?.id === repeaterId) {
-            changed = true;
-            return { ...scope, repeater: updater(scope.repeater) };
-        }
-        const [children, childChanged] = updateRepeaterInTree(scope.children, repeaterId, updater);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function updateStepInTree(
-    scopes: ScopeModule[],
-    stepId: string,
-    updater: (step: RepeaterStep) => RepeaterStep,
-): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.repeater) {
-            const stepIndex = scope.repeater.steps.findIndex((step) => step.id === stepId);
-            if (stepIndex >= 0) {
-                changed = true;
-                return {
-                    ...scope,
-                    repeater: {
-                        ...scope.repeater,
-                        steps: scope.repeater.steps.map((step) => (
-                            step.id === stepId ? updater(step) : step
-                        )),
-                    },
-                };
-            }
-        }
-        const [children, childChanged] = updateStepInTree(scope.children, stepId, updater);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function removeStepFromTree(scopes: ScopeModule[], stepId: string): [ScopeModule[], boolean] {
-    let changed = false;
-    const next = scopes.map((scope) => {
-        if (scope.repeater?.steps.some((step) => step.id === stepId)) {
-            changed = true;
-            return {
-                ...scope,
-                repeater: {
-                    ...scope.repeater,
-                    steps: scope.repeater.steps.filter((step) => step.id !== stepId),
-                },
-            };
-        }
-        const [children, childChanged] = removeStepFromTree(scope.children, stepId);
-        if (!childChanged) return scope;
-        changed = true;
-        return { ...scope, children };
-    });
-    return [next, changed];
-}
-
-function removeScopeFromTree(scopes: ScopeModule[], scopeId: string): [ScopeModule[], boolean] {
-    let removed = false;
-    const filtered = scopes
-        .filter((scope) => {
-            if (scope.id === scopeId) {
-                removed = true;
-                return false;
-            }
-            return true;
-        })
-        .map((scope) => {
-            const [children, childRemoved] = removeScopeFromTree(scope.children, scopeId);
-            if (!childRemoved) return scope;
-            removed = true;
-            return { ...scope, children };
-        });
-    return [filtered, removed];
-}
-
-function appendChildScope(scopes: ScopeModule[], parentScopeId: string, child: ScopeModule): [ScopeModule[], boolean] {
-    return updateScopeInTree(scopes, parentScopeId, (scope) => ({
-        ...scope,
-        children: [...scope.children, child],
-    }));
-}
-
-function findScopeInTree(scopes: ScopeModule[], scopeId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.id === scopeId) {
-            return scope;
-        }
-        const child = findScopeInTree(scope.children, scopeId);
-        if (child) {
-            return child;
-        }
-    }
-    return null;
-}
-
-function findScopeForRepeater(scopes: ScopeModule[], repeaterId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.repeater?.id === repeaterId) {
-            return scope;
-        }
-        const child = findScopeForRepeater(scope.children, repeaterId);
-        if (child) {
-            return child;
-        }
-    }
-    return null;
-}
-
-function findScopeForStep(scopes: ScopeModule[], stepId: string): ScopeModule | null {
-    for (const scope of scopes) {
-        if (scope.repeater?.steps.some((step) => step.id === stepId)) {
-            return scope;
-        }
-        const child = findScopeForStep(scope.children, stepId);
-        if (child) {
-            return child;
-        }
-    }
-    return null;
-}
-
-function mapStepsInTree(
-    scopes: ScopeModule[],
-    mapper: (step: RepeaterStep) => RepeaterStep,
-): ScopeModule[] {
-    return scopes.map((scope) => ({
-        ...scope,
-        repeater: scope.repeater
-            ? {
-                ...scope.repeater,
-                steps: scope.repeater.steps.map(mapper),
-            }
-            : null,
-        children: mapStepsInTree(scope.children, mapper),
-    }));
-}
-
-function collectRepeaters(scopes: ScopeModule[]): RepeaterRef[] {
-    const result: RepeaterRef[] = [];
-    const walk = (nodes: ScopeModule[], parentPath: string[]) => {
-        nodes.forEach((scope, index) => {
-            const scopeLabel = scope.label.trim() || `Scope ${parentPath.concat(String(index + 1)).join('.')}`;
-            if (scope.repeater) {
-                result.push({
-                    scopeId: scope.id,
-                    scopeLabel,
-                    repeaterId: scope.repeater.id,
-                    repeaterLabel: scope.repeater.label.trim() || `Repeater (${scopeLabel})`,
-                });
-            }
-            walk(scope.children, parentPath.concat(String(index + 1)));
-        });
-    };
-    walk(scopes, []);
-    return result;
-}
-
-function collectScopes(scopes: ScopeModule[]): ScopeRef[] {
-    const result: ScopeRef[] = [];
-    const walk = (nodes: ScopeModule[], parentPath: string[]) => {
-        nodes.forEach((scope, index) => {
-            const scopeLabel = scope.label.trim() || `Scope ${parentPath.concat(String(index + 1)).join('.')}`;
-            result.push({ scopeId: scope.id, scopeLabel });
-            walk(scope.children, parentPath.concat(String(index + 1)));
-        });
-    };
-    walk(scopes, []);
-    return result;
-}
-
-function normalizeSelectorWithinScope(selector: string, scopeSelector?: string): string {
-    if (!scopeSelector?.trim()) {
-        return selector.trim();
-    }
-
-    const full = selector.trim();
-    const scope = scopeSelector.trim();
-    if (!full || !scope) return full;
-    if (full === scope) return full;
-    if (full.startsWith(`${scope} > `)) return full.slice(scope.length + 3).trim();
-    if (full.startsWith(`${scope} `)) return full.slice(scope.length + 1).trim();
-    return full;
-}
-
-function describeTarget(target: FocusTarget): string {
-    const phase = target.phase === 'discovery' ? 'Discovery' : 'Processing';
-    if (target.section === 'before') return `${phase} > Before #${target.index + 1}`;
-    if (target.section === 'scope') return `${phase} > Scope`;
-    if (target.section === 'repeater') return `${phase} > Repeater`;
-    if (target.section === 'pagination') return `${phase} > Pagination`;
-    const selectorLabel = target.selectorKey === 'filename_selector'
-        ? 'Filename selector'
-        : target.selectorKey === 'url_selector'
-            ? 'URL selector'
-            : 'Selector';
-    return `${phase} > Step > ${selectorLabel}`;
-}
-
-function ensureScopeAndRepeater(
-    phase: PhaseConfig,
-    preferredScopeId: string | null,
-    preferredRepeaterId: string | null,
-): { phase: PhaseConfig; scopeId: string; repeaterId: string } {
-    let nextPhase = phase;
-    let scopeId = preferredScopeId;
-    let repeaterId = preferredRepeaterId;
-
-    if (!scopeId || !findScopeInTree(nextPhase.chain, scopeId)) {
-        const scope = createScopeModule();
-        nextPhase = { ...nextPhase, chain: [...nextPhase.chain, scope] };
-        scopeId = scope.id;
-        repeaterId = null;
-    }
-
-    const existingScope = findScopeInTree(nextPhase.chain, scopeId);
-    if (!existingScope) {
-        const scope = createScopeModule();
-        nextPhase = { ...nextPhase, chain: [...nextPhase.chain, scope] };
-        scopeId = scope.id;
-        repeaterId = null;
-    } else if (existingScope.repeater) {
-        repeaterId = existingScope.repeater.id;
-    }
-
-    if (!repeaterId || !findScopeForRepeater(nextPhase.chain, repeaterId)) {
-        const repeater = createRepeaterNode();
-        const [chain] = updateScopeInTree(nextPhase.chain, scopeId, (scope) => ({
-            ...scope,
-            repeater,
-        }));
-        nextPhase = { ...nextPhase, chain };
-        repeaterId = repeater.id;
-    }
-
-    return { phase: nextPhase, scopeId, repeaterId };
-}
-
-function isSameTarget(a: FocusTarget | null, b: FocusTarget | null): boolean {
-    return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function firstStepTarget(
-    scopes: ScopeModule[],
-    phaseKey: { phase: 'discovery' } | { phase: 'processing'; urlTypeId: string },
-): FocusTarget | null {
-    for (const scope of scopes) {
-        const repeater = scope.repeater;
-        if (repeater) {
-            for (const step of repeater.steps) {
-                if (step.type === 'source_url' || step.type === 'data_extract') {
-                    return phaseKey.phase === 'discovery'
-                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'selector' }
-                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'selector' };
-                }
-                if (step.type === 'document_url') {
-                    return phaseKey.phase === 'discovery'
-                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'selector' }
-                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'selector' };
-                }
-                if (step.type === 'download_file') {
-                    return phaseKey.phase === 'discovery'
-                        ? { phase: 'discovery', section: 'step', stepId: step.id, selectorKey: 'url_selector' }
-                        : { phase: 'processing', urlTypeId: phaseKey.urlTypeId, section: 'step', stepId: step.id, selectorKey: 'url_selector' };
-                }
-            }
-        }
-        const child = firstStepTarget(scope.children, phaseKey);
-        if (child) return child;
-    }
-    return null;
 }
 
 export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebarProps>(({
@@ -1219,10 +781,11 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'before', index };
 
         return (
-            <div key={`before-${index}`} className="rounded-lg border border-white/10 bg-black/30 p-2">
-                <div className="mb-2 flex items-center justify-between text-xs text-white/70">
-                    <span>{getActionLabel(action)}</span>
-                    <div className="flex gap-1">
+            <BeforeActionCard
+                key={`before-${index}`}
+                title={getActionLabel(action)}
+                actions={(
+                    <>
                         <Button
                             type="button"
                             size="icon"
@@ -1259,8 +822,9 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         >
                             <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                    </div>
-                </div>
+                    </>
+                )}
+            >
 
                 {action.type === 'remove_element' && (
                     <div className="flex items-center gap-1">
@@ -1564,7 +1128,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         }}
                     />
                 )}
-            </div>
+            </BeforeActionCard>
         );
     };
 
@@ -1589,16 +1153,19 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                 : 'Data Extract';
 
         return (
-            <div key={step.id} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                <div className="mb-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/70">
+            <RepeaterStepCard
+                key={step.id}
+                header={(
+                    <>
                         {step.type === 'source_url' && <Link2 className="h-3.5 w-3.5 text-cyan-300" />}
                         {step.type === 'document_url' && <FileText className="h-3.5 w-3.5 text-sky-300" />}
                         {step.type === 'download_file' && <Download className="h-3.5 w-3.5 text-emerald-300" />}
                         {step.type === 'data_extract' && <FolderTree className="h-3.5 w-3.5 text-green-300" />}
                         <span>{stepTitle}</span>
-                    </div>
-                    <div className="flex gap-1">
+                    </>
+                )}
+                actions={(
+                    <>
                         <Button
                             type="button"
                             size="icon"
@@ -1641,8 +1208,9 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         >
                             <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                    </div>
-                </div>
+                    </>
+                )}
+            >
 
                 {step.type === 'source_url' && (
                     <div className="space-y-2">
@@ -1858,7 +1426,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         </div>
                     </div>
                 )}
-            </div>
+            </RepeaterStepCard>
         );
     };
 
@@ -1872,10 +1440,12 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'pagination', scopeId: scope.id };
 
         return (
-            <div key={scope.id} className={cn('space-y-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 p-3', depth > 0 && 'ml-4')}>
-                <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Scope</div>
-                    <div className="flex gap-1">
+            <ScopeNodeCard
+                key={scope.id}
+                depth={depth}
+                title="Scope"
+                actions={(
+                    <>
                         <Button
                             type="button"
                             size="sm"
@@ -1899,8 +1469,9 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         >
                             <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                    </div>
-                </div>
+                    </>
+                )}
+            >
 
                 <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2 flex items-center gap-1">
@@ -2096,204 +1667,45 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         {scope.children.map((child) => renderScopeNode(child, depth + 1))}
                     </div>
                 )}
-            </div>
+            </ScopeNodeCard>
         );
     };
 
     const renderPhaseEditor = () => (
-        <div className="space-y-4">
-            {armedTarget && (
-                <section className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3">
-                    <div className="flex items-center justify-between gap-2 text-xs text-cyan-100">
-                        <span className="font-semibold">Armed: {describeTarget(armedTarget)}</span>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-cyan-100 hover:bg-cyan-500/20"
-                            onClick={cancelArmedTarget}
-                        >
-                            <X className="mr-1 h-3.5 w-3.5" />
-                            Cancel (Esc)
-                        </Button>
-                    </div>
-                </section>
+        <PhaseEditor
+            stepChooser={(
+                <StepChooser
+                    armedTargetLabel={armedTarget ? describeTarget(armedTarget) : null}
+                    onCancelArmed={cancelArmedTarget}
+                    beforeOptions={BASIC_BEFORE_STEP_TYPES}
+                    beforeToAdd={beforeToAdd}
+                    onBeforeToAddChange={(value) => setBeforeToAdd(value as BasicBeforeStepType)}
+                    onAddBasicBeforeAction={addBasicBeforeAction}
+                    playwrightEnabled={playwrightEnabled}
+                    playwrightOptions={PLAYWRIGHT_BEFORE_STEP_TYPES}
+                    playwrightToAdd={playwrightToAdd}
+                    onPlaywrightToAddChange={(value) => setPlaywrightToAdd(value as PlaywrightBeforeStepType)}
+                    onAddPlaywrightAction={addPlaywrightAction}
+                    onAddScope={addScopeStep}
+                    onAddRepeater={addRepeaterStep}
+                    onAddSourceUrl={addSourceUrlStep}
+                    onAddDocumentUrl={addDocumentUrlStep}
+                    onAddDownloadFile={addDownloadFileStep}
+                    onAddDataExtract={addDataExtractStep}
+                    onAddPagination={addPaginationStep}
+                    isDiscoveryTab={activeTab === 'discovery'}
+                    effectiveSelectedScopeId={effectiveSelectedScopeId}
+                    effectiveSelectedRepeaterId={effectiveSelectedRepeaterId}
+                    repeaterRefs={repeaterRefs}
+                    scopeRefs={scopeRefs}
+                    onSelectedRepeaterChange={setSelectedRepeaterId}
+                />
             )}
-            <section className="rounded-lg border border-white/10 bg-white/5 p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
-                <div className="space-y-3">
-                    <div className="rounded-lg border border-white/10 bg-black/30 p-2">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
-                            <Clock3 className="h-3.5 w-3.5" />
-                            Before
-                        </div>
-                        <div className="flex gap-2">
-                            <Select value={beforeToAdd} onValueChange={(value) => setBeforeToAdd(value as BasicBeforeStepType)}>
-                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {BASIC_BEFORE_STEP_TYPES.map((item) => (
-                                        <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Button type="button" size="sm" onClick={addBasicBeforeAction} className="h-8">
-                                <Plus className="mr-1 h-3.5 w-3.5" />
-                                Add
-                            </Button>
-                        </div>
-                    </div>
-
-                    {playwrightEnabled && (
-                        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2">
-                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-purple-200">
-                                <Bot className="h-3.5 w-3.5" />
-                                Playwright
-                            </div>
-                            <div className="flex gap-2">
-                                <Select value={playwrightToAdd} onValueChange={(value) => setPlaywrightToAdd(value as PlaywrightBeforeStepType)}>
-                                    <SelectTrigger className="h-8 border-purple-500/20 bg-black/30 text-xs text-white">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PLAYWRIGHT_BEFORE_STEP_TYPES.map((item) => (
-                                            <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Button type="button" size="sm" onClick={addPlaywrightAction} className="h-8">
-                                    <Plus className="mr-1 h-3.5 w-3.5" />
-                                    Add
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
-                            <FolderTree className="h-3.5 w-3.5" />
-                            Core
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
-                                onClick={addScopeStep}
-                            >
-                                + Scope
-                            </Button>
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-amber-500/40 bg-transparent text-amber-100"
-                                disabled={!effectiveSelectedScopeId}
-                                onClick={addRepeaterStep}
-                            >
-                                + Repeater
-                            </Button>
-                            <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={setSelectedRepeaterId}>
-                                <SelectTrigger className="h-8 border-green-500/40 bg-black/30 text-xs text-white">
-                                    <SelectValue placeholder="Step target repeater" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {repeaterRefs.map((item) => (
-                                        <SelectItem key={item.repeaterId} value={item.repeaterId}>
-                                            {item.scopeLabel} {'->'} {item.repeaterLabel}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {activeTab === 'discovery' ? (
-                                <>
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
-                                        disabled={!effectiveSelectedRepeaterId}
-                                        onClick={addSourceUrlStep}
-                                    >
-                                        + Source URL
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 border-sky-500/40 bg-transparent text-sky-100"
-                                        disabled={!effectiveSelectedRepeaterId}
-                                        onClick={addDocumentUrlStep}
-                                    >
-                                        + Document URL
-                                    </Button>
-                                </>
-                            ) : (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 border-emerald-500/40 bg-transparent text-emerald-100"
-                                    disabled={!effectiveSelectedRepeaterId}
-                                    onClick={addDownloadFileStep}
-                                >
-                                    + Download File
-                                </Button>
-                            )}
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-green-500/40 bg-transparent text-green-100"
-                                disabled={!effectiveSelectedRepeaterId}
-                                onClick={addDataExtractStep}
-                            >
-                                + Data Extract
-                            </Button>
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-red-500/40 bg-transparent text-red-100"
-                                disabled={!effectiveSelectedScopeId}
-                                onClick={addPaginationStep}
-                            >
-                                + Pagination
-                            </Button>
-                        </div>
-                        <div className="mt-2 text-[11px] text-white/50">
-                            Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'}
-                            {' | '}
-                            Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-white/60">Before Pipeline</div>
-                {currentPhase.before.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-white/20 py-4 text-center text-xs text-white/40">
-                        No before actions
-                    </div>
-                ) : (
-                    currentPhase.before.map((action, index) => renderBeforeAction(action, index))
-                )}
-            </section>
-
-            <section className="space-y-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-cyan-200">Core Chain</div>
-                {currentPhase.chain.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-white/20 py-8 text-center text-sm text-white/40">
-                        Add Scope in Step Chooser to start chain
-                    </div>
-                ) : (
-                    currentPhase.chain.map((scope) => renderScopeNode(scope, 0))
-                )}
-            </section>
-        </div>
+            hasBeforeActions={currentPhase.before.length > 0}
+            beforeActions={currentPhase.before.map((action, index) => renderBeforeAction(action, index))}
+            hasCoreChain={currentPhase.chain.length > 0}
+            coreChain={currentPhase.chain.map((scope) => renderScopeNode(scope, 0))}
+        />
     );
 
     return (

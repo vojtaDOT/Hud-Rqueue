@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stripIframeSandboxAttributes, stripSecurityMetaTags } from '@/lib/preview-html-utils';
 
 const PREVIEW_BLOCKED_PATTERNS = [
     'demos\\.telma\\.ai',
@@ -244,11 +245,8 @@ export async function GET(request: NextRequest) {
 
                 html = stripProblematicThirdPartySnippets(html);
 
-                // Strip Content-Security-Policy meta tags
-                html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, '');
-
-                // Strip X-Frame-Options meta tags
-                html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?X-Frame-Options["']?[^>]*>/gi, '');
+                html = stripSecurityMetaTags(html);
+                html = stripIframeSandboxAttributes(html);
 
                 // Strip existing base tags to avoid conflicts
                 html = html.replace(/<base[^>]*>/gi, '');
@@ -493,10 +491,13 @@ export async function GET(request: NextRequest) {
                         let pageTypeDetected = false;
                         let pageType = null;
 
+                        window.parent.postMessage({ type: 'bridge-ready', mode: 'proxy' }, '*');
+
                         window.addEventListener('message', function(event) {
                             if (event.data?.type === 'set-frame-path' && Array.isArray(event.data.framePath)) {
                                 FRAME_PATH = event.data.framePath;
                                 window.__FRAME_PATH__ = FRAME_PATH;
+                                setTimeout(setupIframes, 0);
                             }
                         });
 
@@ -798,19 +799,23 @@ export async function GET(request: NextRequest) {
                         function getIframeSelector(iframe) {
                             if (iframe.id) return 'iframe#' + iframe.id;
                             if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
-                            const iframes = Array.from(document.querySelectorAll('iframe'));
-                            const idx = iframes.indexOf(iframe);
-                            if (idx >= 0) return 'iframe:nth-of-type(' + (idx + 1) + ')';
-                            return 'iframe';
+                            let idx = 1;
+                            let prev = iframe.previousElementSibling;
+                            while (prev) {
+                                if (prev.tagName === 'IFRAME') idx++;
+                                prev = prev.previousElementSibling;
+                            }
+                            return 'iframe:nth-of-type(' + idx + ')';
                         }
 
                         function setupIframes() {
                             document.querySelectorAll('iframe').forEach(function(iframe) {
-                                if (iframe.dataset.framePathBound === 'true') return;
+                                const getFramePath = function() {
+                                    const iframeSelector = getIframeSelector(iframe);
+                                    return FRAME_PATH.concat([iframeSelector]);
+                                };
 
-                                const iframeSelector = getIframeSelector(iframe);
-                                const framePath = FRAME_PATH.concat([iframeSelector]);
-                                const sendFramePath = function() {
+                                const sendFramePath = function(framePath) {
                                     try {
                                         iframe.contentWindow?.postMessage({
                                             type: 'set-frame-path',
@@ -819,20 +824,37 @@ export async function GET(request: NextRequest) {
                                     } catch {}
                                 };
 
-                                iframe.addEventListener('load', function() {
-                                    sendFramePath();
-                                    if (isSelectionMode) {
-                                        try {
-                                            iframe.contentWindow?.postMessage({
-                                                type: 'enable-selection',
-                                                mode: selectionMode,
-                                            }, '*');
-                                        } catch {}
-                                    }
-                                });
+                                if (iframe.dataset.framePathBound !== 'true') {
+                                    iframe.addEventListener('load', function() {
+                                        const framePath = getFramePath();
+                                        sendFramePath(framePath);
+                                        if (isSelectionMode) {
+                                            try {
+                                                iframe.contentWindow?.postMessage({
+                                                    type: 'enable-selection',
+                                                    mode: selectionMode,
+                                                }, '*');
+                                            } catch {}
+                                        }
+                                    });
+                                    iframe.dataset.framePathBound = 'true';
+                                }
 
-                                sendFramePath();
-                                iframe.dataset.framePathBound = 'true';
+                                const framePath = getFramePath();
+                                const framePathKey = JSON.stringify(framePath);
+                                if (iframe.dataset.framePathSent !== framePathKey) {
+                                    sendFramePath(framePath);
+                                    iframe.dataset.framePathSent = framePathKey;
+                                }
+
+                                if (isSelectionMode) {
+                                    try {
+                                        iframe.contentWindow?.postMessage({
+                                            type: 'enable-selection',
+                                            mode: selectionMode,
+                                        }, '*');
+                                    } catch {}
+                                }
                             });
                         }
 

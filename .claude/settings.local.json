@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "mcp__plugin_figma_figma-desktop__get_design_context"
+      "mcp__plugin_figma_figma-desktop__get_design_context",
+      "mcp__Control_your_Mac__osascript",
+      "Bash(env)",
+      "Bash(python3:*)",
+      "Bash(# Look for MCP auth tokens in keychain security find-generic-password -s \"\"figma\"\")",
+      "Bash(# Check for figma tokens in Claude''s IndexedDB / Local Storage python3 -c \"\" import os, glob # Look for leveldb files that might contain figma tokens claude_dir = os.path.expanduser\\(''~/Library/Application Support/Claude''\\) for root, dirs, files in os.walk\\(claude_dir\\): for f in files: if f.endswith\\(''.log''\\) or f.endswith\\(''.ldb''\\): path = os.path.join\\(root, f\\) try: with open\\(path, ''rb''\\) as fp: content = fp.read\\(\\) if b''figma'' in content.lower\\(\\) and b''token'' in content.lower\\(\\): print\\(f''Found in: {path}''\\) except: pass \"\")",
+      "Bash(# Check claude code plugins for stored auth find ~/.claude/plugins -name \"\"*.json\"\" | xargs grep -l \"\"token\\\\|auth\\\\|credential\"\")",
+      "Bash(open \"figma://file/3xXlrMABLIXvSTZ7ug79Rb/hud-operator\")",
+      "WebFetch(domain:api.figma.com)",
+      "Bash(pgrep:*)"
     ]
   }
 }

@@ -24,6 +24,7 @@ Internal web scraping automation platform. Visual workflow builder, Redis job qu
 | Variable | Description |
 |----------|-------------|
 | `REDIS_URL` | Redis connection string |
+| `DEV` | Optional debug toggle for `/pipeline` (`true`,`1`,`yes`,`on` => enabled) |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
 
@@ -63,6 +64,7 @@ The app runs on port `3000`. Redis and Supabase are external services — config
    | Name | Value |
    |------|-------|
    | `REDIS_URL` | `redis://...` |
+   | `DEV` | `false` |
    | `NEXT_PUBLIC_SUPABASE_URL` | `https://your-project.supabase.co` |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `your-anon-key` |
 
@@ -83,6 +85,7 @@ services:
       - "3000:3000"
     environment:
       - REDIS_URL=${REDIS_URL}
+      - DEV=${DEV}
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
     restart: unless-stopped

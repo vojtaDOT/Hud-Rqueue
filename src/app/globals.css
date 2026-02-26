@@ -141,6 +141,15 @@
   }
 }
 
+@keyframes pipeline-flow-connector-run {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
 .pipeline-stage-enter {
   animation: pipeline-stage-enter 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -148,4 +157,10 @@
 .pipeline-status-shimmer {
   background-size: 200% 100%;
   animation: pipeline-status-shimmer 1600ms linear infinite;
+}
+
+.pipeline-flow-connector {
+  background-image: linear-gradient(90deg, rgb(59 130 246 / 0.25), rgb(56 189 248 / 0.9), rgb(59 130 246 / 0.25));
+  background-size: 200% 100%;
+  animation: pipeline-flow-connector-run 1200ms linear infinite;
 }

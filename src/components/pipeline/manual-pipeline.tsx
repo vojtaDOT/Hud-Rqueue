@@ -11,6 +11,9 @@ import {
     ScanText,
     BarChart3,
     AlertCircle,
+    Copy,
+    ExternalLink,
+    TriangleAlert,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -18,11 +21,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { useSources, type Source } from '@/hooks/use-sources';
+import { useIngestionItems } from '@/hooks/use-ingestion-items';
+import { useIngestionRuns } from '@/hooks/use-ingestion-runs';
 import type {
     PipelineCreatedJob,
+    PipelineIngestionItem,
     PipelineJobRequest,
     PipelineJobStatus,
     PipelineJobStatusValue,
+    PipelineRunListItem,
+    PipelineRunScope,
     PipelineRunState,
     PipelineStage,
     PipelineSummary,
@@ -42,25 +50,39 @@ interface DocumentItem {
     source_url_id: string;
     url: string;
     filename: string | null;
+    checksum: string | null;
+    created_at: string;
+    last_seen_at: string | null;
     updated_at: string;
+    meta: unknown;
     external_storage: unknown;
 }
 
 interface IngestionRunItem {
     id: string;
-    source_url_id: string;
+    source_id: string;
+    source_url_id: string | null;
     status: string;
-    started_at: string;
+    active_stage: string | null;
+    started_at: string | null;
     finished_at: string | null;
+    error_message: string | null;
     created_at: string;
+    updated_at: string | null;
     stats_json: unknown;
 }
 
 interface IngestionItemRow {
     id: string;
     run_id: string | null;
-    document_id: string;
-    source_url_id: string;
+    source_id: string | null;
+    document_id: string | null;
+    source_url_id: string | null;
+    item_key: string | null;
+    item_label: string | null;
+    stage: string | null;
+    item_type: string | null;
+    status: string | null;
     ingest_status: string;
     error_message: string | null;
     last_error_message: string | null;
@@ -70,6 +92,15 @@ interface IngestionItemRow {
     created_at: string;
     filename: string | null;
     document_url: string;
+    file_kind: string | null;
+    file_checksum: string | null;
+    ingest_reason: string | null;
+    job_id: string | null;
+    step_order: number | null;
+    context_json: unknown;
+    payload_json: unknown;
+    first_seen_at: string | null;
+    last_seen_at: string | null;
 }
 
 interface QueueOperatorJobProgress {
@@ -189,6 +220,99 @@ function hasBlobStorage(value: unknown): boolean {
 
 function hasText(value: string | null | undefined): boolean {
     return Boolean(value && value.trim().length > 0);
+}
+
+function getNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
+function getString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function formatBytes(bytes: number | null): string {
+    if (bytes === null || bytes < 0) return '—';
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / (1024 ** idx);
+    return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function toPrettyJson(value: unknown): string {
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+}
+
+interface DocumentDebugDetails {
+    blobUuid: string | null;
+    blobEndpoint: string | null;
+    blobBucket: string | null;
+    blobExtension: string | null;
+    blobDocumentKey: string | null;
+    blobInputKey: string | null;
+    sourcePageUrl: string | null;
+    fileSizeBytes: number | null;
+    fileContentType: string | null;
+    fileChecksum: string | null;
+    uploadTimestamp: string | null;
+}
+
+interface OcrUnifiedRow {
+    documentId: string;
+    document: DocumentItem | null;
+    latestJob: PipelineJobStatus | null;
+    jobCount: number;
+    isCandidate: boolean;
+    blobUuid: string | null;
+}
+
+function getDocumentDebugDetails(doc: DocumentItem, sourcePageUrl: string | null): DocumentDebugDetails {
+    const storage = isObjectRecord(doc.external_storage) ? doc.external_storage : null;
+    const meta = isObjectRecord(doc.meta) ? doc.meta : null;
+    const storageUpload = meta && isObjectRecord(meta.storage_upload) ? meta.storage_upload : null;
+    const outputs = storage && isObjectRecord(storage.outputs) ? storage.outputs : null;
+
+    let outputSizeBytes: number | null = null;
+    if (outputs) {
+        for (const value of Object.values(outputs)) {
+            if (!isObjectRecord(value)) continue;
+            const size = getNumber(value.size_bytes);
+            if (size !== null) {
+                outputSizeBytes = size;
+                break;
+            }
+        }
+    }
+
+    const storageBlock = storageUpload && isObjectRecord(storageUpload.storage)
+        ? storageUpload.storage
+        : null;
+    const documentKey = getString(storageBlock?.document_key)
+        ?? getString(storageBlock?.input_key)
+        ?? getString(storage?.worker && isObjectRecord(storage.worker) ? storage.worker.input_key : null);
+
+    return {
+        blobUuid: getString(storage?.uuid),
+        blobEndpoint: getString(storage?.endpoint),
+        blobBucket: getString(storage?.bucket),
+        blobExtension: getString(storage?.extension),
+        blobDocumentKey: documentKey,
+        blobInputKey: getString(storage?.worker && isObjectRecord(storage.worker) ? storage.worker.input_key : null),
+        sourcePageUrl: getString(storageUpload?.url) ?? sourcePageUrl,
+        fileSizeBytes: getNumber(storageUpload?.file_size) ?? outputSizeBytes,
+        fileContentType: getString(storageUpload?.content_type),
+        fileChecksum: getString(storageUpload?.checksum) ?? getString(doc.checksum),
+        uploadTimestamp: getString(storageUpload?.uploaded_at),
+    };
 }
 
 function isIngestionRunIssue(run: IngestionRunItem): boolean {
@@ -312,6 +436,7 @@ function toPendingStatuses(jobs: PipelineCreatedJob[]): PipelineJobStatus[] {
         id: job.id,
         task: job.task,
         status: 'pending',
+        run_id: job.run_id,
         attempts: '0',
         error_message: '',
         started_at: '',
@@ -323,10 +448,16 @@ function toPendingStatuses(jobs: PipelineCreatedJob[]): PipelineJobStatus[] {
     }));
 }
 
-export function ManualPipeline() {
+interface ManualPipelineProps {
+    devMode: boolean;
+}
+
+export function ManualPipeline({ devMode }: ManualPipelineProps) {
     const { sources, loading: sourcesLoading } = useSources();
+    const [runScope, setRunScope] = React.useState<PipelineRunScope>('active');
     const [runState, setRunState] = React.useState<PipelineRunState>({
         selectedSourceId: null,
+        selectedRunId: null,
         runStartedAt: null,
         activeStage: 'sources',
     });
@@ -345,6 +476,22 @@ export function ManualPipeline() {
     const [ingestionRuns, setIngestionRuns] = React.useState<IngestionRunItem[]>([]);
     const [ingestionItems, setIngestionItems] = React.useState<IngestionItemRow[]>([]);
     const [ingestionLoading, setIngestionLoading] = React.useState(false);
+
+    const {
+        runs: activeRuns,
+        loading: activeRunsLoading,
+        refresh: refreshActiveRuns,
+    } = useIngestionRuns('active');
+    const {
+        runs: historyRuns,
+        loading: historyRunsLoading,
+        refresh: refreshHistoryRuns,
+    } = useIngestionRuns('history');
+    const {
+        items: selectedRunItems,
+        loading: selectedRunItemsLoading,
+        refresh: refreshSelectedRunItems,
+    } = useIngestionItems(runState.selectedRunId);
 
     const [submittingDiscovery, setSubmittingDiscovery] = React.useState(false);
     const [submittingDownload, setSubmittingDownload] = React.useState(false);
@@ -366,6 +513,25 @@ export function ManualPipeline() {
     const selectedSource = React.useMemo(
         () => sources.find((source) => String(source.id) === runState.selectedSourceId) ?? null,
         [sources, runState.selectedSourceId],
+    );
+    const allRuns = React.useMemo(() => {
+        const byId = new Map<string, PipelineRunListItem>();
+        for (const run of [...activeRuns, ...historyRuns]) {
+            byId.set(String(run.id), run);
+        }
+        return Array.from(byId.values()).sort((a, b) => {
+            const aTime = parseDate(a.started_at)?.getTime() ?? 0;
+            const bTime = parseDate(b.started_at)?.getTime() ?? 0;
+            return bTime - aTime;
+        });
+    }, [activeRuns, historyRuns]);
+    const scopedRuns = React.useMemo(
+        () => (runScope === 'active' ? activeRuns : historyRuns),
+        [activeRuns, historyRuns, runScope],
+    );
+    const selectedRun = React.useMemo(
+        () => allRuns.find((run) => String(run.id) === runState.selectedRunId) ?? null,
+        [allRuns, runState.selectedRunId],
     );
     const selectedSourceHasDiscoveryDownloadFile = React.useMemo(
         () => hasDiscoveryDownloadFileStep(selectedSource?.crawl_params),
@@ -440,6 +606,74 @@ export function ManualPipeline() {
             ocrFailed: ocrJobs.filter((job) => job.status === 'failed').length,
         };
     }, [changedDocuments, discoveredSourceUrls, ocrJobs, runState.runStartedAt]);
+
+    React.useEffect(() => {
+        if (!selectedRun) {
+            setIngestionRuns([]);
+            return;
+        }
+
+        setIngestionRuns([{
+            id: String(selectedRun.id),
+            source_id: String(selectedRun.source_id),
+            source_url_id: selectedRun.source_url_id ? String(selectedRun.source_url_id) : null,
+            status: String(selectedRun.status),
+            active_stage: selectedRun.active_stage ? String(selectedRun.active_stage) : null,
+            started_at: selectedRun.started_at,
+            finished_at: selectedRun.finished_at,
+            error_message: selectedRun.error_message,
+            created_at: selectedRun.created_at,
+            updated_at: selectedRun.updated_at,
+            stats_json: selectedRun.stats_json ?? null,
+        }]);
+    }, [selectedRun]);
+
+    React.useEffect(() => {
+        if (!selectedRun) return;
+        const nextSourceId = selectedRun.source_id ? String(selectedRun.source_id) : null;
+        const nextStartedAt = selectedRun.started_at || selectedRun.created_at || null;
+        const activeStageRaw = String(selectedRun.active_stage || '').toLowerCase();
+        const mappedStage: PipelineStage | null = activeStageRaw === 'documents'
+            ? 'download'
+            : activeStageRaw === 'discovery' || activeStageRaw === 'ocr' || activeStageRaw === 'summary'
+                ? (activeStageRaw as PipelineStage)
+                : null;
+        setRunState((prev) => {
+            if (
+                prev.selectedSourceId === nextSourceId
+                && prev.runStartedAt === nextStartedAt
+                && (!mappedStage || prev.activeStage === mappedStage)
+            ) {
+                return prev;
+            }
+            return {
+                ...prev,
+                selectedSourceId: nextSourceId || prev.selectedSourceId,
+                runStartedAt: nextStartedAt,
+                activeStage: mappedStage || prev.activeStage,
+            };
+        });
+    }, [selectedRun]);
+
+    React.useEffect(() => {
+        const normalizedItems = selectedRunItems.map((item) => ({
+            ...item,
+            document_id: item.document_id,
+            source_url_id: item.source_url_id,
+            source_id: item.source_id,
+            ingest_status: item.ingest_status || item.status || 'pending',
+            updated_at: item.updated_at || item.last_seen_at || item.created_at,
+            created_at: item.created_at,
+            document_url: item.document_url || '',
+            payload_json: item.payload_json ?? null,
+            context_json: item.context_json ?? null,
+        })) as IngestionItemRow[];
+        setIngestionItems(normalizedItems);
+    }, [selectedRunItems]);
+
+    React.useEffect(() => {
+        setIngestionLoading(activeRunsLoading || historyRunsLoading || selectedRunItemsLoading);
+    }, [activeRunsLoading, historyRunsLoading, selectedRunItemsLoading]);
 
     const discoverCounts = React.useMemo(() => getJobCounts(discoverJobs), [discoverJobs]);
     const downloadCounts = React.useMemo(() => getJobCounts(downloadJobs), [downloadJobs]);
@@ -621,7 +855,7 @@ export function ManualPipeline() {
             while (true) {
                 const { data, error } = await supabase
                     .from('source_urls')
-                    .select('id, source_id, updated_at')
+                    .select('id, source_id, url, label, created_at, updated_at')
                     .range(from, from + pageSize - 1);
 
                 if (error) throw error;
@@ -645,35 +879,17 @@ export function ManualPipeline() {
         }
     }, []);
 
-    const fetchDiscoveredSourceUrls = React.useCallback(async (sourceId: string, runStartedAt: string) => {
-        const { data, error } = await supabase
-            .from('source_urls')
-            .select('id, source_id, url, label, created_at, updated_at')
-            .eq('source_id', sourceId)
-            .gte('updated_at', runStartedAt)
-            .order('updated_at', { ascending: false });
+    const fetchDocumentsByIds = React.useCallback(async (documentIds: string[]) => {
+        if (documentIds.length === 0) return [] as DocumentItem[];
 
-        if (error) throw error;
-        const normalized = (data ?? []).map((row) => ({
-            ...row,
-            id: String(row.id),
-            source_id: String(row.source_id),
-        }));
-        setDiscoveredSourceUrls(normalized);
-        return normalized;
-    }, []);
-
-    const fetchDocumentsForSourceUrlIds = React.useCallback(async (sourceUrlIds: string[]) => {
-        if (sourceUrlIds.length === 0) return [] as DocumentItem[];
-
-        const batches = chunk(sourceUrlIds, 300);
+        const batches = chunk(documentIds, 300);
         const allRows: DocumentItem[] = [];
 
         for (const batch of batches) {
             const { data, error } = await supabase
                 .from('documents')
-                .select('id, source_url_id, url, filename, updated_at, external_storage')
-                .in('source_url_id', batch)
+                .select('id, source_url_id, url, filename, checksum, created_at, last_seen_at, updated_at, meta, external_storage')
+                .in('id', batch)
                 .is('deleted_at', null)
                 .order('updated_at', { ascending: false });
 
@@ -686,131 +902,172 @@ export function ManualPipeline() {
         return allRows;
     }, []);
 
-    const fetchSourceUrlIdsForSource = React.useCallback(async (sourceId: string) => {
-        const pageSize = 1000;
-        let from = 0;
-        const ids: string[] = [];
-
-        while (true) {
-            const { data, error } = await supabase
-                .from('source_urls')
-                .select('id')
-                .eq('source_id', sourceId)
-                .range(from, from + pageSize - 1);
-
-            if (error) throw error;
-            if (!data || data.length === 0) break;
-
-            ids.push(...data.map((row) => String(row.id)));
-            if (data.length < pageSize) break;
-            from += pageSize;
-        }
-
-        return ids;
-    }, []);
-
-    const fetchChangedDocuments = React.useCallback(async (sourceId: string, runStartedAt: string) => {
-        const sourceUrlIds = await fetchSourceUrlIdsForSource(sourceId);
-        if (sourceUrlIds.length === 0) {
-            setChangedDocuments([]);
-            return;
-        }
-
-        const batches = chunk(sourceUrlIds, 300);
-        const allRows: DocumentItem[] = [];
-
-        for (const batch of batches) {
-            const { data, error } = await supabase
-                .from('documents')
-                .select('id, source_url_id, url, filename, updated_at, external_storage')
-                .in('source_url_id', batch)
-                .is('deleted_at', null)
-                .gte('updated_at', runStartedAt)
-                .order('updated_at', { ascending: false });
-
-            if (error) throw error;
-            if (data) {
-                allRows.push(...data.map((row) => ({ ...row, source_url_id: String(row.source_url_id) })));
-            }
-        }
-
-        setChangedDocuments(allRows);
-    }, [fetchSourceUrlIdsForSource]);
-
-    const fetchIngestionDiagnostics = React.useCallback(async (sourceId: string, runStartedAt: string) => {
+    const fetchIngestionDiagnostics = React.useCallback(async (runId: string) => {
         setIngestionLoading(true);
         try {
-            const sourceUrlIds = await fetchSourceUrlIdsForSource(sourceId);
-            if (sourceUrlIds.length === 0) {
+            const { data: runData, error: runError } = await supabase
+                .from('ingestion_runs')
+                .select('*')
+                .eq('id', runId)
+                .single();
+
+            if (runError) throw runError;
+            if (!runData) {
                 setIngestionRuns([]);
                 setIngestionItems([]);
+                setDiscoveredSourceUrls([]);
+                setDownloadDocuments([]);
+                setChangedDocuments([]);
                 return;
             }
 
-            const batches = chunk(sourceUrlIds, 300);
-            const allRuns: IngestionRunItem[] = [];
+            const normalizedRun: IngestionRunItem = {
+                id: String(runData.id),
+                source_id: String((runData as { source_id?: string | number }).source_id ?? runState.selectedSourceId ?? ''),
+                source_url_id: (runData as { source_url_id?: string | number | null }).source_url_id
+                    ? String((runData as { source_url_id?: string | number }).source_url_id)
+                    : null,
+                status: String((runData as { status?: string }).status ?? 'pending'),
+                active_stage: (runData as { active_stage?: string | null }).active_stage ?? null,
+                started_at: (runData as { started_at?: string | null }).started_at ?? null,
+                finished_at: (runData as { finished_at?: string | null }).finished_at ?? null,
+                error_message: (runData as { error_message?: string | null }).error_message ?? null,
+                created_at: String((runData as { created_at?: string }).created_at ?? ''),
+                updated_at: (runData as { updated_at?: string | null }).updated_at ?? null,
+                stats_json: (runData as { stats_json?: unknown }).stats_json ?? null,
+            };
+            setIngestionRuns([normalizedRun]);
+
+            const { data: items, error: itemError } = await supabase
+                .from('ingestion_items')
+                .select('*')
+                .eq('run_id', runId)
+                .order('last_seen_at', { ascending: false })
+                .order('updated_at', { ascending: false });
+
+            if (itemError) throw itemError;
+
             const allItems: IngestionItemRow[] = [];
+            for (const item of items ?? []) {
+                const row = item as PipelineIngestionItem;
+                allItems.push({
+                    ...row,
+                    id: String(row.id),
+                    run_id: row.run_id ? String(row.run_id) : null,
+                    source_id: row.source_id ? String(row.source_id) : null,
+                    document_id: row.document_id ? String(row.document_id) : null,
+                    source_url_id: row.source_url_id ? String(row.source_url_id) : null,
+                    item_key: row.item_key ?? null,
+                    item_label: row.item_label ?? null,
+                    stage: row.stage ?? null,
+                    item_type: row.item_type ?? null,
+                    status: row.status ?? null,
+                    ingest_status: row.ingest_status || row.status || 'pending',
+                    ingest_reason: row.ingest_reason ?? null,
+                    job_id: row.job_id ?? null,
+                    step_order: row.step_order ?? null,
+                    context_json: row.context_json ?? null,
+                    updated_at: row.updated_at,
+                    created_at: row.created_at,
+                    filename: row.filename ?? null,
+                    document_url: row.document_url || '',
+                    file_kind: row.file_kind ?? null,
+                    file_checksum: row.file_checksum ?? null,
+                    payload_json: row.payload_json ?? null,
+                    error_message: row.error_message ?? null,
+                    last_error_message: row.last_error_message ?? null,
+                    review_reason: row.review_reason ?? null,
+                    needs_review: Boolean(row.needs_review),
+                    first_seen_at: row.first_seen_at ?? null,
+                    last_seen_at: row.last_seen_at ?? null,
+                });
+            }
 
-            for (const batch of batches) {
-                const { data: runs, error: runError } = await supabase
-                    .from('ingestion_runs')
-                    .select('id, source_url_id, status, started_at, finished_at, created_at, stats_json')
-                    .in('source_url_id', batch)
-                    .gte('created_at', runStartedAt)
-                    .order('created_at', { ascending: false });
+            setIngestionItems(allItems);
 
-                if (runError) throw runError;
-                if (runs) {
-                    allRuns.push(...runs.map((row) => ({
-                        ...row,
-                        id: String(row.id),
-                        source_url_id: String(row.source_url_id),
-                    })));
-                }
+            const sourceUrlMetaById = new Map<string, SourceUrlMeta>();
+            for (const meta of sourceUrlMeta) {
+                sourceUrlMetaById.set(String(meta.id), meta);
+            }
 
-                const { data: items, error: itemError } = await supabase
-                    .from('ingestion_items')
-                    .select(
-                        'id, run_id, document_id, source_url_id, ingest_status, error_message, last_error_message, review_reason, needs_review, updated_at, created_at, filename, document_url',
-                    )
-                    .in('source_url_id', batch)
-                    .gte('updated_at', runStartedAt)
-                    .order('updated_at', { ascending: false });
+            const sourceUrlIds = Array.from(new Set(
+                allItems
+                    .filter((item) => item.stage === 'discovery' || item.item_type === 'source_url')
+                    .map((item) => item.source_url_id)
+                    .filter((item): item is string => Boolean(item)),
+            ));
 
-                if (itemError) throw itemError;
-                if (items) {
-                    allItems.push(...items.map((row) => ({
-                        ...row,
-                        id: String(row.id),
-                        run_id: row.run_id ? String(row.run_id) : null,
-                        document_id: String(row.document_id),
-                        source_url_id: String(row.source_url_id),
-                    })));
+            const missingSourceUrlIds = sourceUrlIds.filter((id) => !sourceUrlMetaById.has(id));
+            if (missingSourceUrlIds.length > 0) {
+                const { data: missingSourceUrls, error: missingSourceUrlsError } = await supabase
+                    .from('source_urls')
+                    .select('id, source_id, url, label, created_at, updated_at')
+                    .in('id', missingSourceUrlIds);
+                if (!missingSourceUrlsError) {
+                    for (const row of missingSourceUrls ?? []) {
+                        sourceUrlMetaById.set(String(row.id), {
+                            ...row,
+                            id: String(row.id),
+                            source_id: String(row.source_id),
+                        });
+                    }
                 }
             }
 
-            setIngestionRuns(allRuns);
-            setIngestionItems(allItems);
+            const discovered = sourceUrlIds.map((sourceUrlId) => {
+                const existing = sourceUrlMetaById.get(sourceUrlId);
+                if (existing) return existing;
+                const item = allItems.find((row) => row.source_url_id === sourceUrlId);
+                return {
+                    id: sourceUrlId,
+                    source_id: normalizedRun.source_id,
+                    url: item?.document_url || item?.item_label || undefined,
+                    label: item?.item_label ?? null,
+                    created_at: item?.created_at,
+                    updated_at: item?.updated_at,
+                } satisfies SourceUrlMeta;
+            });
+            setDiscoveredSourceUrls(discovered);
+
+            const documentIds = Array.from(new Set(
+                allItems
+                    .filter((item) => (
+                        item.document_id
+                        && (item.stage === 'documents' || item.stage === 'ocr' || item.item_type === 'document' || item.item_type === 'ocr_job')
+                    ))
+                    .map((item) => item.document_id)
+                    .filter((item): item is string => Boolean(item)),
+            ));
+
+            const docs = await fetchDocumentsByIds(documentIds);
+            setDownloadDocuments(docs);
+
+            const ocrCandidateIds = new Set(
+                allItems
+                    .filter((item) => item.stage === 'ocr' || item.item_type === 'ocr_job')
+                    .map((item) => item.document_id)
+                    .filter((item): item is string => Boolean(item)),
+            );
+            const changed = ocrCandidateIds.size > 0
+                ? docs.filter((doc) => ocrCandidateIds.has(String(doc.id)))
+                : docs;
+            setChangedDocuments(changed);
         } catch (error) {
             console.error('Failed to fetch ingestion diagnostics:', error);
             toast.error('Nepodařilo se načíst ingestion diagnostiku');
         } finally {
             setIngestionLoading(false);
         }
-    }, [fetchSourceUrlIdsForSource]);
+    }, [fetchDocumentsByIds, runState.selectedSourceId, sourceUrlMeta]);
 
     const refreshDerivedData = React.useCallback(async () => {
-        if (!runState.selectedSourceId || !runState.runStartedAt) return;
+        if (!runState.selectedRunId) return;
 
         setRefreshingData(true);
         try {
-            const discovered = await fetchDiscoveredSourceUrls(runState.selectedSourceId, runState.runStartedAt);
-            const discoveredIds = discovered.map((item) => String(item.id));
-            const docs = await fetchDocumentsForSourceUrlIds(discoveredIds);
-            setDownloadDocuments(docs);
-            await fetchChangedDocuments(runState.selectedSourceId, runState.runStartedAt);
-            await fetchIngestionDiagnostics(runState.selectedSourceId, runState.runStartedAt);
+            await fetchIngestionDiagnostics(runState.selectedRunId);
             await fetchAllSourceUrlMeta();
+            await Promise.all([refreshActiveRuns(), refreshHistoryRuns(), refreshSelectedRunItems()]);
         } catch (error) {
             console.error('Refresh pipeline data failed:', error);
             toast.error('Nepodařilo se obnovit data pipeline');
@@ -819,12 +1076,11 @@ export function ManualPipeline() {
         }
     }, [
         fetchAllSourceUrlMeta,
-        fetchChangedDocuments,
-        fetchDiscoveredSourceUrls,
-        fetchDocumentsForSourceUrlIds,
         fetchIngestionDiagnostics,
-        runState.runStartedAt,
-        runState.selectedSourceId,
+        refreshActiveRuns,
+        refreshHistoryRuns,
+        refreshSelectedRunItems,
+        runState.selectedRunId,
     ]);
 
     const enqueueJobs = React.useCallback(async (jobs: PipelineJobRequest[]) => {
@@ -853,15 +1109,52 @@ export function ManualPipeline() {
         return data.jobs as PipelineJobStatus[];
     }, []);
 
+    const createPipelineRun = React.useCallback(async (sourceId: string) => {
+        const response = await fetch('/api/pipeline/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: sourceId }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.run) {
+            throw new Error(data.error || 'Nepodařilo se vytvořit pipeline run');
+        }
+        return data.run as PipelineRunListItem;
+    }, []);
+
+    const patchPipelineRun = React.useCallback(async (runId: string, updates: Record<string, unknown>) => {
+        const response = await fetch(`/api/pipeline/runs/${encodeURIComponent(runId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Nepodařilo se upravit pipeline run');
+        }
+        return data.run as PipelineRunListItem;
+    }, []);
+
+    const patchSelectedRun = React.useCallback(async (updates: Record<string, unknown>) => {
+        if (!runState.selectedRunId) return;
+        try {
+            await patchPipelineRun(runState.selectedRunId, updates);
+            await Promise.all([refreshActiveRuns(), refreshHistoryRuns()]);
+        } catch (error) {
+            console.error('Failed to patch selected run:', error);
+        }
+    }, [patchPipelineRun, refreshActiveRuns, refreshHistoryRuns, runState.selectedRunId]);
+
     const unlockStage = React.useCallback((stage: PipelineStage) => {
         setMaxVisitedStage((prev) => (
             getStageIndex(stage) > getStageIndex(prev) ? stage : prev
         ));
     }, []);
 
-    const resetRunStateForSource = React.useCallback((sourceId: string, runStartedAt: string) => {
+    const resetRunStateForSource = React.useCallback((sourceId: string, runId: string, runStartedAt: string) => {
         setRunState({
             selectedSourceId: sourceId,
+            selectedRunId: runId,
             runStartedAt,
             activeStage: 'discovery',
         });
@@ -888,35 +1181,86 @@ export function ManualPipeline() {
         setDownloadSkippedByDiscovery(false);
     }, []);
 
+    const handleSelectRun = React.useCallback((run: PipelineRunListItem) => {
+        const runId = String(run.id);
+        const sourceId = String(run.source_id);
+        const startedAt = run.started_at || run.created_at || null;
+        setRunState((prev) => ({
+            ...prev,
+            selectedRunId: runId,
+            selectedSourceId: sourceId,
+            runStartedAt: startedAt,
+            activeStage: prev.activeStage === 'sources' ? 'discovery' : prev.activeStage,
+        }));
+        setMaxVisitedStage('summary');
+        setDiscoverJobs([]);
+        setDownloadJobs([]);
+        setOcrJobs([]);
+        setOperatorJobProgressById({});
+        setOperatorSourceProgress(null);
+        setOperatorConnectionState('idle');
+        setOperatorError(null);
+        setDiscoverySettled(false);
+        setDownloadSettled(false);
+        setOcrSettled(false);
+        setDownloadSkippedByDiscovery(false);
+        void fetchIngestionDiagnostics(runId);
+    }, [fetchIngestionDiagnostics]);
+
+    React.useEffect(() => {
+        if (runState.selectedRunId) return;
+        if (activeRuns.length === 0) return;
+        handleSelectRun(activeRuns[0]);
+    }, [activeRuns, handleSelectRun, runState.selectedRunId]);
+
+    React.useEffect(() => {
+        if (!runState.selectedRunId) return;
+        void fetchIngestionDiagnostics(runState.selectedRunId);
+    }, [fetchIngestionDiagnostics, runState.selectedRunId]);
+
     const handleStartDiscovery = React.useCallback(async (source: Source) => {
         const sourceId = String(source.id);
-        const runStartedAt = new Date().toISOString();
-
-        resetRunStateForSource(sourceId, runStartedAt);
         setSubmittingDiscovery(true);
+        let createdRunId: string | null = null;
 
         try {
+            const run = await createPipelineRun(sourceId);
+            const runId = String(run.id);
+            createdRunId = runId;
+            const runStartedAt = run.started_at || run.created_at || new Date().toISOString();
+
+            resetRunStateForSource(sourceId, runId, runStartedAt);
             const jobs = await enqueueJobs([
-                { task: 'discover', source_id: sourceId, max_attempts: 3, manual: true },
+                { task: 'discover', run_id: runId, source_id: sourceId, max_attempts: 3, manual: true },
             ]);
             setDiscoverJobs(toPendingStatuses(jobs));
+            await Promise.all([refreshActiveRuns(), refreshHistoryRuns()]);
             toast.success(`Discovery zařazeno do fronty pro source #${sourceId}`);
         } catch (error) {
             console.error('Discovery enqueue failed:', error);
+            if (createdRunId) {
+                void patchPipelineRun(createdRunId, {
+                    status: 'failed',
+                    active_stage: 'discovery',
+                    error_message: error instanceof Error ? error.message : 'Discovery enqueue failed',
+                    finished_at: new Date().toISOString(),
+                });
+            }
             toast.error(error instanceof Error ? error.message : 'Nepodařilo se spustit discovery');
         } finally {
             setSubmittingDiscovery(false);
         }
-    }, [enqueueJobs, resetRunStateForSource]);
+    }, [createPipelineRun, enqueueJobs, patchPipelineRun, refreshActiveRuns, refreshHistoryRuns, resetRunStateForSource]);
 
     const handleStartDownload = React.useCallback(async () => {
-        if (!runState.selectedSourceId || discoveredSourceUrls.length === 0 || downloadSkippedByDiscovery) return;
+        if (!runState.selectedSourceId || !runState.selectedRunId || discoveredSourceUrls.length === 0 || downloadSkippedByDiscovery) return;
         setSubmittingDownload(true);
 
         try {
             const jobs = await enqueueJobs(
                 discoveredSourceUrls.map((sourceUrl) => ({
                     task: 'download',
+                    run_id: runState.selectedRunId!,
                     source_id: runState.selectedSourceId!,
                     source_url_id: String(sourceUrl.id),
                     max_attempts: 3,
@@ -924,7 +1268,10 @@ export function ManualPipeline() {
                 })),
             );
             setDownloadJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setRunState((prev) => ({ ...prev, activeStage: 'download' }));
+            unlockStage('download');
             setDownloadSettled(false);
+            void patchSelectedRun({ active_stage: 'documents', status: 'running', error_message: null });
             toast.success(`Download jobs vytvořeny: ${jobs.length}`);
         } catch (error) {
             console.error('Download enqueue failed:', error);
@@ -932,16 +1279,17 @@ export function ManualPipeline() {
         } finally {
             setSubmittingDownload(false);
         }
-    }, [discoveredSourceUrls, downloadSkippedByDiscovery, enqueueJobs, runState.selectedSourceId]);
+    }, [discoveredSourceUrls, downloadSkippedByDiscovery, enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
 
     const handleStartDownloadForSourceUrl = React.useCallback(async (sourceUrlId: string) => {
-        if (!runState.selectedSourceId || downloadSkippedByDiscovery) return;
+        if (!runState.selectedSourceId || !runState.selectedRunId || downloadSkippedByDiscovery) return;
         setSubmittingDownload(true);
 
         try {
             const jobs = await enqueueJobs([
                 {
                     task: 'download',
+                    run_id: runState.selectedRunId,
                     source_id: runState.selectedSourceId,
                     source_url_id: sourceUrlId,
                     max_attempts: 3,
@@ -949,8 +1297,10 @@ export function ManualPipeline() {
                 },
             ]);
             setDownloadJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setRunState((prev) => ({ ...prev, activeStage: 'download' }));
             setDownloadSettled(false);
             unlockStage('download');
+            void patchSelectedRun({ active_stage: 'documents', status: 'running', error_message: null });
             toast.success('Download job vytvořen');
         } catch (error) {
             console.error('Single download enqueue failed:', error);
@@ -958,16 +1308,17 @@ export function ManualPipeline() {
         } finally {
             setSubmittingDownload(false);
         }
-    }, [downloadSkippedByDiscovery, enqueueJobs, runState.selectedSourceId, unlockStage]);
+    }, [downloadSkippedByDiscovery, enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
 
     const handleStartOcr = React.useCallback(async () => {
-        if (!runState.selectedSourceId || changedDocuments.length === 0) return;
+        if (!runState.selectedSourceId || !runState.selectedRunId || changedDocuments.length === 0) return;
         setSubmittingOcr(true);
 
         try {
             const jobs = await enqueueJobs(
                 changedDocuments.map((document) => ({
                     task: 'ocr',
+                    run_id: runState.selectedRunId!,
                     source_id: runState.selectedSourceId!,
                     source_url_id: String(document.source_url_id),
                     document_id: String(document.id),
@@ -977,7 +1328,10 @@ export function ManualPipeline() {
                 })),
             );
             setOcrJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setRunState((prev) => ({ ...prev, activeStage: 'ocr' }));
+            unlockStage('ocr');
             setOcrSettled(false);
+            void patchSelectedRun({ active_stage: 'ocr', status: 'running', error_message: null });
             toast.success(`OCR jobs vytvořeny: ${jobs.length}`);
         } catch (error) {
             console.error('OCR enqueue failed:', error);
@@ -985,16 +1339,17 @@ export function ManualPipeline() {
         } finally {
             setSubmittingOcr(false);
         }
-    }, [changedDocuments, enqueueJobs, runState.selectedSourceId]);
+    }, [changedDocuments, enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
 
     const handleStartOcrForDocument = React.useCallback(async (document: DocumentItem) => {
-        if (!runState.selectedSourceId) return;
+        if (!runState.selectedSourceId || !runState.selectedRunId) return;
         setSubmittingOcr(true);
 
         try {
             const jobs = await enqueueJobs([
                 {
                     task: 'ocr',
+                    run_id: runState.selectedRunId,
                     source_id: runState.selectedSourceId,
                     source_url_id: String(document.source_url_id),
                     document_id: String(document.id),
@@ -1004,8 +1359,10 @@ export function ManualPipeline() {
                 },
             ]);
             setOcrJobs((prev) => [...prev, ...toPendingStatuses(jobs)]);
+            setRunState((prev) => ({ ...prev, activeStage: 'ocr' }));
             setOcrSettled(false);
             unlockStage('ocr');
+            void patchSelectedRun({ active_stage: 'ocr', status: 'running', error_message: null });
             toast.success('OCR job vytvořen');
         } catch (error) {
             console.error('Single OCR enqueue failed:', error);
@@ -1013,7 +1370,7 @@ export function ManualPipeline() {
         } finally {
             setSubmittingOcr(false);
         }
-    }, [enqueueJobs, runState.selectedSourceId, unlockStage]);
+    }, [enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
 
     React.useEffect(() => {
         fetchAllSourceUrlMeta();
@@ -1140,32 +1497,35 @@ export function ManualPipeline() {
         const hasFailure = discoverJobs.some((job) => job.status === 'failed');
         if (hasFailure && !discoverySettled) {
             setDiscoverySettled(true);
+            void patchSelectedRun({
+                status: 'failed',
+                active_stage: 'discovery',
+                error_message: 'Discovery job selhal',
+                finished_at: new Date().toISOString(),
+            });
             toast.error('Discovery job selhal. Zkontrolujte error_message.');
         }
-    }, [discoverJobs, discoverySettled]);
+    }, [discoverJobs, discoverySettled, patchSelectedRun]);
 
     React.useEffect(() => {
-        if (!discoverCompleted || discoverySettled || !runState.selectedSourceId || !runState.runStartedAt) return;
+        if (!discoverCompleted || discoverySettled || !runState.selectedRunId) return;
 
         setDiscoverySettled(true);
         setLoadingDiscoveryDetails(true);
 
         (async () => {
             try {
-                const discovered = await fetchDiscoveredSourceUrls(runState.selectedSourceId!, runState.runStartedAt!);
-                await fetchIngestionDiagnostics(runState.selectedSourceId!, runState.runStartedAt!);
+                await fetchIngestionDiagnostics(runState.selectedRunId!);
                 await fetchAllSourceUrlMeta();
                 if (selectedSourceHasDiscoveryDownloadFile) {
-                    const discoveredIds = discovered.map((item) => String(item.id));
-                    const docs = await fetchDocumentsForSourceUrlIds(discoveredIds);
-                    setDownloadDocuments(docs);
-                    await fetchChangedDocuments(runState.selectedSourceId!, runState.runStartedAt!);
                     setDownloadSkippedByDiscovery(true);
                     setDownloadSettled(true);
+                    void patchSelectedRun({ active_stage: 'ocr', status: 'running', error_message: null });
                     unlockStage('ocr');
                     toast.success('Discovery dokončeno. Download krok přeskočen, soubory připravené pro OCR.');
                 } else {
                     setDownloadSkippedByDiscovery(false);
+                    void patchSelectedRun({ active_stage: 'documents', status: 'running', error_message: null });
                     unlockStage('download');
                     toast.success('Discovery dokončeno');
                 }
@@ -1180,12 +1540,9 @@ export function ManualPipeline() {
         discoverCompleted,
         discoverySettled,
         fetchAllSourceUrlMeta,
-        fetchChangedDocuments,
-        fetchDiscoveredSourceUrls,
-        fetchDocumentsForSourceUrlIds,
         fetchIngestionDiagnostics,
-        runState.runStartedAt,
-        runState.selectedSourceId,
+        patchSelectedRun,
+        runState.selectedRunId,
         selectedSourceHasDiscoveryDownloadFile,
         unlockStage,
     ]);
@@ -1194,23 +1551,26 @@ export function ManualPipeline() {
         const hasFailure = downloadJobs.some((job) => job.status === 'failed');
         if (hasFailure && !downloadSettled) {
             setDownloadSettled(true);
+            void patchSelectedRun({
+                status: 'failed',
+                active_stage: 'documents',
+                error_message: 'Některé download joby selhaly',
+                finished_at: new Date().toISOString(),
+            });
             toast.error('Některé download joby selhaly');
         }
-    }, [downloadJobs, downloadSettled]);
+    }, [downloadJobs, downloadSettled, patchSelectedRun]);
 
     React.useEffect(() => {
-        if (!downloadCompleted || downloadSettled || !runState.selectedSourceId || !runState.runStartedAt) return;
+        if (!downloadCompleted || downloadSettled || !runState.selectedRunId) return;
 
         setDownloadSettled(true);
         setLoadingDownloadDetails(true);
 
         (async () => {
             try {
-                const discoveredIds = discoveredSourceUrls.map((item) => String(item.id));
-                const docs = await fetchDocumentsForSourceUrlIds(discoveredIds);
-                setDownloadDocuments(docs);
-                await fetchChangedDocuments(runState.selectedSourceId!, runState.runStartedAt!);
-                await fetchIngestionDiagnostics(runState.selectedSourceId!, runState.runStartedAt!);
+                await fetchIngestionDiagnostics(runState.selectedRunId!);
+                void patchSelectedRun({ active_stage: 'ocr', status: 'running', error_message: null });
                 unlockStage('ocr');
                 toast.success('Download fáze dokončena');
             } catch (error) {
@@ -1221,14 +1581,11 @@ export function ManualPipeline() {
             }
         })();
     }, [
-        discoveredSourceUrls,
         downloadCompleted,
         downloadSettled,
-        fetchChangedDocuments,
-        fetchDocumentsForSourceUrlIds,
         fetchIngestionDiagnostics,
-        runState.runStartedAt,
-        runState.selectedSourceId,
+        patchSelectedRun,
+        runState.selectedRunId,
         unlockStage,
     ]);
 
@@ -1236,29 +1593,41 @@ export function ManualPipeline() {
         const hasFailure = ocrJobs.some((job) => job.status === 'failed');
         if (hasFailure && !ocrSettled) {
             setOcrSettled(true);
+            void patchSelectedRun({
+                status: 'failed',
+                active_stage: 'ocr',
+                error_message: 'Některé OCR joby selhaly',
+                finished_at: new Date().toISOString(),
+            });
             unlockStage('summary');
             toast.error('Některé OCR joby selhaly');
         }
-    }, [ocrJobs, ocrSettled, unlockStage]);
+    }, [ocrJobs, ocrSettled, patchSelectedRun, unlockStage]);
 
     React.useEffect(() => {
         if (!ocrCompleted || ocrSettled) return;
         setOcrSettled(true);
+        void patchSelectedRun({
+            status: 'completed',
+            active_stage: 'summary',
+            error_message: null,
+            finished_at: new Date().toISOString(),
+        });
         unlockStage('summary');
         toast.success('OCR fáze dokončena');
-    }, [ocrCompleted, ocrSettled, unlockStage]);
+    }, [ocrCompleted, ocrSettled, patchSelectedRun, unlockStage]);
 
     React.useEffect(() => {
-        if (!ocrSettled || !runState.selectedSourceId || !runState.runStartedAt) return;
+        if (!ocrSettled || !runState.selectedRunId) return;
         (async () => {
             setLoadingOcrDetails(true);
             try {
-                await fetchIngestionDiagnostics(runState.selectedSourceId!, runState.runStartedAt!);
+                await fetchIngestionDiagnostics(runState.selectedRunId!);
             } finally {
                 setLoadingOcrDetails(false);
             }
         })();
-    }, [fetchIngestionDiagnostics, ocrSettled, runState.runStartedAt, runState.selectedSourceId]);
+    }, [fetchIngestionDiagnostics, ocrSettled, runState.selectedRunId]);
 
     const renderSourceStatus = (source: Source) => {
         const sourceId = String(source.id);
@@ -1282,6 +1651,95 @@ export function ManualPipeline() {
                 : `objeveno před ${dayDiff} dny`;
 
         return <span className={cn('font-medium', colorClass)}>{label}</span>;
+    };
+
+    const renderRunsPanel = () => {
+        const runsLoading = runScope === 'active' ? activeRunsLoading : historyRunsLoading;
+        return (
+            <Card className="ring-1 ring-blue-500/30">
+                <CardHeader>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                            <CardTitle>Pipeline Runs</CardTitle>
+                            <CardDescription>Nedokončené běhy + historie</CardDescription>
+                        </div>
+                        <div className="inline-flex rounded-md border border-border/80 p-0.5">
+                            <button
+                                type="button"
+                                className={cn(
+                                    'px-3 py-1.5 text-xs rounded',
+                                    runScope === 'active' ? 'bg-blue-500/20 text-blue-200' : 'text-muted-foreground hover:text-foreground',
+                                )}
+                                onClick={() => setRunScope('active')}
+                            >
+                                Aktivní
+                            </button>
+                            <button
+                                type="button"
+                                className={cn(
+                                    'px-3 py-1.5 text-xs rounded',
+                                    runScope === 'history' ? 'bg-blue-500/20 text-blue-200' : 'text-muted-foreground hover:text-foreground',
+                                )}
+                                onClick={() => setRunScope('history')}
+                            >
+                                Historie
+                            </button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {runsLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Načítám runy...
+                        </div>
+                    ) : scopedRuns.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Žádné runy v tomto přehledu.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {scopedRuns.map((run) => {
+                                const source = sources.find((item) => String(item.id) === String(run.source_id));
+                                const selected = String(run.id) === runState.selectedRunId;
+                                const runStatus = String(run.status || 'pending');
+                                const badgeClass = runStatus === 'completed'
+                                    ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                                    : runStatus === 'failed'
+                                        ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                        : runStatus === 'canceled'
+                                            ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
+                                            : 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+                                return (
+                                    <button
+                                        key={run.id}
+                                        type="button"
+                                        onClick={() => handleSelectRun(run)}
+                                        className={cn(
+                                            'w-full rounded-md border px-3 py-2 text-left transition-colors',
+                                            selected
+                                                ? 'border-blue-500/50 bg-blue-500/10'
+                                                : 'border-border hover:bg-muted/30',
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <span className="font-mono text-xs w-20 shrink-0">#{run.id}</span>
+                                            <span className="font-medium min-w-0 flex-1 truncate">
+                                                {source?.name || `Source #${run.source_id}`}
+                                            </span>
+                                            <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs', badgeClass)}>
+                                                {runStatus}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {run.started_at ? new Date(run.started_at).toLocaleString('cs-CZ') : '—'}
+                                            </span>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        );
     };
 
     const renderJobsTable = (jobs: PipelineJobStatus[], emptyLabel: string) => (
@@ -1323,10 +1781,10 @@ export function ManualPipeline() {
     );
 
     const stageDone = (stage: PipelineStage): boolean => {
-        if (stage === 'sources') return Boolean(runState.selectedSourceId);
+        if (stage === 'sources') return Boolean(runState.selectedRunId);
         if (stage === 'discovery') return discoverCompleted;
         if (stage === 'download') return downloadStageCompleted;
-        if (stage === 'ocr') return ocrCompleted;
+        if (stage === 'ocr') return ocrSettled || ocrCompleted;
         if (stage === 'summary') return ocrSettled || ocrCompleted || ocrJobs.some((job) => job.status === 'failed');
         return false;
     };
@@ -1345,10 +1803,117 @@ export function ManualPipeline() {
         () => new Set(discoveredSourceUrls.map((item) => String(item.id))),
         [discoveredSourceUrls],
     );
+    const discoveredSourceUrlById = React.useMemo(() => {
+        const map = new Map<string, SourceUrlMeta>();
+        for (const sourceUrl of discoveredSourceUrls) {
+            map.set(String(sourceUrl.id), sourceUrl);
+        }
+        return map;
+    }, [discoveredSourceUrls]);
     const changedDocumentIds = React.useMemo(
         () => new Set(changedDocuments.map((doc) => String(doc.id))),
         [changedDocuments],
     );
+    const downloadDocumentById = React.useMemo(() => {
+        const map = new Map<string, DocumentItem>();
+        for (const document of downloadDocuments) {
+            map.set(String(document.id), document);
+        }
+        return map;
+    }, [downloadDocuments]);
+    const changedDocumentById = React.useMemo(() => {
+        const map = new Map<string, DocumentItem>();
+        for (const document of changedDocuments) {
+            map.set(String(document.id), document);
+        }
+        return map;
+    }, [changedDocuments]);
+    const ocrJobsByDocumentId = React.useMemo(() => {
+        const map = new Map<string, PipelineJobStatus[]>();
+        for (const job of ocrJobs) {
+            const documentId = job.document_id?.trim();
+            if (!documentId) continue;
+            const existing = map.get(documentId);
+            if (existing) {
+                existing.push(job);
+            } else {
+                map.set(documentId, [job]);
+            }
+        }
+        return map;
+    }, [ocrJobs]);
+    const ocrDocumentRows = React.useMemo<OcrUnifiedRow[]>(() => {
+        const orderedIds: string[] = [];
+        const seen = new Set<string>();
+        const addDocumentId = (value: string | null | undefined) => {
+            const documentId = value?.trim();
+            if (!documentId || seen.has(documentId)) return;
+            seen.add(documentId);
+            orderedIds.push(documentId);
+        };
+
+        for (const document of downloadDocuments) {
+            addDocumentId(String(document.id));
+        }
+
+        for (const documentId of ocrJobsByDocumentId.keys()) {
+            addDocumentId(documentId);
+        }
+
+        return orderedIds.map((documentId) => {
+            const document = downloadDocumentById.get(documentId) ?? changedDocumentById.get(documentId) ?? null;
+            const jobs = ocrJobsByDocumentId.get(documentId) ?? [];
+            const latestJob = jobs.length > 0 ? jobs[jobs.length - 1] : null;
+            return {
+                documentId,
+                document,
+                latestJob,
+                jobCount: jobs.length,
+                isCandidate: changedDocumentIds.has(documentId),
+                blobUuid: document ? getDocumentDebugDetails(document, null).blobUuid : null,
+            };
+        });
+    }, [changedDocumentById, changedDocumentIds, downloadDocumentById, downloadDocuments, ocrJobsByDocumentId]);
+    const ocrDocumentRowById = React.useMemo(() => {
+        const map = new Map<string, OcrUnifiedRow>();
+        for (const row of ocrDocumentRows) {
+            map.set(row.documentId, row);
+        }
+        return map;
+    }, [ocrDocumentRows]);
+    const activeProcessingOcrJob = React.useMemo(() => {
+        const processingJobs = ocrJobs.filter((job) => job.status === 'processing' && hasText(job.document_id));
+        if (processingJobs.length === 0) return null;
+
+        let selected = processingJobs[0];
+        let selectedStartedAt = parseDate(selected.started_at)?.getTime() ?? null;
+
+        for (const job of processingJobs.slice(1)) {
+            const candidateStartedAt = parseDate(job.started_at)?.getTime() ?? null;
+            if (candidateStartedAt === null) continue;
+            if (selectedStartedAt === null || candidateStartedAt > selectedStartedAt) {
+                selected = job;
+                selectedStartedAt = candidateStartedAt;
+            }
+        }
+
+        return selected;
+    }, [ocrJobs]);
+    const activeProcessingDocumentId = activeProcessingOcrJob?.document_id?.trim() || null;
+    const activeProcessingDocumentRow = React.useMemo(() => (
+        activeProcessingDocumentId ? (ocrDocumentRowById.get(activeProcessingDocumentId) ?? null) : null
+    ), [activeProcessingDocumentId, ocrDocumentRowById]);
+    const activeProcessingDocumentUuid = activeProcessingDocumentRow?.blobUuid ?? null;
+
+    const handleCopyToClipboard = React.useCallback(async (value: string, label: string) => {
+        try {
+            await navigator.clipboard.writeText(value);
+            toast.success(`${label} zkopírováno`);
+        } catch (error) {
+            console.error('Copy to clipboard failed:', error);
+            toast.error('Nepodařilo se zkopírovat hodnotu');
+        }
+    }, []);
 
     const discoveryErrors = React.useMemo(() => (
         discoverJobs
@@ -1370,7 +1935,7 @@ export function ManualPipeline() {
             }));
 
         const runErrors = ingestionRuns
-            .filter((run) => discoveredSourceUrlIds.has(run.source_url_id) && isIngestionRunIssue(run))
+            .filter((run) => String(run.id) === runState.selectedRunId && isIngestionRunIssue(run))
             .map((run) => ({
                 id: `run-${run.id}`,
                 source: `Ingestion run #${run.id}`,
@@ -1378,7 +1943,7 @@ export function ManualPipeline() {
             }));
 
         const itemErrors = ingestionItems
-            .filter((item) => discoveredSourceUrlIds.has(item.source_url_id))
+            .filter((item) => Boolean(item.source_url_id) && discoveredSourceUrlIds.has(item.source_url_id!))
             .map((item) => {
                 const message = getIngestionItemIssueMessage(item);
                 if (!message) return null;
@@ -1391,7 +1956,7 @@ export function ManualPipeline() {
             .filter((item): item is { id: string; source: string; message: string } => item !== null);
 
         return [...redisErrors, ...runErrors, ...itemErrors];
-    }, [discoveredSourceUrlIds, downloadJobs, ingestionItems, ingestionRuns]);
+    }, [discoveredSourceUrlIds, downloadJobs, ingestionItems, ingestionRuns, runState.selectedRunId]);
 
     const ocrErrors = React.useMemo(() => {
         const redisErrors = ocrJobs
@@ -1403,7 +1968,7 @@ export function ManualPipeline() {
             }));
 
         const itemErrors = ingestionItems
-            .filter((item) => changedDocumentIds.has(item.document_id))
+            .filter((item) => Boolean(item.document_id) && changedDocumentIds.has(item.document_id!))
             .map((item) => {
                 const message = getIngestionItemIssueMessage(item);
                 if (!message) return null;
@@ -1421,36 +1986,53 @@ export function ManualPipeline() {
     const renderErrorPanel = (
         title: string,
         errors: Array<{ id: string; source: string; message: string }>,
-    ) => (
-        <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-                <h4 className="text-sm font-semibold text-red-300">{title}</h4>
-                {ingestionLoading && (
-                    <span className="inline-flex items-center gap-1 text-xs text-red-200/80">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        loading db...
-                    </span>
-                )}
-            </div>
-            {errors.length === 0 ? (
-                <p className="text-xs text-red-200/80">Žádné chyby v tomto kroku.</p>
-            ) : (
-                <div className="space-y-1.5">
-                    {errors.slice(0, 12).map((error) => (
-                        <div key={error.id} className="text-xs text-red-100">
-                            <span className="font-semibold">{error.source}:</span>{' '}
-                            <span className="break-all">{error.message}</span>
-                        </div>
-                    ))}
-                    {errors.length > 12 && (
-                        <p className="text-xs text-red-200/80">
-                            + dalších {errors.length - 12} chyb
-                        </p>
+    ) => {
+        const visibleErrors = devMode ? errors : errors.slice(0, 12);
+        return (
+            <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-red-300">{title}</h4>
+                    {ingestionLoading && (
+                        <span className="inline-flex items-center gap-1 text-xs text-red-200/80">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            loading db...
+                        </span>
                     )}
                 </div>
-            )}
-        </div>
-    );
+                {visibleErrors.length === 0 ? (
+                    <p className="text-xs text-red-200/80">Žádné chyby v tomto kroku.</p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {visibleErrors.map((error) => (
+                            <div key={error.id} className="text-xs text-red-100">
+                                <span className="font-semibold">{error.source}:</span>{' '}
+                                <span className="break-all">{error.message}</span>
+                            </div>
+                        ))}
+                        {!devMode && errors.length > 12 && (
+                            <p className="text-xs text-red-200/80">
+                                + dalších {errors.length - 12} chyb
+                            </p>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderRawDebugPanel = (title: string, payload: unknown) => {
+        if (!devMode) return null;
+        return (
+            <details className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-sky-300">
+                    {title}
+                </summary>
+                <pre className="mt-2 max-h-80 overflow-auto rounded bg-zinc-950/70 p-2 text-[11px] text-sky-100">
+                    {toPrettyJson(payload)}
+                </pre>
+            </details>
+        );
+    };
 
     const renderStepProgress = (
         label: string,
@@ -1584,6 +2166,14 @@ export function ManualPipeline() {
                     discoveryOperatorState,
                 )}
                 {renderErrorPanel('Chyby discovery', discoveryErrors)}
+                {renderRawDebugPanel('DEV raw: Discovery jobs + Queue-Operator', {
+                    discoverJobs,
+                    discoverCounts,
+                    discoveryOperatorState,
+                    operatorConnectionState,
+                    operatorError,
+                    queueOperatorTrackedJobIds,
+                })}
                 {downloadSkippedByDiscovery && (
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
@@ -1650,6 +2240,28 @@ export function ManualPipeline() {
                 <CardDescription>Výsledek download fáze pro discovered URL</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="text-sm text-muted-foreground">
+                        OCR kandidáti: <span className="font-semibold text-foreground">{changedDocuments.length}</span>
+                    </span>
+                    <Button
+                        onClick={handleStartOcr}
+                        disabled={!downloadStageCompleted || changedDocuments.length === 0 || submittingOcr}
+                        size="sm"
+                    >
+                        {submittingOcr ? (
+                            <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Enqueue...
+                            </>
+                        ) : (
+                            <>
+                                <ScanText className="h-4 w-4 mr-2" />
+                                Scrape all
+                            </>
+                        )}
+                    </Button>
+                </div>
                 {downloadSkippedByDiscovery && (
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
@@ -1663,33 +2275,126 @@ export function ManualPipeline() {
                     downloadOperatorState,
                 )}
                 {renderErrorPanel('Chyby download', downloadErrors)}
+                {renderRawDebugPanel('DEV raw: Download docs + ingestion diagnostika', {
+                    downloadJobs,
+                    downloadCounts,
+                    downloadDocuments,
+                    discoveredSourceUrls,
+                    ingestionRuns,
+                    ingestionItems,
+                    downloadOperatorState,
+                })}
                 <div className="border rounded-md divide-y">
                     {downloadDocuments.length === 0 ? (
                         <p className="p-3 text-sm text-muted-foreground">Zatím nejsou žádné dokumenty.</p>
                     ) : (
-                        downloadDocuments.map((doc) => (
-                            <div key={doc.id} className="p-3 text-sm flex items-center gap-2">
-                                <span className="font-mono text-xs text-muted-foreground w-20">{doc.id}</span>
-                                <span className="flex-1 truncate">{doc.filename || doc.url}</span>
-                                <span className={cn(
-                                    'text-xs font-medium px-2 py-1 rounded-full',
-                                    hasBlobStorage(doc.external_storage)
-                                        ? 'bg-green-500/15 text-green-400'
-                                        : 'bg-amber-500/15 text-amber-400',
-                                )}>
-                                    {hasBlobStorage(doc.external_storage) ? 'Blob OK' : 'Blob missing'}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => handleStartOcrForDocument(doc)}
-                                    disabled={!downloadStageCompleted || submittingOcr}
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Spustit OCR pro tento dokument"
-                                >
-                                    <Play className="h-3 w-3 text-muted-foreground" />
-                                </button>
-                            </div>
-                        ))
+                        downloadDocuments.map((doc) => {
+                            const sourceUrlMeta = discoveredSourceUrlById.get(String(doc.source_url_id));
+                            const sourcePageUrl = sourceUrlMeta?.url ?? null;
+                            const debugDetails = getDocumentDebugDetails(doc, sourcePageUrl);
+                            const blobUuid = debugDetails.blobUuid;
+                            const hasBlob = hasBlobStorage(doc.external_storage);
+                            const missingBlobMeta = !debugDetails.blobUuid || !debugDetails.blobDocumentKey;
+                            const missingContentType = !debugDetails.fileContentType;
+                            const zeroSize = debugDetails.fileSizeBytes === 0;
+
+                            return (
+                                <div key={doc.id} className="p-3 text-sm space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-mono text-xs text-muted-foreground w-20">{doc.id}</span>
+                                        <span className="flex-1 truncate">{doc.filename || doc.url}</span>
+                                        <span className={cn(
+                                            'text-xs font-medium px-2 py-1 rounded-full',
+                                            hasBlob
+                                                ? 'bg-green-500/15 text-green-400'
+                                                : 'bg-amber-500/15 text-amber-400',
+                                        )}>
+                                            {hasBlob ? 'Blob OK' : 'Blob missing'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleStartOcrForDocument(doc)}
+                                            disabled={!downloadStageCompleted || submittingOcr}
+                                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title="Spustit OCR pro tento dokument"
+                                        >
+                                            <Play className="h-3 w-3 text-muted-foreground" />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                                        <span className="text-muted-foreground">Source page:</span>
+                                        {debugDetails.sourcePageUrl ? (
+                                            <a
+                                                href={debugDetails.sourcePageUrl}
+                                                target="_blank"
+                                                rel="noreferrer noopener"
+                                                className="inline-flex items-center gap-1 text-blue-300 hover:underline break-all"
+                                            >
+                                                {debugDetails.sourcePageUrl}
+                                                <ExternalLink className="h-3 w-3" />
+                                            </a>
+                                        ) : (
+                                            <span className="text-amber-300">není dostupná</span>
+                                        )}
+                                    </div>
+
+                                    {devMode && (
+                                        <div className="space-y-2 rounded border border-sky-500/30 bg-sky-500/5 p-2 text-xs">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-semibold text-sky-300">Blob UUID:</span>
+                                                <span className="font-mono text-sky-100 break-all">{blobUuid ?? '—'}</span>
+                                                {blobUuid && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleCopyToClipboard(blobUuid, 'Blob UUID')}
+                                                        className="inline-flex items-center justify-center rounded border border-sky-400/40 bg-sky-500/10 p-1 text-sky-200 hover:bg-sky-500/20"
+                                                        title="Kopírovat UUID"
+                                                    >
+                                                        <Copy className="h-3.5 w-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <div className="grid gap-1 text-[11px] text-sky-100 sm:grid-cols-2">
+                                                <span>Size: {formatBytes(debugDetails.fileSizeBytes)}</span>
+                                                <span>Content-Type: {debugDetails.fileContentType ?? '—'}</span>
+                                                <span>Checksum: {debugDetails.fileChecksum ?? '—'}</span>
+                                                <span>Bucket: {debugDetails.blobBucket ?? '—'}</span>
+                                                <span>Extension: {debugDetails.blobExtension ?? '—'}</span>
+                                                <span>Uploaded: {debugDetails.uploadTimestamp ?? '—'}</span>
+                                                <span>Created: {doc.created_at || '—'}</span>
+                                                <span>Last seen: {doc.last_seen_at || '—'}</span>
+                                                <span className="sm:col-span-2 break-all">Blob key: {debugDetails.blobDocumentKey ?? '—'}</span>
+                                                <span className="sm:col-span-2 break-all">Input key: {debugDetails.blobInputKey ?? '—'}</span>
+                                                <span className="sm:col-span-2 break-all">Endpoint: {debugDetails.blobEndpoint ?? '—'}</span>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                {missingBlobMeta && (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                        <TriangleAlert className="h-3 w-3" />
+                                                        Missing blob metadata
+                                                    </span>
+                                                )}
+                                                {zeroSize && (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                        <TriangleAlert className="h-3 w-3" />
+                                                        File size = 0
+                                                    </span>
+                                                )}
+                                                {missingContentType && (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                        <TriangleAlert className="h-3 w-3" />
+                                                        Missing content-type
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
                     )}
                 </div>
             </CardContent>
@@ -1727,34 +2432,118 @@ export function ManualPipeline() {
                 </div>
                 <div className="rounded-md border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
                     <span>
-                        Stažené dokumenty (download): <span className="font-semibold text-foreground">{downloadDocuments.length}</span>
+                        Dokumenty v seznamu: <span className="font-semibold text-foreground">{ocrDocumentRows.length}</span>
                     </span>
                     <span>
                         OCR kandidáti: <span className="font-semibold text-foreground">{changedDocuments.length}</span>
                     </span>
+                    <span>
+                        Aktivní processing: <span className="font-semibold text-foreground">{activeProcessingDocumentId ? `#${activeProcessingDocumentId}` : '—'}</span>
+                    </span>
                 </div>
-                <div className="border rounded-md divide-y">
-                    {downloadDocuments.length === 0 ? (
-                        <p className="p-3 text-sm text-muted-foreground">Po download kroku zatím nejsou dostupné žádné soubory.</p>
-                    ) : (
-                        downloadDocuments.map((doc) => {
-                            const isCandidate = changedDocumentIds.has(String(doc.id));
-                            return (
-                                <div key={doc.id} className="p-3 text-sm flex items-center gap-2">
-                                    <span className="font-mono text-xs text-muted-foreground w-20">{doc.id}</span>
-                                    <span className="flex-1 truncate">{doc.filename || doc.url}</span>
-                                    <span className={cn(
-                                        'text-xs font-medium px-2 py-1 rounded-full',
-                                        isCandidate ? 'bg-blue-500/15 text-blue-300' : 'bg-zinc-500/20 text-zinc-300',
-                                    )}>
-                                        {isCandidate ? 'OCR candidate' : 'beze změny'}
-                                    </span>
-                                </div>
-                            );
-                        })
-                    )}
+                <div className="rounded-md border border-border/60 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                        <thead className="border-b border-border/60">
+                            <tr>
+                                <th className="text-left p-2">Document ID</th>
+                                <th className="text-left p-2">Dokument</th>
+                                <th className="text-left p-2">Candidate</th>
+                                <th className="text-left p-2">Task status</th>
+                                <th className="text-left p-2">Attempts</th>
+                                <th className="text-left p-2">Retries</th>
+                                <th className="text-left p-2">Error</th>
+                                <th className="text-left p-2">UUID</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {ocrDocumentRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={8} className="p-3 text-muted-foreground">
+                                        Po download kroku zatím nejsou dostupné žádné soubory.
+                                    </td>
+                                </tr>
+                            ) : (
+                                ocrDocumentRows.map((row) => {
+                                    const latestJob = row.latestJob;
+                                    const statusLabel = latestJob ? getStatusLabel(latestJob.status) : 'idle';
+                                    const statusDot = latestJob ? getStatusDot(latestJob.status) : 'bg-zinc-500';
+                                    const retries = row.jobCount > 0 ? row.jobCount - 1 : 0;
+                                    const isActiveProcessing = activeProcessingDocumentId === row.documentId && latestJob?.status === 'processing';
+                                    const displayName = row.document?.filename || row.document?.url || `Dokument #${row.documentId}`;
+
+                                    return (
+                                        <tr key={row.documentId} className={cn('border-b border-border/40', isActiveProcessing && 'bg-blue-500/10')}>
+                                            <td className="p-2 font-mono text-xs align-top">{row.documentId}</td>
+                                            <td className="p-2 align-top max-w-[30rem]">
+                                                {row.document?.url ? (
+                                                    <a
+                                                        href={row.document.url}
+                                                        target="_blank"
+                                                        rel="noreferrer noopener"
+                                                        className="inline-flex max-w-full items-center gap-1 text-blue-300 hover:underline"
+                                                        title={row.document.url}
+                                                    >
+                                                        <span className="truncate">{displayName}</span>
+                                                        <ExternalLink className="h-3 w-3 shrink-0" />
+                                                    </a>
+                                                ) : (
+                                                    <div className="truncate">{displayName}</div>
+                                                )}
+                                                {!row.document && (
+                                                    <div className="text-xs text-muted-foreground">
+                                                        Dostupné pouze přes OCR task
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="p-2 align-top">
+                                                <span className={cn(
+                                                    'text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap',
+                                                    row.isCandidate ? 'bg-blue-500/15 text-blue-300' : 'bg-zinc-500/20 text-zinc-300',
+                                                )}>
+                                                    {row.isCandidate ? 'OCR candidate' : 'beze změny'}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 align-top whitespace-nowrap">
+                                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                                                    <span className={cn('h-2 w-2 rounded-full', statusDot)} />
+                                                    {statusLabel}
+                                                    {isActiveProcessing && (
+                                                        <span
+                                                            className="inline-flex h-1.5 w-1.5 rounded-full bg-blue-300 shrink-0"
+                                                            title="Aktivně zpracovávaný dokument"
+                                                        />
+                                                    )}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 align-top">{latestJob?.attempts ?? '—'}</td>
+                                            <td className="p-2 align-top">{retries}</td>
+                                            <td className="p-2 align-top text-red-400 break-words max-w-[20rem]">
+                                                {latestJob?.error_message || '—'}
+                                            </td>
+                                            <td className="p-2 align-top">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="icon-sm"
+                                                    disabled={!row.blobUuid}
+                                                    onClick={() => {
+                                                        if (!row.blobUuid) return;
+                                                        handleCopyToClipboard(row.blobUuid, 'UUID dokumentu');
+                                                    }}
+                                                    title={row.blobUuid ? `Kopírovat UUID dokumentu #${row.documentId}` : 'UUID není dostupné'}
+                                                >
+                                                    <Copy className="h-4 w-4" />
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                        </table>
+                    </div>
                 </div>
-                {renderJobsTable(ocrJobs, 'OCR jobs zatím nebyly vytvořeny')}
                 {renderStepProgress(
                     'Stav OCR kroku',
                     submittingOcr || loadingOcrDetails || ocrCounts.pending + ocrCounts.processing > 0,
@@ -1762,6 +2551,16 @@ export function ManualPipeline() {
                     ocrOperatorState,
                 )}
                 {renderErrorPanel('Chyby OCR', ocrErrors)}
+                {renderRawDebugPanel('DEV raw: OCR jobs + ingestion items', {
+                    ocrJobs,
+                    ocrCounts,
+                    ocrDocumentRows,
+                    activeProcessingDocumentId,
+                    activeProcessingDocumentUuid,
+                    changedDocuments,
+                    ingestionItems,
+                    ocrOperatorState,
+                })}
             </CardContent>
         </Card>
     );
@@ -1829,69 +2628,52 @@ export function ManualPipeline() {
                 </Button>
             </div>
 
-            <Card className={cn('overflow-hidden', isBusy ? 'border-blue-500/40' : 'border-border')}>
-                <div className={cn('h-1 w-full', isBusy ? 'pipeline-status-shimmer bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500' : 'bg-muted')} />
-                <CardContent className="pt-4">
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
-                        <div className="space-y-1">
-                            <p className="text-sm font-semibold">
-                                Aktivní krok: <span className="text-blue-300">{activeStageLabel}</span>
-                            </p>
-                            {isBusy ? (
-                                <p className="text-xs text-muted-foreground">
-                                    {activeWaitReasons[0]}
-                                </p>
-                            ) : (
-                                <p className="text-xs text-muted-foreground">Pipeline čeká na další akci.</p>
-                            )}
-                        </div>
-                        <div className="inline-flex items-center gap-2 text-xs">
-                            {isBusy ? (
-                                <>
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-300" />
-                                    <span className="text-blue-200">Právě zpracovávám</span>
-                                </>
-                            ) : (
-                                <>
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
-                                    <span className="text-green-300">Idle</span>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-                        <span className={cn(
-                            'inline-flex items-center rounded-full border px-2 py-0.5',
-                            operatorConnectionState === 'connected'
-                                ? 'border-green-500/40 text-green-300 bg-green-500/10'
-                                : operatorConnectionState === 'error'
-                                    ? 'border-red-500/40 text-red-300 bg-red-500/10'
-                                    : 'border-blue-500/40 text-blue-200 bg-blue-500/10',
-                        )}>
-                            Queue-Operator: {operatorConnectionState}
-                        </span>
-                        {sourceAggregateProgressPct !== null && (
-                            <span className="inline-flex items-center rounded-full border border-blue-500/40 px-2 py-0.5 text-blue-200 bg-blue-500/10">
-                                source progress: {sourceAggregateProgressPct}%
-                            </span>
-                        )}
-                        {operatorSourceStale && (
-                            <span className="inline-flex items-center rounded-full border border-amber-500/40 px-2 py-0.5 text-amber-200 bg-amber-500/10">
-                                stale data
-                            </span>
-                        )}
-                    </div>
-                    {activeWaitReasons.length > 1 && (
-                        <div className="mt-3 grid gap-1">
-                            {activeWaitReasons.slice(1, 4).map((reason) => (
-                                <div key={reason} className="text-[11px] text-muted-foreground">
-                                    - {reason}
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+            {renderRunsPanel()}
+
+            <div className={cn(
+                'rounded-md border px-3 py-2 text-xs flex flex-wrap items-center gap-2',
+                isBusy ? 'border-blue-500/40 bg-blue-500/5' : 'border-border bg-background/40',
+            )}>
+                <span className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5',
+                    isBusy ? 'border-blue-500/40 text-blue-200 bg-blue-500/10' : 'border-green-500/40 text-green-300 bg-green-500/10',
+                )}>
+                    {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                    {isBusy ? 'RUNNING' : 'IDLE'}
+                </span>
+                <span className="text-muted-foreground">
+                    Krok: <span className="text-blue-300 font-medium">{activeStageLabel}</span>
+                </span>
+                <span className="text-muted-foreground">
+                    Run: <span className="text-blue-300 font-medium">{runState.selectedRunId ? `#${runState.selectedRunId}` : '—'}</span>
+                </span>
+                <span className={cn(
+                    'inline-flex items-center rounded-full border px-2 py-0.5',
+                    operatorConnectionState === 'connected'
+                        ? 'border-green-500/40 text-green-300 bg-green-500/10'
+                        : operatorConnectionState === 'error'
+                            ? 'border-red-500/40 text-red-300 bg-red-500/10'
+                            : 'border-blue-500/40 text-blue-200 bg-blue-500/10',
+                )}>
+                    Queue-Operator: {operatorConnectionState}
+                </span>
+                {sourceAggregateProgressPct !== null && (
+                    <span className="inline-flex items-center rounded-full border border-blue-500/40 px-2 py-0.5 text-blue-200 bg-blue-500/10">
+                        Progress: {sourceAggregateProgressPct}%
+                    </span>
+                )}
+                {operatorSourceStale && (
+                    <span className="inline-flex items-center rounded-full border border-amber-500/40 px-2 py-0.5 text-amber-200 bg-amber-500/10">
+                        stale data
+                    </span>
+                )}
+                <span
+                    className="text-muted-foreground truncate min-w-0 flex-1"
+                    title={isBusy ? activeWaitReasons[0] : 'Pipeline čeká na další akci.'}
+                >
+                    {isBusy ? activeWaitReasons[0] : 'Pipeline čeká na další akci.'}
+                </span>
+            </div>
 
             <Card>
                 <CardContent className="pt-6">
@@ -1901,6 +2683,8 @@ export function ManualPipeline() {
                             const isActive = runState.activeStage === stage.key;
                             const isDone = stageDone(stage.key);
                             const isPassed = getStageIndex(runState.activeStage) > index;
+                            const activeEdge = isBusy && isActive;
+                            const highlightedEdge = isPassed || isDone || activeEdge;
                             const isUnlocked = canNavigateToStage(stage.key);
 
                             return (
@@ -1933,7 +2717,12 @@ export function ManualPipeline() {
                                         </span>
                                     </button>
                                     {index < STAGES.length - 1 && (
-                                        <div className={cn('h-[1px] w-8 sm:w-16', isPassed || isDone ? 'bg-blue-400' : 'bg-zinc-700')} />
+                                        <div className={cn(
+                                            'h-[2px] w-8 sm:w-16 rounded-full',
+                                            highlightedEdge
+                                                ? (isBusy ? 'pipeline-flow-connector' : 'bg-blue-400')
+                                                : 'bg-zinc-700',
+                                        )} />
                                     )}
                                 </React.Fragment>
                             );

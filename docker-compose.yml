@@ -10,6 +10,7 @@ services:
       - "3000:3000"
     environment:
       - REDIS_URL=${REDIS_URL}
+      - DEV=${DEV}
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
     restart: unless-stopped

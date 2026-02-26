@@ -102,12 +102,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 // FK cascade chains: parent table → { childTable, childFkColumn }
 const CASCADE_MAP: Record<string, { table: string; fk: string }[]> = {
-    sources: [{ table: 'source_urls', fk: 'source_id' }],
+    sources: [
+        { table: 'source_urls', fk: 'source_id' },
+        { table: 'ingestion_runs', fk: 'source_id' },
+        { table: 'ingestion_items', fk: 'source_id' },
+    ],
     source_urls: [
         { table: 'documents', fk: 'source_url_id' },
         { table: 'ingestion_items', fk: 'source_url_id' },
         { table: 'ingestion_runs', fk: 'source_url_id' },
     ],
+    ingestion_runs: [{ table: 'ingestion_items', fk: 'run_id' }],
     documents: [
         { table: 'document_texts', fk: 'document_id' },
         { table: 'ingestion_items', fk: 'document_id' },

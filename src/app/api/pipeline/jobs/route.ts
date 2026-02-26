@@ -5,6 +5,7 @@ import { toRedisBool } from '@/lib/redis-bool';
 
 const JobSchema = z.object({
     task: z.enum(['discover', 'download', 'ocr']),
+    run_id: z.string().optional(),
     source_id: z.string().min(1, 'source_id is required'),
     source_url_id: z.string().optional(),
     document_id: z.string().optional(),
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
         const responseJobs: Array<{
             id: string;
             task: string;
+            run_id: string;
             source_id: string;
             source_url_id: string;
             document_id: string;
@@ -111,6 +113,7 @@ export async function POST(request: Request) {
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
             const id = String(firstId + i);
+            const runId = job.run_id ?? '';
             const sourceUrlId = job.source_url_id ?? '';
             const documentId = job.document_id ?? '';
             const ocrTemplate = job.task === 'ocr'
@@ -128,6 +131,7 @@ export async function POST(request: Request) {
             const redisJob = {
                 id,
                 task: job.task,
+                run_id: runId,
                 source_id: job.source_id,
                 source_url_id: sourceUrlId,
                 document_id: documentId,
@@ -156,6 +160,7 @@ export async function POST(request: Request) {
             responseJobs.push({
                 id,
                 task: job.task,
+                run_id: runId,
                 source_id: job.source_id,
                 source_url_id: sourceUrlId,
                 document_id: documentId,

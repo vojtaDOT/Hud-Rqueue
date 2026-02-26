@@ -10,13 +10,15 @@ const RequestSchema = z.object({
 type StatusValue = 'pending' | 'processing' | 'completed' | 'failed' | 'unknown';
 
 function normalizeStatus(value: string | undefined): StatusValue {
+    const normalized = value?.trim().toLowerCase();
+    if (normalized === 'done') return 'completed';
     if (
-        value === 'pending'
-        || value === 'processing'
-        || value === 'completed'
-        || value === 'failed'
+        normalized === 'pending'
+        || normalized === 'processing'
+        || normalized === 'completed'
+        || normalized === 'failed'
     ) {
-        return value;
+        return normalized;
     }
     return 'unknown';
 }
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
                         id,
                         task: 'unknown',
                         status: 'unknown' as const,
+                        run_id: '',
                         attempts: '0',
                         error_message: '',
                         started_at: '',
@@ -63,10 +66,11 @@ export async function POST(request: Request) {
                     id,
                     task: data.task || 'unknown',
                     status: normalizeStatus(data.status),
+                    run_id: data.run_id || '',
                     attempts: data.attempts || '0',
                     error_message: data.error_message || '',
                     started_at: data.started_at || '',
-                    completed_at: data.completed_at || '',
+                    completed_at: data.completed_at || data.finished_at || '',
                     source_id: data.source_id || '',
                     source_url_id: data.source_url_id || '',
                     document_id: data.document_id || '',

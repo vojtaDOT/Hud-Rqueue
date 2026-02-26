@@ -5,6 +5,7 @@ import {
     CheckCircle2,
     Loader2,
     Play,
+    Plus,
     RefreshCw,
     Search,
     FileDown,
@@ -14,6 +15,7 @@ import {
     Copy,
     ExternalLink,
     TriangleAlert,
+    X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -252,6 +254,32 @@ function toPrettyJson(value: unknown): string {
     }
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && hasText(error.message)) return error.message;
+    if (typeof error === 'string' && hasText(error)) return error;
+    if (isObjectRecord(error)) {
+        const message = getString(error.message);
+        const details = getString(error.details);
+        const hint = getString(error.hint);
+        const reason = getString(error.error);
+        const joined = [message, reason, details, hint].filter((part): part is string => Boolean(part)).join(' | ');
+        if (hasText(joined)) return joined;
+    }
+    return fallback;
+}
+
+function getErrorLogPayload(error: unknown): unknown {
+    if (error instanceof Error) {
+        return {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+        };
+    }
+    if (isObjectRecord(error)) return error;
+    return { value: String(error) };
+}
+
 interface DocumentDebugDetails {
     blobUuid: string | null;
     blobEndpoint: string | null;
@@ -273,6 +301,96 @@ interface OcrUnifiedRow {
     jobCount: number;
     isCandidate: boolean;
     blobUuid: string | null;
+}
+
+type StepHealth = 'neutral' | 'success' | 'warning' | 'error';
+
+function getStepKeyFromIngestionItem(item: IngestionItemRow): 'discovery' | 'download' | 'ocr' | null {
+    // Prefer explicit stage over item_type so OCR updates on document items
+    // are not counted as download step failures.
+    if (item.stage === 'discovery') return 'discovery';
+    if (item.stage === 'documents') return 'download';
+    if (item.stage === 'ocr') return 'ocr';
+    if (item.item_type === 'source_url') return 'discovery';
+    if (item.item_type === 'ocr_job') return 'ocr';
+    if (item.item_type === 'document') return 'download';
+    return null;
+}
+
+function getErrorStepOverride(item: IngestionItemRow): 'download' | 'ocr' | null {
+    const context = [
+        item.ingest_reason,
+        item.review_reason,
+        item.last_error_message,
+        item.error_message,
+        item.ingest_status,
+        item.status,
+    ]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' | ');
+
+    if (!hasText(context)) return null;
+
+    if (/(ocr|tesseract|rasteriz|low_confidence|confidence|hocr|pdf page|processing_failed)/.test(context)) {
+        return 'ocr';
+    }
+    if (/(download|blob|storage|fetch|http|checksum|source[_ ]?url)/.test(context)) {
+        return 'download';
+    }
+    return null;
+}
+
+function getStepKeyForErrorDisplay(item: IngestionItemRow): 'discovery' | 'download' | 'ocr' | null {
+    return getErrorStepOverride(item) ?? getStepKeyFromIngestionItem(item);
+}
+
+function isSuccessfulIngestionItem(item: IngestionItemRow): boolean {
+    if (isFailedIngestionItem(item)) return false;
+    const status = String(item.ingest_status || item.status || '').toLowerCase();
+    if (!hasText(status)) return true;
+    if (/(pending|running|processing|queued|retry|waiting|planned|skip)/.test(status)) return false;
+    return true;
+}
+
+function isFailedIngestionItem(item: IngestionItemRow): boolean {
+    if (getIngestionItemIssueMessage(item)) return true;
+    const status = String(item.ingest_status || item.status || '').toLowerCase();
+    return /(fail|error|cancel|canceled|cancelled|review)/.test(status);
+}
+
+function getStepHealthFromCounts(total: number, success: number, failed: number): StepHealth {
+    if (total === 0 || success === 0) return 'error';
+    if (failed > 0 || success < total) return 'warning';
+    return 'success';
+}
+
+function getStepHealthClasses(health: StepHealth): { circle: string; label: string; connector: string } {
+    if (health === 'success') {
+        return {
+            circle: 'border-green-500 bg-green-500/20 text-green-300',
+            label: 'text-green-200',
+            connector: 'bg-green-500/80',
+        };
+    }
+    if (health === 'warning') {
+        return {
+            circle: 'border-amber-500 bg-amber-500/20 text-amber-200',
+            label: 'text-amber-200',
+            connector: 'bg-amber-500/80',
+        };
+    }
+    if (health === 'error') {
+        return {
+            circle: 'border-red-500 bg-red-500/20 text-red-300',
+            label: 'text-red-200',
+            connector: 'bg-red-500/75',
+        };
+    }
+    return {
+        circle: 'border-zinc-600 text-zinc-400',
+        label: 'text-muted-foreground',
+        connector: 'bg-zinc-700',
+    };
 }
 
 function getDocumentDebugDetails(doc: DocumentItem, sourcePageUrl: string | null): DocumentDebugDetails {
@@ -317,6 +435,11 @@ function getDocumentDebugDetails(doc: DocumentItem, sourcePageUrl: string | null
 
 function isIngestionRunIssue(run: IngestionRunItem): boolean {
     return /(fail|error)/i.test(run.status || '');
+}
+
+function isRunIncomplete(status: string | null | undefined): boolean {
+    const normalized = String(status || '').toLowerCase();
+    return normalized === 'pending' || normalized === 'running';
 }
 
 function getIngestionItemIssueMessage(item: IngestionItemRow): string | null {
@@ -496,6 +619,9 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     const [submittingDiscovery, setSubmittingDiscovery] = React.useState(false);
     const [submittingDownload, setSubmittingDownload] = React.useState(false);
     const [submittingOcr, setSubmittingOcr] = React.useState(false);
+    const [finishingRun, setFinishingRun] = React.useState(false);
+    const [suppressAutoRunSelect, setSuppressAutoRunSelect] = React.useState(false);
+    const [deletingRunIds, setDeletingRunIds] = React.useState<Record<string, boolean>>({});
     const [refreshingData, setRefreshingData] = React.useState(false);
     const [operatorJobProgressById, setOperatorJobProgressById] = React.useState<Record<string, QueueOperatorJobProgress>>({});
     const [operatorSourceProgress, setOperatorSourceProgress] = React.useState<QueueOperatorSourceProgress | null>(null);
@@ -533,6 +659,70 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         () => allRuns.find((run) => String(run.id) === runState.selectedRunId) ?? null,
         [allRuns, runState.selectedRunId],
     );
+    const historicalStepColoring = React.useMemo(
+        () => Boolean(selectedRun && !isRunIncomplete(selectedRun.status)),
+        [selectedRun],
+    );
+    const stepHealthByStage = React.useMemo<Record<PipelineStage, StepHealth>>(() => {
+        const base: Record<PipelineStage, StepHealth> = {
+            sources: runState.selectedRunId ? 'success' : 'neutral',
+            discovery: 'error',
+            download: 'error',
+            ocr: 'error',
+            summary: 'neutral',
+        };
+
+        if (!historicalStepColoring || !selectedRun) {
+            return base;
+        }
+
+        const counts = {
+            discovery: { total: 0, success: 0, failed: 0 },
+            download: { total: 0, success: 0, failed: 0 },
+            ocr: { total: 0, success: 0, failed: 0 },
+        };
+
+        for (const item of ingestionItems) {
+            const baseKey = getStepKeyFromIngestionItem(item);
+            if (!baseKey) continue;
+            if (isFailedIngestionItem(item)) {
+                const errorKey = getStepKeyForErrorDisplay(item) ?? baseKey;
+                counts[errorKey].total += 1;
+                counts[errorKey].failed += 1;
+                continue;
+            }
+
+            counts[baseKey].total += 1;
+            if (isSuccessfulIngestionItem(item)) counts[baseKey].success += 1;
+        }
+
+        base.discovery = getStepHealthFromCounts(
+            counts.discovery.total,
+            counts.discovery.success,
+            counts.discovery.failed,
+        );
+        base.download = getStepHealthFromCounts(
+            counts.download.total,
+            counts.download.success,
+            counts.download.failed,
+        );
+        base.ocr = getStepHealthFromCounts(
+            counts.ocr.total,
+            counts.ocr.success,
+            counts.ocr.failed,
+        );
+
+        const runStatus = String(selectedRun.status || '').toLowerCase();
+        if (runStatus === 'completed') {
+            base.summary = 'success';
+        } else if (runStatus === 'failed' || runStatus === 'canceled') {
+            base.summary = base.ocr === 'error' ? 'error' : 'warning';
+        } else {
+            base.summary = 'warning';
+        }
+
+        return base;
+    }, [historicalStepColoring, ingestionItems, runState.selectedRunId, selectedRun]);
     const selectedSourceHasDiscoveryDownloadFile = React.useMemo(
         () => hasDiscoveryDownloadFileStep(selectedSource?.crawl_params),
         [selectedSource?.crawl_params],
@@ -1053,8 +1243,13 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 : docs;
             setChangedDocuments(changed);
         } catch (error) {
-            console.error('Failed to fetch ingestion diagnostics:', error);
-            toast.error('Nepodařilo se načíst ingestion diagnostiku');
+            const message = getErrorMessage(error, 'Nepodařilo se načíst ingestion diagnostiku');
+            console.error('Failed to fetch ingestion diagnostics:', {
+                runId,
+                message,
+                error: getErrorLogPayload(error),
+            });
+            toast.error(message);
         } finally {
             setIngestionLoading(false);
         }
@@ -1135,6 +1330,20 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         return data.run as PipelineRunListItem;
     }, []);
 
+    const deletePipelineRun = React.useCallback(async (runId: string) => {
+        const response = await fetch(`/api/pipeline/runs/${encodeURIComponent(runId)}`, {
+            method: 'DELETE',
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(
+                (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string')
+                    ? data.error
+                    : 'Nepodařilo se odstranit pipeline run',
+            );
+        }
+    }, []);
+
     const patchSelectedRun = React.useCallback(async (updates: Record<string, unknown>) => {
         if (!runState.selectedRunId) return;
         try {
@@ -1150,6 +1359,101 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             getStageIndex(stage) > getStageIndex(prev) ? stage : prev
         ));
     }, []);
+
+    const resetPipelineToSources = React.useCallback(() => {
+        setRunState({
+            selectedSourceId: null,
+            selectedRunId: null,
+            runStartedAt: null,
+            activeStage: 'sources',
+        });
+        setMaxVisitedStage('sources');
+        setDiscoverJobs([]);
+        setDownloadJobs([]);
+        setOcrJobs([]);
+        setDiscoveredSourceUrls([]);
+        setDownloadDocuments([]);
+        setChangedDocuments([]);
+        setIngestionRuns([]);
+        setIngestionItems([]);
+        setIngestionLoading(false);
+        setOperatorJobProgressById({});
+        setOperatorSourceProgress(null);
+        setOperatorConnectionState('idle');
+        setOperatorError(null);
+        setDiscoverySettled(false);
+        setDownloadSettled(false);
+        setOcrSettled(false);
+        setLoadingDiscoveryDetails(false);
+        setLoadingDownloadDetails(false);
+        setLoadingOcrDetails(false);
+        setDownloadSkippedByDiscovery(false);
+    }, []);
+
+    const handlePrepareNewRun = React.useCallback(() => {
+        setSuppressAutoRunSelect(true);
+        setRunScope('active');
+        resetPipelineToSources();
+    }, [resetPipelineToSources]);
+
+    const handleFinishRun = React.useCallback(async () => {
+        const runId = runState.selectedRunId;
+        if (!runId || !selectedRun || !isRunIncomplete(selectedRun.status)) return;
+
+        setFinishingRun(true);
+        try {
+            await patchPipelineRun(runId, {
+                status: 'completed',
+                active_stage: 'summary',
+                error_message: null,
+                finished_at: new Date().toISOString(),
+            });
+            setRunState((prev) => ({ ...prev, activeStage: 'summary' }));
+            setOcrSettled(true);
+            unlockStage('summary');
+            await Promise.all([refreshActiveRuns(), refreshHistoryRuns()]);
+            setRunScope('history');
+            toast.success(`Run #${runId} dokončen`);
+        } catch (error) {
+            console.error('Finish run failed:', error);
+            toast.error(error instanceof Error ? error.message : 'Nepodařilo se dokončit run');
+        } finally {
+            setFinishingRun(false);
+        }
+    }, [
+        patchPipelineRun,
+        refreshActiveRuns,
+        refreshHistoryRuns,
+        runState.selectedRunId,
+        selectedRun,
+        unlockStage,
+    ]);
+
+    const handleDeleteRun = React.useCallback(async (run: PipelineRunListItem) => {
+        const runId = String(run.id);
+        if (!isRunIncomplete(run.status)) return;
+        if (!window.confirm(`Opravdu chcete odstranit nedokončený run #${runId}?`)) return;
+
+        setDeletingRunIds((prev) => ({ ...prev, [runId]: true }));
+        try {
+            await deletePipelineRun(runId);
+            if (runState.selectedRunId === runId) {
+                setSuppressAutoRunSelect(false);
+                resetPipelineToSources();
+            }
+            await Promise.all([refreshActiveRuns(), refreshHistoryRuns()]);
+            toast.success(`Run #${runId} odstraněn`);
+        } catch (error) {
+            console.error('Delete run failed:', error);
+            toast.error(error instanceof Error ? error.message : 'Nepodařilo se odstranit run');
+        } finally {
+            setDeletingRunIds((prev) => {
+                const next = { ...prev };
+                delete next[runId];
+                return next;
+            });
+        }
+    }, [deletePipelineRun, refreshActiveRuns, refreshHistoryRuns, resetPipelineToSources, runState.selectedRunId]);
 
     const resetRunStateForSource = React.useCallback((sourceId: string, runId: string, runStartedAt: string) => {
         setRunState({
@@ -1182,6 +1486,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     }, []);
 
     const handleSelectRun = React.useCallback((run: PipelineRunListItem) => {
+        setSuppressAutoRunSelect(false);
         const runId = String(run.id);
         const sourceId = String(run.source_id);
         const startedAt = run.started_at || run.created_at || null;
@@ -1208,10 +1513,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     }, [fetchIngestionDiagnostics]);
 
     React.useEffect(() => {
+        if (suppressAutoRunSelect) return;
         if (runState.selectedRunId) return;
         if (activeRuns.length === 0) return;
         handleSelectRun(activeRuns[0]);
-    }, [activeRuns, handleSelectRun, runState.selectedRunId]);
+    }, [activeRuns, handleSelectRun, runState.selectedRunId, suppressAutoRunSelect]);
 
     React.useEffect(() => {
         if (!runState.selectedRunId) return;
@@ -1220,6 +1526,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
 
     const handleStartDiscovery = React.useCallback(async (source: Source) => {
         const sourceId = String(source.id);
+        setSuppressAutoRunSelect(false);
         setSubmittingDiscovery(true);
         let createdRunId: string | null = null;
 
@@ -1699,8 +2006,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         <div className="space-y-2">
                             {scopedRuns.map((run) => {
                                 const source = sources.find((item) => String(item.id) === String(run.source_id));
+                                const runId = String(run.id);
                                 const selected = String(run.id) === runState.selectedRunId;
                                 const runStatus = String(run.status || 'pending');
+                                const canDeleteRun = runScope === 'active' && isRunIncomplete(runStatus);
+                                const deletingRun = Boolean(deletingRunIds[runId]);
                                 const badgeClass = runStatus === 'completed'
                                     ? 'bg-green-500/15 text-green-300 border-green-500/30'
                                     : runStatus === 'failed'
@@ -1709,30 +2019,52 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                             ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
                                             : 'bg-blue-500/15 text-blue-300 border-blue-500/30';
                                 return (
-                                    <button
+                                    <div
                                         key={run.id}
-                                        type="button"
-                                        onClick={() => handleSelectRun(run)}
                                         className={cn(
-                                            'w-full rounded-md border px-3 py-2 text-left transition-colors',
+                                            'w-full rounded-md border transition-colors flex items-stretch gap-2',
                                             selected
                                                 ? 'border-blue-500/50 bg-blue-500/10'
                                                 : 'border-border hover:bg-muted/30',
                                         )}
                                     >
-                                        <div className="flex items-center gap-3 flex-wrap">
-                                            <span className="font-mono text-xs w-20 shrink-0">#{run.id}</span>
-                                            <span className="font-medium min-w-0 flex-1 truncate">
-                                                {source?.name || `Source #${run.source_id}`}
-                                            </span>
-                                            <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs', badgeClass)}>
-                                                {runStatus}
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">
-                                                {run.started_at ? new Date(run.started_at).toLocaleString('cs-CZ') : '—'}
-                                            </span>
-                                        </div>
-                                    </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelectRun(run)}
+                                            className="flex-1 min-w-0 px-3 py-2 text-left"
+                                        >
+                                            <div className="flex items-center gap-3 flex-wrap">
+                                                <span className="font-mono text-xs w-20 shrink-0">#{run.id}</span>
+                                                <span className="font-medium min-w-0 flex-1 truncate">
+                                                    {source?.name || `Source #${run.source_id}`}
+                                                </span>
+                                                <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs', badgeClass)}>
+                                                    {runStatus}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground">
+                                                    {run.started_at ? new Date(run.started_at).toLocaleString('cs-CZ') : '—'}
+                                                </span>
+                                            </div>
+                                        </button>
+                                        {canDeleteRun ? (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => void handleDeleteRun(run)}
+                                                disabled={deletingRun}
+                                                className="mr-2 self-center h-7 w-7 shrink-0 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
+                                                title={`Smazat nedokončený run #${runId}`}
+                                            >
+                                                {deletingRun ? (
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                ) : (
+                                                    <X className="h-3.5 w-3.5" />
+                                                )}
+                                                <span className="sr-only">{`Smazat nedokončený run #${runId}`}</span>
+                                            </Button>
+                                        ) : null}
+                                    </div>
                                 );
                             })}
                         </div>
@@ -1781,6 +2113,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     );
 
     const stageDone = (stage: PipelineStage): boolean => {
+        if (historicalStepColoring) {
+            if (stage === 'sources') return Boolean(runState.selectedRunId);
+            if (stage === 'summary') return stepHealthByStage.summary !== 'error';
+            return stepHealthByStage[stage] === 'success' || stepHealthByStage[stage] === 'warning';
+        }
         if (stage === 'sources') return Boolean(runState.selectedRunId);
         if (stage === 'discovery') return discoverCompleted;
         if (stage === 'download') return downloadStageCompleted;
@@ -1799,10 +2136,6 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         setRunState((prev) => ({ ...prev, activeStage: stage }));
     }, [canNavigateToStage]);
 
-    const discoveredSourceUrlIds = React.useMemo(
-        () => new Set(discoveredSourceUrls.map((item) => String(item.id))),
-        [discoveredSourceUrls],
-    );
     const discoveredSourceUrlById = React.useMemo(() => {
         const map = new Map<string, SourceUrlMeta>();
         for (const sourceUrl of discoveredSourceUrls) {
@@ -1935,7 +2268,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             }));
 
         const runErrors = ingestionRuns
-            .filter((run) => String(run.id) === runState.selectedRunId && isIngestionRunIssue(run))
+            .filter((run) => (
+                String(run.id) === runState.selectedRunId
+                && isIngestionRunIssue(run)
+                && String(run.active_stage || '').toLowerCase() === 'documents'
+            ))
             .map((run) => ({
                 id: `run-${run.id}`,
                 source: `Ingestion run #${run.id}`,
@@ -1943,7 +2280,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             }));
 
         const itemErrors = ingestionItems
-            .filter((item) => Boolean(item.source_url_id) && discoveredSourceUrlIds.has(item.source_url_id!))
+            .filter((item) => getStepKeyForErrorDisplay(item) === 'download')
             .map((item) => {
                 const message = getIngestionItemIssueMessage(item);
                 if (!message) return null;
@@ -1956,7 +2293,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             .filter((item): item is { id: string; source: string; message: string } => item !== null);
 
         return [...redisErrors, ...runErrors, ...itemErrors];
-    }, [discoveredSourceUrlIds, downloadJobs, ingestionItems, ingestionRuns, runState.selectedRunId]);
+    }, [downloadJobs, ingestionItems, ingestionRuns, runState.selectedRunId]);
 
     const ocrErrors = React.useMemo(() => {
         const redisErrors = ocrJobs
@@ -1968,7 +2305,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             }));
 
         const itemErrors = ingestionItems
-            .filter((item) => Boolean(item.document_id) && changedDocumentIds.has(item.document_id!))
+            .filter((item) => getStepKeyForErrorDisplay(item) === 'ocr')
             .map((item) => {
                 const message = getIngestionItemIssueMessage(item);
                 if (!message) return null;
@@ -1980,14 +2317,25 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             })
             .filter((item): item is { id: string; source: string; message: string } => item !== null);
 
-        return [...redisErrors, ...itemErrors];
-    }, [changedDocumentIds, ingestionItems, ocrJobs]);
+        const runErrors = ingestionRuns
+            .filter((run) => (
+                String(run.id) === runState.selectedRunId
+                && isIngestionRunIssue(run)
+                && String(run.active_stage || '').toLowerCase() === 'ocr'
+            ))
+            .map((run) => ({
+                id: `ocr-run-${run.id}`,
+                source: `Ingestion run #${run.id}`,
+                message: `status=${run.status}`,
+            }));
+
+        return [...redisErrors, ...runErrors, ...itemErrors];
+    }, [ingestionItems, ingestionRuns, ocrJobs, runState.selectedRunId]);
 
     const renderErrorPanel = (
         title: string,
         errors: Array<{ id: string; source: string; message: string }>,
     ) => {
-        const visibleErrors = devMode ? errors : errors.slice(0, 12);
         return (
             <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -1999,21 +2347,16 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         </span>
                     )}
                 </div>
-                {visibleErrors.length === 0 ? (
+                {errors.length === 0 ? (
                     <p className="text-xs text-red-200/80">Žádné chyby v tomto kroku.</p>
                 ) : (
-                    <div className="space-y-1.5">
-                        {visibleErrors.map((error) => (
+                    <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+                        {errors.map((error) => (
                             <div key={error.id} className="text-xs text-red-100">
                                 <span className="font-semibold">{error.source}:</span>{' '}
                                 <span className="break-all">{error.message}</span>
                             </div>
                         ))}
-                        {!devMode && errors.length > 12 && (
-                            <p className="text-xs text-red-200/80">
-                                + dalších {errors.length - 12} chyb
-                            </p>
-                        )}
                     </div>
                 )}
             </div>
@@ -2475,20 +2818,20 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                     return (
                                         <tr key={row.documentId} className={cn('border-b border-border/40', isActiveProcessing && 'bg-blue-500/10')}>
                                             <td className="p-2 font-mono text-xs align-top">{row.documentId}</td>
-                                            <td className="p-2 align-top max-w-[30rem]">
+                                            <td className="p-2 align-top w-[14rem] max-w-[14rem] sm:w-[18rem] sm:max-w-[18rem] lg:w-[22rem] lg:max-w-[22rem] overflow-hidden">
                                                 {row.document?.url ? (
                                                     <a
                                                         href={row.document.url}
                                                         target="_blank"
                                                         rel="noreferrer noopener"
-                                                        className="inline-flex max-w-full items-center gap-1 text-blue-300 hover:underline"
+                                                        className="flex w-full min-w-0 items-center gap-1 text-[11px] leading-tight text-blue-300 hover:underline"
                                                         title={row.document.url}
                                                     >
-                                                        <span className="truncate">{displayName}</span>
+                                                        <span className="block min-w-0 truncate">{displayName}</span>
                                                         <ExternalLink className="h-3 w-3 shrink-0" />
                                                     </a>
                                                 ) : (
-                                                    <div className="truncate">{displayName}</div>
+                                                    <div className="truncate text-[11px] leading-tight">{displayName}</div>
                                                 )}
                                                 {!row.document && (
                                                     <div className="text-xs text-muted-foreground">
@@ -2565,45 +2908,70 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         </Card>
     );
 
-    const renderSummaryCard = () => (
-        <Card className="ring-1 ring-blue-500/40">
-            <CardHeader>
-                <CardTitle>5. Souhrn</CardTitle>
-                <CardDescription>Výsledky aktuálního manuálního běhu</CardDescription>
-            </CardHeader>
-            <CardContent>
-                {!runState.runStartedAt ? (
-                    <div className="text-sm text-muted-foreground flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />
-                        Spusťte nejdříve discovery na vybraném source.
+    const renderSummaryCard = () => {
+        const canFinishRun = Boolean(selectedRun && isRunIncomplete(selectedRun.status));
+        return (
+            <Card className="ring-1 ring-blue-500/40">
+                <CardHeader>
+                    <CardTitle>5. Souhrn</CardTitle>
+                    <CardDescription>Výsledky aktuálního manuálního běhu</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {!runState.runStartedAt ? (
+                        <div className="text-sm text-muted-foreground flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4" />
+                            Spusťte nejdříve discovery na vybraném source.
+                        </div>
+                    ) : (
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                            <div className="rounded-lg border p-3">
+                                <p className="text-xs text-muted-foreground">Nové source URLs</p>
+                                <p className="text-2xl font-bold">{summary.newSourceUrls}</p>
+                            </div>
+                            <div className="rounded-lg border p-3">
+                                <p className="text-xs text-muted-foreground">Změněné dokumenty</p>
+                                <p className="text-2xl font-bold">{summary.changedDocuments}</p>
+                            </div>
+                            <div className="rounded-lg border p-3">
+                                <p className="text-xs text-muted-foreground">Blob OK</p>
+                                <p className="text-2xl font-bold">{summary.blobOk}</p>
+                            </div>
+                            <div className="rounded-lg border p-3">
+                                <p className="text-xs text-muted-foreground">OCR completed</p>
+                                <p className="text-2xl font-bold text-green-400">{summary.ocrCompleted}</p>
+                            </div>
+                            <div className="rounded-lg border p-3">
+                                <p className="text-xs text-muted-foreground">OCR failed</p>
+                                <p className="text-2xl font-bold text-red-400">{summary.ocrFailed}</p>
+                            </div>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <Button type="button" variant="outline" size="sm" onClick={handlePrepareNewRun}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Nový run
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleFinishRun()}
+                            disabled={!canFinishRun || finishingRun}
+                            title={canFinishRun ? 'Označit run jako dokončený' : 'Run už je dokončený'}
+                        >
+                            {finishingRun ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Ukládám...
+                                </>
+                            ) : (
+                                'Finish run'
+                            )}
+                        </Button>
                     </div>
-                ) : (
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                        <div className="rounded-lg border p-3">
-                            <p className="text-xs text-muted-foreground">Nové source URLs</p>
-                            <p className="text-2xl font-bold">{summary.newSourceUrls}</p>
-                        </div>
-                        <div className="rounded-lg border p-3">
-                            <p className="text-xs text-muted-foreground">Změněné dokumenty</p>
-                            <p className="text-2xl font-bold">{summary.changedDocuments}</p>
-                        </div>
-                        <div className="rounded-lg border p-3">
-                            <p className="text-xs text-muted-foreground">Blob OK</p>
-                            <p className="text-2xl font-bold">{summary.blobOk}</p>
-                        </div>
-                        <div className="rounded-lg border p-3">
-                            <p className="text-xs text-muted-foreground">OCR completed</p>
-                            <p className="text-2xl font-bold text-green-400">{summary.ocrCompleted}</p>
-                        </div>
-                        <div className="rounded-lg border p-3">
-                            <p className="text-xs text-muted-foreground">OCR failed</p>
-                            <p className="text-2xl font-bold text-red-400">{summary.ocrFailed}</p>
-                        </div>
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    );
+                </CardContent>
+            </Card>
+        );
+    };
 
     const renderActiveStageCard = () => {
         if (runState.activeStage === 'sources') return renderSourcesCard();
@@ -2686,6 +3054,15 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                             const activeEdge = isBusy && isActive;
                             const highlightedEdge = isPassed || isDone || activeEdge;
                             const isUnlocked = canNavigateToStage(stage.key);
+                            const useHistoricalColor = historicalStepColoring && stage.key !== 'sources';
+                            const stepHealth = stepHealthByStage[stage.key];
+                            const stepHealthClasses = getStepHealthClasses(stepHealth);
+                            const showCheckIcon = useHistoricalColor ? stepHealth === 'success' : isDone;
+                            const connectorClass = useHistoricalColor
+                                ? stepHealthClasses.connector
+                                : highlightedEdge
+                                    ? (isBusy ? 'pipeline-flow-connector' : 'bg-blue-400')
+                                    : 'bg-zinc-700';
 
                             return (
                                 <React.Fragment key={stage.key}>
@@ -2703,25 +3080,31 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                         <span
                                             className={cn(
                                                 'h-8 w-8 rounded-full border flex items-center justify-center transition-all duration-200',
-                                                isDone
-                                                    ? 'border-green-500 bg-green-500/20 text-green-300'
-                                                    : isActive
-                                                        ? 'border-blue-500 bg-blue-500/20 text-blue-300 shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'
-                                                        : 'border-zinc-600 text-zinc-400',
+                                                useHistoricalColor
+                                                    ? stepHealthClasses.circle
+                                                    : isDone
+                                                        ? 'border-green-500 bg-green-500/20 text-green-300'
+                                                        : isActive
+                                                            ? 'border-blue-500 bg-blue-500/20 text-blue-300 shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'
+                                                            : 'border-zinc-600 text-zinc-400',
+                                                useHistoricalColor && isActive && 'shadow-[0_0_0_3px_rgba(148,163,184,0.18)]',
                                             )}
                                         >
-                                            {isDone ? <CheckCircle2 className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                                            {showCheckIcon ? <CheckCircle2 className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                                         </span>
-                                        <span className={cn('text-sm', isActive ? 'text-white font-medium' : 'text-muted-foreground')}>
+                                        <span className={cn(
+                                            'text-sm',
+                                            useHistoricalColor
+                                                ? cn(stepHealthClasses.label, isActive && 'font-medium')
+                                                : (isActive ? 'text-white font-medium' : 'text-muted-foreground'),
+                                        )}>
                                             {stage.label}
                                         </span>
                                     </button>
                                     {index < STAGES.length - 1 && (
                                         <div className={cn(
                                             'h-[2px] w-8 sm:w-16 rounded-full',
-                                            highlightedEdge
-                                                ? (isBusy ? 'pipeline-flow-connector' : 'bg-blue-400')
-                                                : 'bg-zinc-700',
+                                            connectorClass,
                                         )} />
                                     )}
                                 </React.Fragment>

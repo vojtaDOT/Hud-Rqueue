@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
 
 type RouteContext = { params: Promise<{ id: string }> };
+const DELETABLE_RUN_STATUSES = new Set(['pending', 'running']);
 
 const PatchRunSchema = z.object({
     status: z.enum(['pending', 'running', 'completed', 'failed', 'canceled']).optional(),
@@ -181,6 +182,68 @@ export async function PATCH(request: Request, context: RouteContext) {
         return NextResponse.json({ run });
     } catch (error) {
         console.error('Error patching pipeline run:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+export async function DELETE(_: Request, context: RouteContext) {
+    try {
+        const { id } = await context.params;
+
+        const { data: runData, error: runError } = await supabase
+            .from('ingestion_runs')
+            .select('id, status')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (runError) {
+            const status = runError.code === 'PGRST116' ? 404 : 500;
+            return NextResponse.json({ error: runError.message }, { status });
+        }
+
+        if (!runData?.id) {
+            return NextResponse.json({ error: 'Run nenalezen' }, { status: 404 });
+        }
+
+        const runStatus = String(runData.status || '').toLowerCase();
+        if (!DELETABLE_RUN_STATUSES.has(runStatus)) {
+            return NextResponse.json(
+                { error: 'Smazat lze pouze nedokončené běhy (pending/running).' },
+                { status: 400 },
+            );
+        }
+
+        const { error: deleteItemsError } = await supabase
+            .from('ingestion_items')
+            .delete()
+            .eq('run_id', id);
+
+        if (deleteItemsError) {
+            return NextResponse.json({ error: deleteItemsError.message }, { status: 500 });
+        }
+
+        const { data: deletedRun, error: deleteRunError } = await supabase
+            .from('ingestion_runs')
+            .delete()
+            .eq('id', id)
+            .in('status', Array.from(DELETABLE_RUN_STATUSES))
+            .select('id')
+            .maybeSingle();
+
+        if (deleteRunError) {
+            return NextResponse.json({ error: deleteRunError.message }, { status: 500 });
+        }
+
+        if (!deletedRun?.id) {
+            return NextResponse.json(
+                { error: 'Run byl mezitím dokončen a nelze ho smazat.' },
+                { status: 409 },
+            );
+        }
+
+        return NextResponse.json({ ok: true, id: String(deletedRun.id) });
+    } catch (error) {
+        console.error('Error deleting pipeline run:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

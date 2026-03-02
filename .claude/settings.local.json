@@ -10,7 +10,10 @@
       "Bash(# Check claude code plugins for stored auth find ~/.claude/plugins -name \"\"*.json\"\" | xargs grep -l \"\"token\\\\|auth\\\\|credential\"\")",
       "Bash(open \"figma://file/3xXlrMABLIXvSTZ7ug79Rb/hud-operator\")",
       "WebFetch(domain:api.figma.com)",
-      "Bash(pgrep:*)"
+      "Bash(pgrep:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs:*)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

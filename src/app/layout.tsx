@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SidebarProvider } from "@/components/sidebar-context";
 import { Header } from "@/components/header";
+import { MainContent } from "@/components/main-content";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Redis Queue Manager",
-  description: "Internal tool for managing Redis queue tasks",
+  title: "HUD Queue",
+  description: "Internal tool for managing scraping pipelines",
 };
 
 export default function RootLayout({
@@ -37,12 +39,12 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <div className="relative flex min-h-screen flex-col">
+          <SidebarProvider>
             <Header />
-            <div className="flex-1">
+            <MainContent>
               {children}
-            </div>
-          </div>
+            </MainContent>
+          </SidebarProvider>
           <Toaster />
         </ThemeProvider>
       </body>

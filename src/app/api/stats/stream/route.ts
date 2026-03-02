@@ -12,27 +12,41 @@ export async function GET(request: Request) {
     const stream = new ReadableStream({
         async start(controller) {
             let intervalId: ReturnType<typeof setInterval> | null = null;
+            let closed = false;
 
             const send = async () => {
+                if (closed) return;
                 try {
                     const data = await fetchQueueStats();
+                    if (closed) return;
                     controller.enqueue(
                         encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
                     );
                 } catch (err) {
+                    if (closed) return;
                     console.error('Stats stream error:', err);
-                    controller.enqueue(
-                        encoder.encode(
-                            `data: ${JSON.stringify({ success: false, error: 'Failed to fetch stats' })}\n\n`
-                        )
-                    );
+                    try {
+                        controller.enqueue(
+                            encoder.encode(
+                                `data: ${JSON.stringify({ success: false, error: 'Failed to fetch stats' })}\n\n`
+                            )
+                        );
+                    } catch {
+                        // Controller already closed, ignore
+                    }
                 }
             };
 
             const cleanup = () => {
+                if (closed) return;
+                closed = true;
                 if (intervalId) clearInterval(intervalId);
                 clearTimeout(timeoutId);
-                controller.close();
+                try {
+                    controller.close();
+                } catch {
+                    // Already closed, ignore
+                }
             };
 
             signal?.addEventListener('abort', cleanup);

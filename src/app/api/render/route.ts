@@ -288,32 +288,44 @@ export async function GET(request: NextRequest) {
             }
         );
 
-        // Rewrite iframe src attributes to go through our proxy
+        const rewriteFrameLikeTag = (
+            match: string,
+            tagName: 'iframe' | 'frame',
+            before: string,
+            src: string,
+            after: string,
+        ) => {
+            // Skip if already proxied or is about:blank/javascript:
+            if (src.startsWith('/api/') || src.startsWith('about:') || src.startsWith('javascript:') || src.startsWith('data:')) {
+                return match;
+            }
+            // Resolve relative URLs
+            let absoluteSrc = src;
+            try {
+                absoluteSrc = new URL(src, url.href).href;
+            } catch {
+                return match;
+            }
+            if (depth >= maxDepth) {
+                return match;
+            }
+            const proxiedSrc = toRenderUrl(absoluteSrc, depth + 1);
+            const relaxedBefore = relaxIframeAttributes(before);
+            const relaxedAfter = relaxIframeAttributes(after);
+            return `<${tagName}${relaxedBefore} src="${proxiedSrc}"${relaxedAfter} data-original-src="${absoluteSrc}">`;
+        };
+
+        // Rewrite iframe/frame src attributes to go through renderer so nested selection works.
         html = html.replace(
             /<iframe([^>]*)\ssrc=["']([^"']+)["']([^>]*)>/gi,
-            (match: string, before: string, src: string, after: string) => {
-                // Skip if already proxied or is about:blank/javascript:
-                if (src.startsWith('/api/') || src.startsWith('about:') || src.startsWith('javascript:') || src.startsWith('data:')) {
-                    return match;
-                }
-                // Resolve relative URLs
-                let absoluteSrc = src;
-                try {
-                    absoluteSrc = new URL(src, url.href).href;
-                } catch {
-                    return match;
-                }
-                if (depth >= maxDepth) {
-                    return match;
-                }
-                const proxiedSrc = toRenderUrl(absoluteSrc, depth + 1);
-                const relaxedBefore = relaxIframeAttributes(before);
-                const relaxedAfter = relaxIframeAttributes(after);
-                return '<iframe' + relaxedBefore + ' src="' + proxiedSrc + '"' + relaxedAfter + ' data-original-src="' + absoluteSrc + '">';
-            }
+            (match: string, before: string, src: string, after: string) => rewriteFrameLikeTag(match, 'iframe', before, src, after),
+        );
+        html = html.replace(
+            /<frame([^>]*)\ssrc=["']([^"']+)["']([^>]*)>/gi,
+            (match: string, before: string, src: string, after: string) => rewriteFrameLikeTag(match, 'frame', before, src, after),
         );
 
-        // Inject selection script with iframe support
+        // Inject selection script with iframe/frame support
         const safeBaseHref = escapeHtml(url.href);
         const safeTargetUrl = escapeJsString(targetUrl);
         const safeAppOrigin = escapeJsString(appOrigin);
@@ -452,15 +464,16 @@ export async function GET(request: NextRequest) {
                     }
 
                     function getIframeSelector(iframe) {
-                        if (iframe.id) return 'iframe#' + iframe.id;
-                        if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
+                        const tagName = iframe.tagName.toLowerCase();
+                        if (iframe.id) return tagName + '#' + iframe.id;
+                        if (iframe.name) return tagName + '[name="' + iframe.name + '"]';
                         let idx = 1;
                         let prev = iframe.previousElementSibling;
                         while (prev) {
-                            if (prev.tagName === 'IFRAME') idx++;
+                            if (prev.tagName === iframe.tagName) idx++;
                             prev = prev.previousElementSibling;
                         }
-                        return 'iframe:nth-of-type(' + idx + ')';
+                        return tagName + ':nth-of-type(' + idx + ')';
                     }
 
                     function detectList(el) {
@@ -476,7 +489,7 @@ export async function GET(request: NextRequest) {
                     function getInspectorBadges(el) {
                         const badges = [];
                         if (el.tagName === 'A' && el.getAttribute('href')) badges.push('link');
-                        if (el.tagName === 'IFRAME') badges.push('iframe');
+                        if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') badges.push('iframe');
                         const parent = el.parentElement;
                         if (parent) {
                             const siblings = Array.from(parent.children).filter(function(item) { return item.tagName === el.tagName; });
@@ -646,7 +659,7 @@ export async function GET(request: NextRequest) {
 
                     // Setup iframe communication for proxied iframes
                     function setupIframes() {
-                        const iframes = document.querySelectorAll('iframe');
+                        const iframes = document.querySelectorAll('iframe, frame');
                         iframes.forEach(function(iframe) {
                             const getFramePath = function() {
                                 const iframeSel = getIframeSelector(iframe);
@@ -832,7 +845,7 @@ export async function GET(request: NextRequest) {
                             selectionMode = e.data.mode === 'remove' ? 'remove' : 'select';
                             document.body.style.cursor = 'crosshair';
                             // Forward to iframes
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try {
                                     iframe.contentWindow?.postMessage({
                                         type: 'enable-selection',
@@ -847,19 +860,19 @@ export async function GET(request: NextRequest) {
                             document.body.style.cursor = ''; 
                             if (highlightDiv) highlightDiv.style.display = 'none';
                             // Forward to iframes
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage({ type: 'disable-selection' }, '*'); } catch {}
                             });
                         }
                         else if (e.data.type === 'highlight-selector') {
                             highlightSelectorMatches(e.data.selector);
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
                         else if (e.data.type === 'clear-highlight-selector') {
                             clearSelectorHighlights();
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
@@ -869,7 +882,7 @@ export async function GET(request: NextRequest) {
                             } else {
                                 highlightSelectorMatches(e.data.selector);
                             }
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
@@ -884,13 +897,13 @@ export async function GET(request: NextRequest) {
                         }
                         else if (e.data.type === 'inspector:init') {
                             sendInspectorInit();
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
                         else if (e.data.type === 'inspector:request-children') {
                             sendInspectorChildren(e.data.nodeId);
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
@@ -901,7 +914,7 @@ export async function GET(request: NextRequest) {
                                 nodeId: e.data.nodeId,
                                 suggestions: suggestions,
                             }, '*');
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
@@ -929,7 +942,7 @@ export async function GET(request: NextRequest) {
                                     },
                                 }, '*');
                             }
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
                         }
@@ -985,7 +998,7 @@ export async function GET(request: NextRequest) {
                                     if (highlightDiv) highlightDiv.style.display = 'none';
                                 }
                                 // Forward to iframes
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                                 });
                             } catch (err) { console.error('Error removing element:', err); }

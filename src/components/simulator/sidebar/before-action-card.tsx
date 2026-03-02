@@ -10,8 +10,8 @@ interface BeforeActionCardProps {
 
 export function BeforeActionCard({ title, actions, children }: BeforeActionCardProps) {
     return (
-        <div className="rounded-lg border border-white/10 bg-black/30 p-2">
-            <div className="mb-2 flex items-center justify-between text-xs text-white/70">
+        <div className="rounded-lg border border-border bg-card/50 p-2">
+            <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
                 <span>{title}</span>
                 <div className="flex gap-1">{actions}</div>
             </div>

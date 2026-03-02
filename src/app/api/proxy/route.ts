@@ -666,7 +666,7 @@ export async function GET(request: NextRequest) {
                         function getInspectorBadges(el) {
                             const badges = [];
                             if (el.tagName === 'A' && el.getAttribute('href')) badges.push('link');
-                            if (el.tagName === 'IFRAME') badges.push('iframe');
+                            if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') badges.push('iframe');
                             const parent = el.parentElement;
                             if (parent) {
                                 const siblings = Array.from(parent.children).filter(function(item) { return item.tagName === el.tagName; });
@@ -797,19 +797,20 @@ export async function GET(request: NextRequest) {
                         }
 
                         function getIframeSelector(iframe) {
-                            if (iframe.id) return 'iframe#' + iframe.id;
-                            if (iframe.name) return 'iframe[name="' + iframe.name + '"]';
+                            const tagName = iframe.tagName.toLowerCase();
+                            if (iframe.id) return tagName + '#' + iframe.id;
+                            if (iframe.name) return tagName + '[name="' + iframe.name + '"]';
                             let idx = 1;
                             let prev = iframe.previousElementSibling;
                             while (prev) {
-                                if (prev.tagName === 'IFRAME') idx++;
+                                if (prev.tagName === iframe.tagName) idx++;
                                 prev = prev.previousElementSibling;
                             }
-                            return 'iframe:nth-of-type(' + idx + ')';
+                            return tagName + ':nth-of-type(' + idx + ')';
                         }
 
                         function setupIframes() {
-                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                            document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 const getFramePath = function() {
                                     const iframeSelector = getIframeSelector(iframe);
                                     return FRAME_PATH.concat([iframeSelector]);
@@ -914,7 +915,7 @@ export async function GET(request: NextRequest) {
                             if (!isSelectionMode) return;
                             const target = getElementFromEvent(e);
                             if (!target || target === highlightDiv || target === selectedEl) return;
-                            if (target.tagName === 'IFRAME') return;
+                            if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') return;
                             hoveredEl = target;
                             updateHighlight(target);
                         }
@@ -923,7 +924,7 @@ export async function GET(request: NextRequest) {
                             if (!isSelectionMode) return;
                             const target = getElementFromEvent(e);
                             if (!target || target === highlightDiv) return;
-                            if (target.tagName === 'IFRAME') return;
+                            if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') return;
                             
                             e.preventDefault();
                             e.stopPropagation();
@@ -990,7 +991,7 @@ export async function GET(request: NextRequest) {
                         window.addEventListener('message', function(event) {
                             if (event.data.type === 'enable-selection') {
                                 enableSelection(event.data.mode);
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try {
                                         iframe.contentWindow?.postMessage({
                                             type: 'enable-selection',
@@ -1001,19 +1002,19 @@ export async function GET(request: NextRequest) {
                             }
                             else if (event.data.type === 'disable-selection') {
                                 disableSelection();
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage({ type: 'disable-selection' }, '*'); } catch {}
                                 });
                             }
                             else if (event.data.type === 'highlight-selector') {
                                 highlightSelectorMatches(event.data.selector);
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
                             else if (event.data.type === 'clear-highlight-selector') {
                                 clearSelectorHighlights();
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
@@ -1023,7 +1024,7 @@ export async function GET(request: NextRequest) {
                                 } else {
                                     highlightSelectorMatches(event.data.selector);
                                 }
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
@@ -1038,13 +1039,13 @@ export async function GET(request: NextRequest) {
                             }
                             else if (event.data.type === 'inspector:init') {
                                 sendInspectorInit();
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
                             else if (event.data.type === 'inspector:request-children') {
                                 sendInspectorChildren(event.data.nodeId);
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
@@ -1055,7 +1056,7 @@ export async function GET(request: NextRequest) {
                                     nodeId: event.data.nodeId,
                                     suggestions: suggestions,
                                 }, '*');
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
@@ -1084,7 +1085,7 @@ export async function GET(request: NextRequest) {
                                         },
                                     }, '*');
                                 }
-                                document.querySelectorAll('iframe').forEach(function(iframe) {
+                                document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
                             }
@@ -1172,7 +1173,7 @@ export async function GET(request: NextRequest) {
                                     }
                                     
                                     // Forward to all iframes
-                                    document.querySelectorAll('iframe').forEach(function(iframe) {
+                                    document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                         try {
                                             iframe.contentWindow?.postMessage(event.data, '*');
                                         } catch {}

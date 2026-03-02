@@ -143,7 +143,7 @@ export function SourceEditorContainer() {
 
     return (
         <div className="flex h-full w-full flex-col">
-            <form onSubmit={handleFormSubmit} className="relative z-10 space-y-4 border-b border-white/10 bg-black/10 p-6 backdrop-blur-sm">
+            <form onSubmit={handleFormSubmit} className="relative z-10 border-b border-border bg-card/50 px-5 py-4">
                 <SourceMetadataForm
                     name={name}
                     onNameChange={setName}

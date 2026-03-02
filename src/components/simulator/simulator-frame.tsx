@@ -481,8 +481,8 @@ export function SimulatorFrame({
                     key={node.nodeId}
                     type="button"
                     className={cn(
-                        'w-full rounded-md px-2 py-1 text-left text-[11px] hover:bg-white/10',
-                        selectedInspectorNodeId === node.nodeId ? 'bg-cyan-500/20 text-cyan-100' : 'text-white/80',
+                        'w-full rounded-md px-2 py-1 text-left text-[11px] hover:bg-muted/50',
+                        selectedInspectorNodeId === node.nodeId ? 'bg-primary/20 text-primary' : 'text-foreground/80',
                     )}
                     style={{ paddingLeft: `${depth * 12 + 8}px` }}
                     onMouseEnter={() => requestInspectorHover(node.selector)}
@@ -496,7 +496,7 @@ export function SimulatorFrame({
                     <span className="mr-1 inline-flex items-center align-middle">
                         {node.hasChildren ? (
                             <span
-                                className="inline-flex h-4 w-4 items-center justify-center rounded hover:bg-white/10"
+                                className="inline-flex h-4 w-4 items-center justify-center rounded hover:bg-muted/50"
                                 onClick={(event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
@@ -518,14 +518,14 @@ export function SimulatorFrame({
                             <span className="inline-block h-4 w-4" />
                         )}
                     </span>
-                    <span className="font-mono text-cyan-200">{node.tag}</span>
-                    {node.attrs?.id && <span className="ml-1 text-purple-200">#{node.attrs.id}</span>}
-                    {node.attrs?.className && <span className="ml-1 text-white/50">.{node.attrs.className}</span>}
-                    {node.text && <span className="ml-2 text-white/60">{node.text}</span>}
+                    <span className="font-mono text-primary">{node.tag}</span>
+                    {node.attrs?.id && <span className="ml-1 text-primary/70">#{node.attrs.id}</span>}
+                    {node.attrs?.className && <span className="ml-1 text-muted-foreground">.{node.attrs.className}</span>}
+                    {node.text && <span className="ml-2 text-muted-foreground">{node.text}</span>}
                     {node.badges.length > 0 && (
                         <span className="ml-2 inline-flex gap-1">
                             {node.badges.slice(0, 3).map((badge) => (
-                                <span key={`${node.nodeId}-${badge}`} className="rounded bg-white/10 px-1 py-0.5 text-[10px] uppercase tracking-wide">
+                                <span key={`${node.nodeId}-${badge}`} className="rounded bg-muted/50 px-1 py-0.5 text-[10px] uppercase tracking-wide">
                                     {badge}
                                 </span>
                             ))}
@@ -538,7 +538,7 @@ export function SimulatorFrame({
     };
 
     return (
-        <div className={cn('relative flex flex-1 flex-col bg-zinc-950', className)}>
+        <div className={cn('relative flex flex-1 flex-col bg-card', className)}>
             <FrameToolbar
                 interactionMode={interactionMode}
                 inspectorOpen={inspectorOpen}
@@ -616,7 +616,7 @@ export function SimulatorFrame({
                 </div>
             ) : (
                 <div className="flex h-full items-center justify-center">
-                    <div className="text-center text-white/30">
+                    <div className="text-center text-muted-foreground/40">
                         <Globe className="mx-auto mb-4 h-16 w-16 opacity-30" />
                         <p className="text-lg">Zadejte Base URL pro zobrazeni simulatoru stranky</p>
                         <p className="mt-2 text-sm">URL musi zacinat na http:// nebo https://</p>

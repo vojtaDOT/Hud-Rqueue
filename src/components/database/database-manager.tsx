@@ -202,9 +202,9 @@ export function DatabaseManager() {
     return (
         <div className="flex h-full">
             {/* Sidebar */}
-            <aside className="w-56 shrink-0 border-r border-white/10 bg-black/20 overflow-y-auto">
-                <div className="p-4 border-b border-white/10">
-                    <div className="flex items-center gap-2 text-sm font-medium text-white/70">
+            <aside className="w-56 shrink-0 border-r border-border bg-card/50 overflow-y-auto">
+                <div className="p-4 border-b border-border">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                         <Database className="w-4 h-4" />
                         <span>Tabulky</span>
                     </div>
@@ -217,8 +217,8 @@ export function DatabaseManager() {
                             className={cn(
                                 'w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between gap-2',
                                 selectedTable === t.name
-                                    ? 'bg-purple-500/20 text-white border border-purple-500/30'
-                                    : 'text-white/60 hover:text-white hover:bg-white/5',
+                                    ? 'bg-primary/15 text-primary border border-primary/30'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30',
                             )}
                         >
                             <div className="flex items-center gap-2 min-w-0">
@@ -226,7 +226,7 @@ export function DatabaseManager() {
                                 <span className="truncate">{t.label}</span>
                             </div>
                             {tableCounts[t.name] !== undefined && (
-                                <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-white/40 shrink-0">
+                                <span className="text-[10px] bg-muted/50 px-1.5 py-0.5 rounded text-muted-foreground/60 shrink-0">
                                     {tableCounts[t.name]}
                                 </span>
                             )}
@@ -238,32 +238,32 @@ export function DatabaseManager() {
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 {/* Toolbar */}
-                <div className="shrink-0 px-4 py-3 border-b border-white/10 bg-black/10 flex items-center gap-3">
-                    <h2 className="text-sm font-semibold text-white mr-2">{schema.label}</h2>
-                    <span className="text-xs text-white/40">
+                <div className="shrink-0 px-4 py-3 border-b border-border bg-card/30 flex items-center gap-3">
+                    <h2 className="text-sm font-semibold text-foreground mr-2">{schema.label}</h2>
+                    <span className="text-xs text-muted-foreground/60">
                         {totalCount} záznamů
                     </span>
                     <div className="flex-1" />
                     <div className="relative w-56">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
                         <Input
                             placeholder="Hledat..."
                             onChange={e => handleSearchInput(e.target.value)}
-                            className="h-8 pl-8 text-xs bg-white/5 border-white/15 text-white placeholder:text-white/30"
+                            className="h-8 pl-8 text-xs bg-muted/30 border-border text-foreground placeholder:text-muted-foreground/40"
                         />
                     </div>
                     <Button
                         variant="ghost"
                         size="icon"
                         onClick={fetchRows}
-                        className="h-8 w-8 text-white/50 hover:text-white"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     >
                         <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
                     </Button>
                     <Button
                         size="sm"
                         onClick={openCreate}
-                        className="h-8 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-xs"
+                        className="h-8 bg-primary text-primary-foreground hover:bg-primary/90 text-xs"
                     >
                         <Plus className="w-3.5 h-3.5 mr-1" />
                         Přidat
@@ -274,20 +274,20 @@ export function DatabaseManager() {
                 <div className="flex-1 overflow-auto relative">
                     {loading && rows.length === 0 && (
                         <div className="absolute inset-0 flex items-center justify-center">
-                            <Loader2 className="w-6 h-6 text-purple-400 animate-spin" />
+                            <Loader2 className="w-6 h-6 text-primary animate-spin" />
                         </div>
                     )}
 
                     <table className="w-full text-sm">
-                        <thead className="sticky top-0 z-10 bg-zinc-900/95 backdrop-blur-sm">
-                            <tr className="border-b border-white/10">
+                        <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm">
+                            <tr className="border-b border-border">
                                 {visibleCols.map(col => {
                                     const isSorted = sortColumn === col.name;
                                     return (
                                         <th
                                             key={col.name}
                                             onClick={() => handleSort(col.name)}
-                                            className="px-3 py-2 text-left text-xs font-medium text-white/50 uppercase tracking-wider cursor-pointer hover:text-white/80 transition-colors select-none whitespace-nowrap"
+                                            className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground/80 transition-colors select-none whitespace-nowrap"
                                         >
                                             <div className="flex items-center gap-1">
                                                 {col.label}
@@ -300,16 +300,16 @@ export function DatabaseManager() {
                                         </th>
                                     );
                                 })}
-                                <th className="px-3 py-2 text-right text-xs font-medium text-white/50 uppercase tracking-wider w-20">
+                                <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider w-20">
                                     Akce
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
+                        <tbody className="divide-y divide-border">
                             {rows.map((row, i) => (
                                 <tr
                                     key={`${selectedTable}-${row[schema.primaryKey] ?? i}`}
-                                    className="hover:bg-white/[0.03] transition-colors group"
+                                    className="hover:bg-muted/20 transition-colors group"
                                 >
                                     {visibleCols.map(col => {
                                         const val = row[col.name];
@@ -338,13 +338,13 @@ export function DatabaseManager() {
                                                         {display}
                                                     </span>
                                                 ) : isNull ? (
-                                                    <span className="text-white/20">—</span>
+                                                    <span className="text-muted-foreground/30">—</span>
                                                 ) : col.type === 'jsonb' || col.type === 'json' ? (
-                                                    <span className="font-mono text-xs text-purple-300/70">{display}</span>
+                                                    <span className="font-mono text-xs text-primary/70">{display}</span>
                                                 ) : col.primaryKey ? (
-                                                    <span className="font-mono text-white/80">{display}</span>
+                                                    <span className="font-mono text-foreground/80">{display}</span>
                                                 ) : (
-                                                    <span className="text-white/70">{display}</span>
+                                                    <span className="text-muted-foreground">{display}</span>
                                                 )}
                                             </td>
                                         );
@@ -353,14 +353,14 @@ export function DatabaseManager() {
                                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
                                                 onClick={() => openEdit(row)}
-                                                className="p-1.5 rounded hover:bg-white/10 text-white/40 hover:text-blue-400 transition-colors"
+                                                className="p-1.5 rounded hover:bg-muted/50 text-muted-foreground/60 hover:text-primary transition-colors"
                                                 title="Upravit"
                                             >
                                                 <Pencil className="w-3.5 h-3.5" />
                                             </button>
                                             <button
                                                 onClick={() => setDeleteRow(row)}
-                                                className="p-1.5 rounded hover:bg-white/10 text-white/40 hover:text-red-400 transition-colors"
+                                                className="p-1.5 rounded hover:bg-muted/50 text-muted-foreground/60 hover:text-red-400 transition-colors"
                                                 title="Smazat"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />
@@ -374,7 +374,7 @@ export function DatabaseManager() {
                                 <tr>
                                     <td
                                         colSpan={visibleCols.length + 1}
-                                        className="text-center py-16 text-white/30 text-sm"
+                                        className="text-center py-16 text-muted-foreground/40 text-sm"
                                     >
                                         {search ? 'Žádné výsledky pro tento dotaz' : 'Tabulka je prázdná'}
                                     </td>
@@ -386,36 +386,36 @@ export function DatabaseManager() {
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                    <div className="shrink-0 px-4 py-2 border-t border-white/10 bg-black/10 flex items-center justify-between">
-                        <span className="text-xs text-white/40">
+                    <div className="shrink-0 px-4 py-2 border-t border-border bg-card/30 flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground/60">
                             Stránka {page + 1} z {totalPages}
                         </span>
                         <div className="flex items-center gap-1">
                             <button
                                 onClick={() => setPage(0)}
                                 disabled={page === 0}
-                                className="p-1 rounded text-white/40 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                className="p-1 rounded text-muted-foreground/60 hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronsLeft className="w-4 h-4" />
                             </button>
                             <button
                                 onClick={() => setPage(p => Math.max(0, p - 1))}
                                 disabled={page === 0}
-                                className="p-1 rounded text-white/40 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                className="p-1 rounded text-muted-foreground/60 hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronLeft className="w-4 h-4" />
                             </button>
                             <button
                                 onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                                 disabled={page >= totalPages - 1}
-                                className="p-1 rounded text-white/40 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                className="p-1 rounded text-muted-foreground/60 hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronRight className="w-4 h-4" />
                             </button>
                             <button
                                 onClick={() => setPage(totalPages - 1)}
                                 disabled={page >= totalPages - 1}
-                                className="p-1 rounded text-white/40 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                className="p-1 rounded text-muted-foreground/60 hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronsRight className="w-4 h-4" />
                             </button>
@@ -436,12 +436,12 @@ export function DatabaseManager() {
 
             {/* Delete Confirmation Dialog */}
             <Dialog open={!!deleteRow} onOpenChange={v => !v && setDeleteRow(null)}>
-                <DialogContent className="sm:max-w-sm bg-zinc-950 border-white/10 text-white">
+                <DialogContent className="sm:max-w-sm bg-card border-border text-foreground">
                     <DialogHeader>
                         <DialogTitle>Smazat záznam?</DialogTitle>
                         <DialogDescription>
                             Opravdu chcete smazat záznam s klíčem{' '}
-                            <span className="font-mono text-white/80">
+                            <span className="font-mono text-foreground/80">
                                 {String(deleteRow?.[schema.primaryKey])}
                             </span>
                             ? Tuto akci nelze vrátit.
@@ -458,7 +458,7 @@ export function DatabaseManager() {
                         <Button
                             onClick={handleDelete}
                             disabled={deleting}
-                            className="bg-red-600 hover:bg-red-700 text-white"
+                            className="bg-red-600 hover:bg-red-700 text-white dark:text-white"
                         >
                             {deleting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                             Smazat

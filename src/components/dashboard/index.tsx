@@ -18,16 +18,13 @@ export function Dashboard() {
 
     return (
         <div className="w-full space-y-6">
-            {/* Glass tab bar — centered, not full width */}
             <div className="flex justify-center">
                 <nav
                     className={cn(
-                        'inline-flex items-center gap-1 px-1.5 py-1.5 rounded-2xl',
-                        'bg-background/60 dark:bg-zinc-900/50',
-                        'backdrop-blur-xl backdrop-saturate-150',
-                        'border border-white/8 dark:border-white/6',
-                        'shadow-lg shadow-black/4 dark:shadow-black/30',
-                        'ring-1 ring-black/3 dark:ring-white/4'
+                        'inline-flex items-center gap-1 px-1.5 py-1.5 rounded-xl',
+                        'bg-card/80 backdrop-blur-sm',
+                        'border border-border/60',
+                        'shadow-sm',
                     )}
                 >
                     {TABS.map(({ value, label, icon: Icon }) => (
@@ -35,10 +32,10 @@ export function Dashboard() {
                             key={value}
                             onClick={() => setActiveTab(value)}
                             className={cn(
-                                'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200',
+                                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200',
                                 activeTab === value
-                                    ? 'text-foreground bg-white/12 dark:bg-white/8 shadow-sm'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/6'
+                                    ? 'text-primary bg-primary/10 shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                             )}
                         >
                             <Icon className="h-4 w-4" />
@@ -48,7 +45,6 @@ export function Dashboard() {
                 </nav>
             </div>
 
-            {/* Tab content */}
             {activeTab === 'overview' && <DashboardOverview />}
             {activeTab === 'redis' && <DashboardRedis />}
             {activeTab === 'database' && <DashboardDatabase />}

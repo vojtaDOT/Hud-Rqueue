@@ -256,8 +256,8 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             size="icon"
             variant="ghost"
             className={cn(
-                'h-8 w-8 border border-white/10',
-                isSameTarget(target, armedTarget) ? 'bg-cyan-500/30 text-cyan-100' : 'text-white/60',
+                'h-8 w-8 border border-border',
+                isSameTarget(target, armedTarget) ? 'bg-primary/30 text-primary' : 'text-muted-foreground',
             )}
             title="Pick target selector"
             onClick={() => armSelectorTarget(target, selector)}
@@ -831,7 +831,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         <Input
                             value={action.css_selector}
                             placeholder="CSS selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onFocus={() => setSelectorFocus(target, action.css_selector)}
                             onChange={(event) => {
                                 const value = event.target.value;
@@ -853,7 +853,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         type="number"
                         value={action.ms}
                         placeholder="Timeout ms"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                        className="h-8 border-border bg-card/50 text-xs text-foreground"
                         onChange={(event) => {
                             const value = Number(event.target.value) || 0;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -872,7 +872,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={action.css_selector}
                                 placeholder="CSS selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(target, action.css_selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -891,7 +891,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             type="number"
                             value={action.timeout_ms}
                             placeholder="Timeout ms"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -919,7 +919,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             }));
                         }}
                     >
-                        <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                        <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -936,7 +936,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={action.css_selector}
                                 placeholder="CSS selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(target, action.css_selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -955,7 +955,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             type="number"
                             value={action.wait_after_ms ?? 0}
                             placeholder="Wait ms"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -975,7 +975,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             type="number"
                             value={action.count}
                             placeholder="Count"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -990,7 +990,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             type="number"
                             value={action.delay_ms}
                             placeholder="Delay ms"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = Number(event.target.value) || 0;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -1010,7 +1010,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={action.css_selector}
                                 placeholder="CSS selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(target, action.css_selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1028,7 +1028,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         <Input
                             value={action.value}
                             placeholder="Value"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -1039,7 +1039,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 }));
                             }}
                         />
-                        <label className="flex items-center gap-2 text-xs text-white/70">
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
                             <input
                                 type="checkbox"
                                 checked={action.press_enter}
@@ -1063,7 +1063,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={action.css_selector}
                                 placeholder="CSS selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(target, action.css_selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1081,7 +1081,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         <Input
                             value={action.value}
                             placeholder="Value"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -1099,7 +1099,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     <Input
                         value={action.script}
                         placeholder="JavaScript"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                        className="h-8 border-border bg-card/50 text-xs text-foreground"
                         onChange={(event) => {
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -1116,7 +1116,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     <Input
                         value={action.filename}
                         placeholder="Filename"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                        className="h-8 border-border bg-card/50 text-xs text-foreground"
                         onChange={(event) => {
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => ({
@@ -1218,7 +1218,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.selector}
                                 placeholder="Selector for source URL"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1237,7 +1237,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value="href"
                                 disabled
-                                className="h-8 border-white/10 bg-black/40 text-xs text-white/60"
+                                className="h-8 border-border bg-card/50 text-xs text-muted-foreground"
                             />
                             <Select
                                 value={step.url_type_id ?? workflow.url_types[0]?.id}
@@ -1251,7 +1251,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                     });
                                 }}
                             >
-                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1272,7 +1272,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.selector}
                                 placeholder="Selector for document URL"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1291,7 +1291,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.filename_selector ?? ''}
                                 placeholder="Filename selector (optional)"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1315,7 +1315,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.url_selector}
                                 placeholder="File URL selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('url_selector'), step.url_selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1334,7 +1334,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.filename_selector ?? ''}
                                 placeholder="Filename selector (optional)"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('filename_selector'), step.filename_selector ?? '')}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1352,7 +1352,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         <Input
                             value={step.file_type_hint ?? ''}
                             placeholder="File type hint (optional)"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onChange={(event) => {
                                 const value = event.target.value;
                                 updateWorkflowPhase(currentPhaseKey, (phase) => {
@@ -1372,7 +1372,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.key}
                                 placeholder="Output key"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onChange={(event) => {
                                     const value = event.target.value;
                                     updateWorkflowPhase(currentPhaseKey, (phase) => {
@@ -1396,7 +1396,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                     });
                                 }}
                             >
-                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1409,7 +1409,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             <Input
                                 value={step.selector}
                                 placeholder="CSS selector"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
                                 onChange={(event) => {
                                     const value = event.target.value;
@@ -1450,7 +1450,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className={cn('h-7 text-xs', effectiveSelectedScopeId === scope.id ? 'bg-white/20 text-white' : 'text-white/70')}
+                            className={cn('h-7 text-xs', effectiveSelectedScopeId === scope.id ? 'bg-muted text-foreground' : 'text-muted-foreground')}
                             onClick={() => setSelectedScopeId(scope.id)}
                         >
                             Target
@@ -1478,7 +1478,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         <Input
                             value={scope.css_selector}
                             placeholder="Scope selector"
-                            className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                            className="h-8 border-border bg-card/50 text-xs text-foreground"
                             onFocus={() => setSelectorFocus(scopeTarget, scope.css_selector)}
                             onChange={(event) => {
                                 const value = event.target.value;
@@ -1494,7 +1494,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     <Input
                         value={scope.label}
                         placeholder="Scope label"
-                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                        className="h-8 border-border bg-card/50 text-xs text-foreground"
                         onChange={(event) => {
                             const value = event.target.value;
                             updateWorkflowPhase(currentPhaseKey, (phase) => {
@@ -1520,7 +1520,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                         type="button"
                                         size="sm"
                                         variant="ghost"
-                                        className={cn('h-7 text-xs', effectiveSelectedRepeaterId === repeater.id ? 'bg-white/20 text-white' : 'text-white/70')}
+                                        className={cn('h-7 text-xs', effectiveSelectedRepeaterId === repeater.id ? 'bg-muted text-foreground' : 'text-muted-foreground')}
                                         onClick={() => {
                                             setSelectedScopeId(scope.id);
                                             setSelectedRepeaterId(repeater.id);
@@ -1553,7 +1553,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                     <Input
                                         value={repeater.css_selector}
                                         placeholder="Repeater selector"
-                                        className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                        className="h-8 border-border bg-card/50 text-xs text-foreground"
                                         onFocus={() => setSelectorFocus(repeaterTarget, repeater.css_selector)}
                                         onChange={(event) => {
                                             const value = event.target.value;
@@ -1572,7 +1572,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 <Input
                                     value={repeater.label}
                                     placeholder="Repeater label"
-                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                    className="h-8 border-border bg-card/50 text-xs text-foreground"
                                     onChange={(event) => {
                                         const value = event.target.value;
                                         updateWorkflowPhase(currentPhaseKey, (phase) => {
@@ -1620,7 +1620,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 <Input
                                     value={scope.pagination.css_selector}
                                     placeholder="Next selector"
-                                    className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                    className="h-8 border-border bg-card/50 text-xs text-foreground"
                                     onFocus={() => setSelectorFocus(paginationTarget, scope.pagination?.css_selector ?? '')}
                                     onChange={(event) => {
                                         const value = event.target.value;
@@ -1643,7 +1643,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                 type="number"
                                 value={scope.pagination.max_pages}
                                 placeholder="0 = all"
-                                className="h-8 border-white/10 bg-black/30 text-xs text-white"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
                                 onChange={(event) => {
                                     const value = Number(event.target.value) || 0;
                                     updateWorkflowPhase(currentPhaseKey, (phase) => {
@@ -1709,14 +1709,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     );
 
     return (
-        <aside className="flex h-full w-full flex-col overflow-hidden border-l border-white/10 bg-black/30 backdrop-blur-sm">
-            <div className="border-b border-white/10 p-4">
+        <aside className="flex h-full w-full flex-col overflow-hidden border-l border-border bg-card/50 backdrop-blur-sm">
+            <div className="border-b border-border p-4">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm font-medium text-white/70">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                         <Workflow className="h-4 w-4" />
                         <span>Scraping Workflow</span>
                     </div>
-                    <div className="rounded bg-white/10 px-2 py-1 text-xs text-white/60">
+                    <div className="rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
                         {playwrightEnabled ? 'Playwright' : 'Scrapy'}
                     </div>
                 </div>
@@ -1724,12 +1724,12 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
 
             <div className="flex min-h-0 flex-1 flex-col">
                 <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as PhaseTab)} className="flex min-h-0 flex-1 flex-col">
-                    <div className="border-b border-white/10 px-4 pt-4">
+                    <div className="border-b border-border px-4 pt-4">
                         <TabsList className="h-auto border-0 bg-transparent p-0">
-                            <TabsTrigger value="discovery" className="text-white/60 data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                            <TabsTrigger value="discovery" className="text-muted-foreground data-[state=active]:bg-muted/50 data-[state=active]:text-foreground">
                                 Phase 1: Discovery
                             </TabsTrigger>
-                            <TabsTrigger value="processing" className="text-white/60 data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                            <TabsTrigger value="processing" className="text-muted-foreground data-[state=active]:bg-muted/50 data-[state=active]:text-foreground">
                                 Phase 2: Processing
                             </TabsTrigger>
                         </TabsList>
@@ -1742,10 +1742,10 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     </TabsContent>
 
                     <TabsContent value="processing" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
-                        <div className="border-b border-white/10 p-4">
+                        <div className="border-b border-border p-4">
                             <div className="mb-3 flex items-center justify-between">
-                                <h3 className="text-xs font-semibold uppercase tracking-wider text-white/50">URL Types</h3>
-                                <Button type="button" size="sm" variant="ghost" className="h-7 text-white/70 hover:bg-white/10" onClick={handleUrlTypeAdd}>
+                                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">URL Types</h3>
+                                <Button type="button" size="sm" variant="ghost" className="h-7 text-muted-foreground hover:bg-muted/50" onClick={handleUrlTypeAdd}>
                                     <Plus className="mr-1 h-3 w-3" />
                                     Add URL Type
                                 </Button>
@@ -1767,18 +1767,18 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                         className={cn(
                                             'w-full rounded-lg border px-3 py-2 text-left transition-colors',
                                             activeUrlType.id === urlType.id
-                                                ? 'border-purple-500/50 bg-purple-500/20'
-                                                : 'border-white/10 bg-zinc-900/50 hover:border-white/20',
+                                                ? 'border-primary/50 bg-primary/20'
+                                                : 'border-border bg-card/50 hover:border-border',
                                         )}
                                     >
                                         <div className="flex items-center justify-between gap-2">
-                                            <span className="truncate text-sm text-white">{urlType.name}</span>
+                                            <span className="truncate text-sm text-foreground">{urlType.name}</span>
                                             <span className="flex gap-1">
                                                 <Button
                                                     type="button"
                                                     size="icon"
                                                     variant="ghost"
-                                                    className="h-6 w-6 text-white/40 hover:text-white"
+                                                    className="h-6 w-6 text-muted-foreground/60 hover:text-foreground"
                                                     onClick={(event) => {
                                                         event.stopPropagation();
                                                         handleUrlTypeRename(urlType);
@@ -1791,7 +1791,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                                         type="button"
                                                         size="icon"
                                                         variant="ghost"
-                                                        className="h-6 w-6 text-white/40 hover:text-red-300"
+                                                        className="h-6 w-6 text-muted-foreground/60 hover:text-red-300"
                                                         onClick={(event) => {
                                                             event.stopPropagation();
                                                             handleUrlTypeDelete(urlType.id);

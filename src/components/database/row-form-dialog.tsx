@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import {
     Dialog,
@@ -51,7 +51,10 @@ export function RowFormDialog({
     initialData,
     onSubmit,
 }: RowFormDialogProps) {
-    const columns = mode === 'create' ? getCreateColumns(schema) : getEditColumns(schema);
+    const columns = useMemo(
+        () => (mode === 'create' ? getCreateColumns(schema) : getEditColumns(schema)),
+        [mode, schema],
+    );
     const [formData, setFormData] = useState<Record<string, string | boolean>>({});
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -139,7 +142,7 @@ export function RowFormDialog({
         if (col.type === 'boolean') {
             return (
                 <div key={key} className="flex items-center justify-between py-2">
-                    <Label className="text-sm text-white/70">{col.label}</Label>
+                    <Label className="text-sm text-muted-foreground">{col.label}</Label>
                     <Switch
                         checked={formData[key] === true}
                         onCheckedChange={v => handleChange(col, v)}
@@ -151,12 +154,12 @@ export function RowFormDialog({
         if (col.type === 'jsonb' || col.type === 'json') {
             return (
                 <div key={key} className="space-y-1.5">
-                    <Label className="text-sm text-white/70">{col.label}</Label>
+                    <Label className="text-sm text-muted-foreground">{col.label}</Label>
                     <Textarea
                         value={(formData[key] as string) || ''}
                         onChange={e => handleChange(col, e.target.value)}
                         rows={5}
-                        className="font-mono text-xs bg-white/5 border-white/20 text-white"
+                        className="font-mono text-xs bg-muted/30 border-border text-foreground"
                         placeholder="{}"
                     />
                 </div>
@@ -168,12 +171,12 @@ export function RowFormDialog({
             if (isLong) {
                 return (
                     <div key={key} className="space-y-1.5">
-                        <Label className="text-sm text-white/70">{col.label}</Label>
+                        <Label className="text-sm text-muted-foreground">{col.label}</Label>
                         <Textarea
                             value={(formData[key] as string) || ''}
                             onChange={e => handleChange(col, e.target.value)}
                             rows={3}
-                            className="bg-white/5 border-white/20 text-white"
+                            className="bg-muted/30 border-border text-foreground"
                         />
                     </div>
                 );
@@ -182,13 +185,13 @@ export function RowFormDialog({
 
         return (
             <div key={key} className="space-y-1.5">
-                <Label className="text-sm text-white/70">{col.label}</Label>
+                <Label className="text-sm text-muted-foreground">{col.label}</Label>
                 <Input
                     type={col.type === 'integer' || col.type === 'bigint' ? 'number' : 'text'}
                     value={(formData[key] as string) || ''}
                     onChange={e => handleChange(col, e.target.value)}
                     placeholder={col.nullable ? '(volitelné)' : ''}
-                    className="bg-white/5 border-white/20 text-white placeholder:text-white/30"
+                    className="bg-muted/30 border-border text-foreground placeholder:text-muted-foreground/50"
                 />
             </div>
         );
@@ -196,11 +199,11 @@ export function RowFormDialog({
 
     return (
         <Dialog open={open} onOpenChange={v => !v && onClose()}>
-            <DialogContent className="sm:max-w-lg max-h-[85vh] bg-zinc-950 border-white/10 text-white overflow-hidden flex flex-col">
+            <DialogContent className="sm:max-w-lg max-h-[85vh] bg-card border-border text-foreground overflow-hidden flex flex-col">
                 <DialogHeader>
                     <DialogTitle>
                         {mode === 'create' ? 'Nový záznam' : 'Upravit záznam'}
-                        <span className="ml-2 text-sm font-normal text-white/40">
+                        <span className="ml-2 text-sm font-normal text-muted-foreground/60">
                             {schema.label}
                         </span>
                     </DialogTitle>
@@ -221,14 +224,14 @@ export function RowFormDialog({
                     </div>
                 )}
 
-                <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                <div className="flex justify-end gap-3 pt-3 border-t border-border">
                     <Button variant="ghost" onClick={onClose} disabled={submitting}>
                         Zrušit
                     </Button>
                     <Button
                         onClick={handleSubmit}
                         disabled={submitting}
-                        className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                        className="bg-primary text-primary-foreground hover:bg-primary/90"
                     >
                         {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                         {mode === 'create' ? 'Vytvořit' : 'Uložit'}

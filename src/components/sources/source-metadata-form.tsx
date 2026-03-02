@@ -66,22 +66,22 @@ export function SourceMetadataForm({
     rssPanel,
 }: SourceMetadataFormProps) {
     return (
-        <div className="space-y-4">
-            <div className="flex gap-4">
-                <div className="flex-1">
-                    <Label htmlFor="name" className="mb-1.5 block text-sm text-white/70">Nazev</Label>
+        <div className="space-y-3">
+            {/* Row 1: Name + Type */}
+            <div className="grid grid-cols-[1fr_180px] gap-3">
+                <div>
+                    <Label htmlFor="name" className="mb-1 block text-xs text-muted-foreground">Nazev</Label>
                     <Input
                         id="name"
                         value={name}
                         onChange={(event) => onNameChange(event.target.value)}
                         placeholder="Nazev zdroje"
-                        className="border-white/20 bg-white/5 text-white placeholder:text-white/40"
                     />
                 </div>
-                <div className="w-64">
-                    <Label htmlFor="type" className="mb-1.5 block text-sm text-white/70">Typ zdroje</Label>
+                <div>
+                    <Label htmlFor="type" className="mb-1 block text-xs text-muted-foreground">Typ zdroje</Label>
                     <Select value={typeId} onValueChange={onTypeIdChange} disabled={loadingTypes}>
-                        <SelectTrigger className="border-white/20 bg-white/5 text-white">
+                        <SelectTrigger>
                             <SelectValue placeholder={loadingTypes ? 'Nacitani...' : 'Vyberte typ'} />
                         </SelectTrigger>
                         <SelectContent>
@@ -95,6 +95,7 @@ export function SourceMetadataForm({
                 </div>
             </div>
 
+            {/* Row 2: Obec autocomplete */}
             <ObecAutocomplete
                 obecDropdownRef={obecDropdownRef}
                 obecSearch={obecSearch}
@@ -107,24 +108,25 @@ export function SourceMetadataForm({
                 selectedKrajName={selectedObec?.kraj_nazev}
             />
 
-            <div className="flex items-end gap-4">
-                <div className="flex-1">
-                    <Label htmlFor="baseUrl" className="mb-1.5 block text-sm text-white/70">Base URL</Label>
+            {/* Row 3: Base URL + Strategy + Actions */}
+            <div className="grid grid-cols-[1fr_120px] gap-3">
+                <div>
+                    <Label htmlFor="baseUrl" className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
                     <div className="relative">
-                        <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+                        <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                             id="baseUrl"
                             value={baseUrl}
                             onChange={(event) => onBaseUrlChange(event.target.value)}
                             placeholder="https://example.com/bulletin"
-                            className="border-white/20 bg-white/5 pl-10 text-white placeholder:text-white/40"
+                            className="pl-10"
                         />
                     </div>
                 </div>
-                <div className="w-40">
-                    <Label htmlFor="crawlStrategy" className="mb-1.5 block text-sm text-white/70">Strategie</Label>
+                <div>
+                    <Label htmlFor="crawlStrategy" className="mb-1 block text-xs text-muted-foreground">Strategie</Label>
                     <Select value={crawlStrategy} onValueChange={(value) => onCrawlStrategyChange(value as CrawlStrategy)}>
-                        <SelectTrigger id="crawlStrategy" className="border-white/20 bg-white/5 text-white">
+                        <SelectTrigger id="crawlStrategy">
                             <SelectValue placeholder="Strategie" />
                         </SelectTrigger>
                         <SelectContent>
@@ -133,38 +135,42 @@ export function SourceMetadataForm({
                         </SelectContent>
                     </Select>
                 </div>
+            </div>
+
+            {/* Row 4: Action buttons + RSS panel */}
+            <div className="flex items-center justify-end gap-2 pt-1">
                 <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={onDetectRssFeeds}
                     disabled={detectingRss || !/^https?:\/\//.test(baseUrl)}
-                    className="border-white/20 bg-white/5 text-white hover:bg-white/10"
                 >
                     {detectingRss ? (
                         <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                             Hledam RSS...
                         </>
                     ) : (
                         <>
-                            <Rss className="mr-2 h-4 w-4" />
+                            <Rss className="mr-1.5 h-3.5 w-3.5" />
                             Detekovat RSS
                         </>
                     )}
                 </Button>
                 <Button
                     type="submit"
+                    size="sm"
                     disabled={submitting}
-                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"
                 >
                     {submitting ? (
                         <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                             Ukladam...
                         </>
                     ) : (
                         <>
-                            <ChevronRight className="mr-2 h-4 w-4" />
+                            <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
                             Ulozit zdroj
                         </>
                     )}

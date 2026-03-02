@@ -1,4 +1,3 @@
-import { AnimatedBackground } from '@/components/animated-background';
 import { ManualPipeline } from '@/components/pipeline/manual-pipeline';
 
 function parseDevFlag(value: string | undefined): boolean {
@@ -9,11 +8,8 @@ function parseDevFlag(value: string | undefined): boolean {
 export default function PipelinePage() {
     const devMode = parseDevFlag(process.env.DEV);
     return (
-        <main className="flex min-h-screen flex-col items-center p-8 relative pt-20">
-            <AnimatedBackground />
-            <div className="w-full z-10">
-                <ManualPipeline devMode={devMode} />
-            </div>
+        <main className="p-6 pt-5">
+            <ManualPipeline devMode={devMode} />
         </main>
     );
 }

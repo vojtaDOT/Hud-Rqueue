@@ -85,17 +85,17 @@ export function StepChooser({
                 </section>
             )}
 
-            <section className="rounded-lg border border-white/10 bg-white/5 p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">Step Chooser</div>
+            <section className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Step Chooser</div>
                 <div className="space-y-3">
-                    <div className="rounded-lg border border-white/10 bg-black/30 p-2">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
+                    <div className="rounded-lg border border-border bg-card/50 p-2">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
                             <Clock3 className="h-3.5 w-3.5" />
                             Before
                         </div>
                         <div className="flex gap-2">
                             <Select value={beforeToAdd} onValueChange={onBeforeToAddChange}>
-                                <SelectTrigger className="h-8 border-white/10 bg-black/30 text-xs text-white">
+                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -112,14 +112,14 @@ export function StepChooser({
                     </div>
 
                     {playwrightEnabled && (
-                        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2">
-                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-purple-200">
+                        <div className="rounded-lg border border-primary/30 bg-primary/5 p-2">
+                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-primary">
                                 <Bot className="h-3.5 w-3.5" />
                                 Playwright
                             </div>
                             <div className="flex gap-2">
                                 <Select value={playwrightToAdd} onValueChange={onPlaywrightToAddChange}>
-                                    <SelectTrigger className="h-8 border-purple-500/20 bg-black/30 text-xs text-white">
+                                    <SelectTrigger className="h-8 border-primary/20 bg-card/50 text-xs text-foreground">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -136,8 +136,8 @@ export function StepChooser({
                         </div>
                     )}
 
-                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-2">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-primary">
                             <FolderTree className="h-3.5 w-3.5" />
                             Core
                         </div>
@@ -163,7 +163,7 @@ export function StepChooser({
                             </Button>
 
                             <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={onSelectedRepeaterChange}>
-                                <SelectTrigger className="h-8 border-green-500/40 bg-black/30 text-xs text-white">
+                                <SelectTrigger className="h-8 border-emerald-500/40 bg-card/50 text-xs text-foreground">
                                     <SelectValue placeholder="Step target repeater" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -232,7 +232,7 @@ export function StepChooser({
                                 + Pagination
                             </Button>
                         </div>
-                        <div className="mt-2 text-[11px] text-white/50">
+                        <div className="mt-2 text-[11px] text-muted-foreground">
                             Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'}
                             {' | '}
                             Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}

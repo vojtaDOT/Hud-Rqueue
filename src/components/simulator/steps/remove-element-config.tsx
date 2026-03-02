@@ -19,7 +19,7 @@ export function RemoveElementConfig({ block, onChange }: RemoveElementConfigProp
                     onChange={(e) => onChange(block.id, { ...block.config, selector: e.target.value })}
                 />
             </div>
-            <div className="text-xs text-white/50">
+            <div className="text-xs text-muted-foreground">
                 This element will be removed from the DOM before processing further steps.
             </div>
         </div>

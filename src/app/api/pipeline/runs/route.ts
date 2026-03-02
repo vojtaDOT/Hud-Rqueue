@@ -43,6 +43,83 @@ async function findFallbackSourceUrlId(sourceId: string): Promise<string | null>
     return String(data.id);
 }
 
+async function ensureFallbackSourceUrlId(sourceId: string): Promise<string | null> {
+    const existingId = await findFallbackSourceUrlId(sourceId);
+    if (existingId) return existingId;
+
+    const { data: source, error: sourceError } = await supabase
+        .from('sources')
+        .select('base_url, name')
+        .eq('id', sourceId)
+        .maybeSingle();
+    if (sourceError || !source?.base_url) return null;
+
+    const now = new Date().toISOString();
+    const baseUrl = String(source.base_url);
+    const autoLabel = source.name ? `Auto seed from source: ${String(source.name)}` : 'Auto seed from source';
+    const insertCandidates: Record<string, unknown>[] = [
+        { source_id: sourceId, url: baseUrl, enabled: true, label: autoLabel, created_at: now, updated_at: now },
+        { source_id: sourceId, url: baseUrl, enabled: true },
+        { source_id: sourceId, url: baseUrl },
+    ];
+
+    for (const payload of insertCandidates) {
+        const { data: inserted, error: insertError } = await supabase
+            .from('source_urls')
+            .insert([payload])
+            .select('id')
+            .single();
+        if (!insertError && inserted?.id) {
+            return String(inserted.id);
+        }
+    }
+
+    const { data: matched } = await supabase
+        .from('source_urls')
+        .select('id')
+        .eq('source_id', sourceId)
+        .eq('url', baseUrl)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (matched?.id) return String(matched.id);
+    return findFallbackSourceUrlId(sourceId);
+}
+
+async function insertRun(payload: Record<string, unknown>): Promise<{ run: Record<string, unknown> | null; errorMessage: string | null }> {
+    const { data, error } = await supabase
+        .from('ingestion_runs')
+        .insert([payload])
+        .select('*')
+        .single();
+    if (error || !data) {
+        return { run: null, errorMessage: error?.message || 'Insert failed' };
+    }
+    return { run: normalizeRunRow(data as Record<string, unknown>), errorMessage: null };
+}
+
+function normalizeCompatRun(run: Record<string, unknown>, sourceId: string, now: string, fallbackSourceUrlId?: string | null) {
+    run.source_id = run.source_id || sourceId;
+    run.source_url_id = run.source_url_id || fallbackSourceUrlId || null;
+    run.active_stage = run.active_stage || 'discovery';
+    run.updated_at = run.updated_at || now;
+    return run;
+}
+
+async function insertCompatRun(payload: Record<string, unknown>): Promise<{ run: Record<string, unknown> | null; errorMessage: string | null }> {
+    let attempt = await insertRun(payload);
+    if (attempt.run) return attempt;
+
+    const message = (attempt.errorMessage || '').toLowerCase();
+    if (!message.includes('source_id')) return attempt;
+
+    const legacyPayload = { ...payload };
+    delete legacyPayload.source_id;
+    attempt = await insertRun(legacyPayload);
+    return attempt;
+}
+
 export async function GET(request: NextRequest) {
     try {
         const sp = request.nextUrl.searchParams;
@@ -145,59 +222,26 @@ export async function POST(request: Request) {
             updated_at: now,
         };
 
-        const { data, error } = await supabase
-            .from('ingestion_runs')
-            .insert([payload])
-            .select('*')
-            .single();
-
-        if (!error && data) {
-            const run = normalizeRunRow(data as Record<string, unknown>);
+        const initialInsert = await insertRun(payload);
+        if (initialInsert.run) {
+            const run = initialInsert.run;
             if (!run.source_id) run.source_id = sourceId;
             return NextResponse.json({ run });
         }
 
-        const message = (error?.message || '').toLowerCase();
+        const message = (initialInsert.errorMessage || '').toLowerCase();
         const needsCompatInsert = message.includes('source_url_id')
             || message.includes('source_id')
             || message.includes('does not exist')
             || message.includes('null value in column');
 
         if (!needsCompatInsert) {
-            return NextResponse.json({ error: error?.message || 'Insert failed' }, { status: 500 });
-        }
-
-        const fallbackSourceUrlId = await findFallbackSourceUrlId(sourceId);
-        if (!fallbackSourceUrlId) {
-            return NextResponse.json(
-                {
-                    error: 'Pro tento source neexistuje žádné source_url. Spusťte nejdřív migrace pipeline nebo vytvořte source_url.',
-                },
-                { status: 500 },
-            );
-        }
-
-        const retryPayload = {
-            ...payload,
-            source_url_id: fallbackSourceUrlId,
-        };
-
-        const { data: retryData, error: retryError } = await supabase
-            .from('ingestion_runs')
-            .insert([retryPayload])
-            .select('*')
-            .single();
-
-        if (!retryError && retryData) {
-            const run = normalizeRunRow(retryData as Record<string, unknown>);
-            run.source_id = run.source_id || sourceId;
-            run.source_url_id = run.source_url_id || fallbackSourceUrlId;
-            return NextResponse.json({ run });
+            return NextResponse.json({ error: initialInsert.errorMessage || 'Insert failed' }, { status: 500 });
         }
 
         const compatPayload: Record<string, unknown> = {
             source_id: sourceId,
-            source_url_id: fallbackSourceUrlId,
+            source_url_id: null,
             started_at: now,
             finished_at: null,
             status: 'running',
@@ -206,33 +250,35 @@ export async function POST(request: Request) {
             created_at: now,
         };
 
-        let { data: compatData, error: compatError } = await supabase
-            .from('ingestion_runs')
-            .insert([compatPayload])
-            .select('*')
-            .single();
-
-        if (compatError && (compatError.message || '').toLowerCase().includes('source_id')) {
-            const legacyCompatPayload = { ...compatPayload };
-            delete legacyCompatPayload.source_id;
-            const legacyResult = await supabase
-                .from('ingestion_runs')
-                .insert([legacyCompatPayload])
-                .select('*')
-                .single();
-            compatData = legacyResult.data;
-            compatError = legacyResult.error;
+        const compatWithoutSourceUrl = await insertCompatRun(compatPayload);
+        if (compatWithoutSourceUrl.run) {
+            const run = normalizeCompatRun(compatWithoutSourceUrl.run, sourceId, now);
+            return NextResponse.json({ run });
         }
 
-        if (compatError || !compatData) {
-            return NextResponse.json({ error: compatError?.message || 'Compat insert failed' }, { status: 500 });
+        const fallbackSourceUrlId = await ensureFallbackSourceUrlId(sourceId);
+        if (!fallbackSourceUrlId) {
+            const compatMessage = compatWithoutSourceUrl.errorMessage || initialInsert.errorMessage || 'Compat insert failed';
+            return NextResponse.json(
+                {
+                    error: `${compatMessage}. Pro tento source neexistuje žádné source_url a nepodařilo se vytvořit fallback z base_url.`,
+                },
+                { status: 500 },
+            );
         }
 
-        const run = normalizeRunRow(compatData as Record<string, unknown>);
-        run.source_id = run.source_id || sourceId;
-        run.source_url_id = run.source_url_id || fallbackSourceUrlId;
-        run.active_stage = run.active_stage || 'discovery';
-        run.updated_at = run.updated_at || now;
+        const compatWithSourceUrl = await insertCompatRun({
+            ...compatPayload,
+            source_url_id: fallbackSourceUrlId,
+        });
+        if (!compatWithSourceUrl.run) {
+            return NextResponse.json(
+                { error: compatWithSourceUrl.errorMessage || 'Compat insert failed' },
+                { status: 500 },
+            );
+        }
+
+        const run = normalizeCompatRun(compatWithSourceUrl.run, sourceId, now, fallbackSourceUrlId);
         return NextResponse.json({ run });
     } catch (error) {
         console.error('Error creating pipeline run:', error);

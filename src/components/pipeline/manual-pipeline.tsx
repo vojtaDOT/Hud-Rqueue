@@ -188,13 +188,13 @@ function getStatusDot(status: PipelineJobStatusValue): string {
         case 'pending':
             return 'bg-yellow-500';
         case 'processing':
-            return 'bg-blue-500 animate-pulse';
+            return 'bg-primary animate-pulse';
         case 'completed':
             return 'bg-green-500';
         case 'failed':
             return 'bg-red-500';
         default:
-            return 'bg-zinc-500';
+            return 'bg-muted-foreground';
     }
 }
 
@@ -387,9 +387,9 @@ function getStepHealthClasses(health: StepHealth): { circle: string; label: stri
         };
     }
     return {
-        circle: 'border-zinc-600 text-zinc-400',
+        circle: 'border-muted-foreground/40 text-muted-foreground',
         label: 'text-muted-foreground',
-        connector: 'bg-zinc-700',
+        connector: 'bg-border',
     };
 }
 
@@ -1963,7 +1963,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     const renderRunsPanel = () => {
         const runsLoading = runScope === 'active' ? activeRunsLoading : historyRunsLoading;
         return (
-            <Card className="ring-1 ring-blue-500/30">
+            <Card className="ring-1 ring-primary/30">
                 <CardHeader>
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div>
@@ -1975,7 +1975,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                 type="button"
                                 className={cn(
                                     'px-3 py-1.5 text-xs rounded',
-                                    runScope === 'active' ? 'bg-blue-500/20 text-blue-200' : 'text-muted-foreground hover:text-foreground',
+                                    runScope === 'active' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
                                 )}
                                 onClick={() => setRunScope('active')}
                             >
@@ -1985,7 +1985,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                 type="button"
                                 className={cn(
                                     'px-3 py-1.5 text-xs rounded',
-                                    runScope === 'history' ? 'bg-blue-500/20 text-blue-200' : 'text-muted-foreground hover:text-foreground',
+                                    runScope === 'history' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
                                 )}
                                 onClick={() => setRunScope('history')}
                             >
@@ -2016,15 +2016,15 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                     : runStatus === 'failed'
                                         ? 'bg-red-500/15 text-red-300 border-red-500/30'
                                         : runStatus === 'canceled'
-                                            ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
-                                            : 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+                                            ? 'bg-muted text-muted-foreground border-border'
+                                            : 'bg-primary/15 text-primary border-primary/30';
                                 return (
                                     <div
                                         key={run.id}
                                         className={cn(
                                             'w-full rounded-md border transition-colors flex items-stretch gap-2',
                                             selected
-                                                ? 'border-blue-500/50 bg-blue-500/10'
+                                                ? 'border-primary/50 bg-primary/10'
                                                 : 'border-border hover:bg-muted/30',
                                         )}
                                     >
@@ -2370,7 +2370,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 <summary className="cursor-pointer text-xs font-semibold text-sky-300">
                     {title}
                 </summary>
-                <pre className="mt-2 max-h-80 overflow-auto rounded bg-zinc-950/70 p-2 text-[11px] text-sky-100">
+                <pre className="mt-2 max-h-80 overflow-auto rounded bg-card/70 p-2 text-[11px] text-sky-100">
                     {toPrettyJson(payload)}
                 </pre>
             </details>
@@ -2392,7 +2392,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     ) => (
         <div className={cn(
             'rounded-md border p-2 text-xs space-y-2',
-            isLoading ? 'border-blue-500/40 bg-blue-500/10 text-blue-100' : 'border-border text-muted-foreground',
+            isLoading ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground',
         )}>
             <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{label}</span>
@@ -2416,7 +2416,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden">
                         <div
                             className={cn(
-                                'h-full rounded-full bg-blue-400 transition-all duration-500',
+                                'h-full rounded-full bg-primary transition-all duration-500',
                                 isLoading && 'pipeline-status-shimmer',
                                 operator.stale && 'bg-amber-400',
                             )}
@@ -2443,7 +2443,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     );
 
     const renderSourcesCard = () => (
-        <Card className="ring-1 ring-blue-500/40">
+        <Card className="ring-1 ring-primary/30">
             <CardHeader>
                 <CardTitle>1. Sources</CardTitle>
                 <CardDescription>Kliknutím na source se enqueue discovery job</CardDescription>
@@ -2469,7 +2469,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                     className={cn(
                                         'w-full rounded-md border px-3 py-2 text-left transition-colors',
                                         selected
-                                            ? 'border-blue-500/50 bg-blue-500/10'
+                                            ? 'border-primary/50 bg-primary/10'
                                             : 'border-border hover:bg-muted/40',
                                     )}
                                 >
@@ -2491,7 +2491,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     );
 
     const renderDiscoveryCard = () => (
-        <Card className="ring-1 ring-blue-500/40">
+        <Card className="ring-1 ring-primary/30">
             <CardHeader>
                 <CardTitle>2. Discovery</CardTitle>
                 <CardDescription>
@@ -2577,7 +2577,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     );
 
     const renderDownloadCard = () => (
-        <Card className="ring-1 ring-blue-500/40">
+        <Card className="ring-1 ring-primary/30">
             <CardHeader>
                 <CardTitle>3. Download + Blob</CardTitle>
                 <CardDescription>Výsledek download fáze pro discovered URL</CardDescription>
@@ -2672,7 +2672,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                 href={debugDetails.sourcePageUrl}
                                                 target="_blank"
                                                 rel="noreferrer noopener"
-                                                className="inline-flex items-center gap-1 text-blue-300 hover:underline break-all"
+                                                className="inline-flex items-center gap-1 text-primary hover:underline break-all"
                                             >
                                                 {debugDetails.sourcePageUrl}
                                                 <ExternalLink className="h-3 w-3" />
@@ -2745,7 +2745,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     );
 
     const renderOcrCard = () => (
-        <Card className="ring-1 ring-blue-500/40">
+        <Card className="ring-1 ring-primary/30">
             <CardHeader>
                 <CardTitle>4. OCR</CardTitle>
                 <CardDescription>OCR pro dokumenty změněné během runu</CardDescription>
@@ -2810,13 +2810,13 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                 ocrDocumentRows.map((row) => {
                                     const latestJob = row.latestJob;
                                     const statusLabel = latestJob ? getStatusLabel(latestJob.status) : 'idle';
-                                    const statusDot = latestJob ? getStatusDot(latestJob.status) : 'bg-zinc-500';
+                                    const statusDot = latestJob ? getStatusDot(latestJob.status) : 'bg-muted-foreground';
                                     const retries = row.jobCount > 0 ? row.jobCount - 1 : 0;
                                     const isActiveProcessing = activeProcessingDocumentId === row.documentId && latestJob?.status === 'processing';
                                     const displayName = row.document?.filename || row.document?.url || `Dokument #${row.documentId}`;
 
                                     return (
-                                        <tr key={row.documentId} className={cn('border-b border-border/40', isActiveProcessing && 'bg-blue-500/10')}>
+                                        <tr key={row.documentId} className={cn('border-b border-border/40', isActiveProcessing && 'bg-primary/10')}>
                                             <td className="p-2 font-mono text-xs align-top">{row.documentId}</td>
                                             <td className="p-2 align-top w-[14rem] max-w-[14rem] sm:w-[18rem] sm:max-w-[18rem] lg:w-[22rem] lg:max-w-[22rem] overflow-hidden">
                                                 {row.document?.url ? (
@@ -2824,7 +2824,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                         href={row.document.url}
                                                         target="_blank"
                                                         rel="noreferrer noopener"
-                                                        className="flex w-full min-w-0 items-center gap-1 text-[11px] leading-tight text-blue-300 hover:underline"
+                                                        className="flex w-full min-w-0 items-center gap-1 text-[11px] leading-tight text-primary hover:underline"
                                                         title={row.document.url}
                                                     >
                                                         <span className="block min-w-0 truncate">{displayName}</span>
@@ -2842,7 +2842,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                             <td className="p-2 align-top">
                                                 <span className={cn(
                                                     'text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap',
-                                                    row.isCandidate ? 'bg-blue-500/15 text-blue-300' : 'bg-zinc-500/20 text-zinc-300',
+                                                    row.isCandidate ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
                                                 )}>
                                                     {row.isCandidate ? 'OCR candidate' : 'beze změny'}
                                                 </span>
@@ -2853,7 +2853,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                     {statusLabel}
                                                     {isActiveProcessing && (
                                                         <span
-                                                            className="inline-flex h-1.5 w-1.5 rounded-full bg-blue-300 shrink-0"
+                                                            className="inline-flex h-1.5 w-1.5 rounded-full bg-primary shrink-0"
                                                             title="Aktivně zpracovávaný dokument"
                                                         />
                                                     )}
@@ -2911,7 +2911,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     const renderSummaryCard = () => {
         const canFinishRun = Boolean(selectedRun && isRunIncomplete(selectedRun.status));
         return (
-            <Card className="ring-1 ring-blue-500/40">
+            <Card className="ring-1 ring-primary/30">
                 <CardHeader>
                     <CardTitle>5. Souhrn</CardTitle>
                     <CardDescription>Výsledky aktuálního manuálního běhu</CardDescription>
@@ -3000,20 +3000,20 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
 
             <div className={cn(
                 'rounded-md border px-3 py-2 text-xs flex flex-wrap items-center gap-2',
-                isBusy ? 'border-blue-500/40 bg-blue-500/5' : 'border-border bg-background/40',
+                isBusy ? 'border-primary/40 bg-primary/5' : 'border-border bg-background/40',
             )}>
                 <span className={cn(
                     'inline-flex items-center gap-1 rounded-full border px-2 py-0.5',
-                    isBusy ? 'border-blue-500/40 text-blue-200 bg-blue-500/10' : 'border-green-500/40 text-green-300 bg-green-500/10',
+                    isBusy ? 'border-primary/40 text-primary bg-primary/10' : 'border-green-500/40 text-green-300 bg-green-500/10',
                 )}>
                     {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
                     {isBusy ? 'RUNNING' : 'IDLE'}
                 </span>
                 <span className="text-muted-foreground">
-                    Krok: <span className="text-blue-300 font-medium">{activeStageLabel}</span>
+                    Krok: <span className="text-primary font-medium">{activeStageLabel}</span>
                 </span>
                 <span className="text-muted-foreground">
-                    Run: <span className="text-blue-300 font-medium">{runState.selectedRunId ? `#${runState.selectedRunId}` : '—'}</span>
+                    Run: <span className="text-primary font-medium">{runState.selectedRunId ? `#${runState.selectedRunId}` : '—'}</span>
                 </span>
                 <span className={cn(
                     'inline-flex items-center rounded-full border px-2 py-0.5',
@@ -3021,12 +3021,12 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         ? 'border-green-500/40 text-green-300 bg-green-500/10'
                         : operatorConnectionState === 'error'
                             ? 'border-red-500/40 text-red-300 bg-red-500/10'
-                            : 'border-blue-500/40 text-blue-200 bg-blue-500/10',
+                            : 'border-primary/40 text-primary bg-primary/10',
                 )}>
                     Queue-Operator: {operatorConnectionState}
                 </span>
                 {sourceAggregateProgressPct !== null && (
-                    <span className="inline-flex items-center rounded-full border border-blue-500/40 px-2 py-0.5 text-blue-200 bg-blue-500/10">
+                    <span className="inline-flex items-center rounded-full border border-primary/40 px-2 py-0.5 text-primary bg-primary/10">
                         Progress: {sourceAggregateProgressPct}%
                     </span>
                 )}
@@ -3061,8 +3061,8 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                             const connectorClass = useHistoricalColor
                                 ? stepHealthClasses.connector
                                 : highlightedEdge
-                                    ? (isBusy ? 'pipeline-flow-connector' : 'bg-blue-400')
-                                    : 'bg-zinc-700';
+                                    ? (isBusy ? 'pipeline-flow-connector' : 'bg-primary')
+                                    : 'bg-border';
 
                             return (
                                 <React.Fragment key={stage.key}>
@@ -3085,8 +3085,8 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                     : isDone
                                                         ? 'border-green-500 bg-green-500/20 text-green-300'
                                                         : isActive
-                                                            ? 'border-blue-500 bg-blue-500/20 text-blue-300 shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'
-                                                            : 'border-zinc-600 text-zinc-400',
+                                                            ? 'border-primary bg-primary/20 text-primary shadow-[0_0_0_3px_hsl(var(--primary)/0.15)]'
+                                                            : 'border-muted-foreground/40 text-muted-foreground',
                                                 useHistoricalColor && isActive && 'shadow-[0_0_0_3px_rgba(148,163,184,0.18)]',
                                             )}
                                         >
@@ -3096,7 +3096,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                             'text-sm',
                                             useHistoricalColor
                                                 ? cn(stepHealthClasses.label, isActive && 'font-medium')
-                                                : (isActive ? 'text-white font-medium' : 'text-muted-foreground'),
+                                                : (isActive ? 'text-foreground font-medium' : 'text-muted-foreground'),
                                         )}>
                                             {stage.label}
                                         </span>

@@ -2,15 +2,17 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Database, Server } from 'lucide-react';
+import { LayoutDashboard, Database, Server, HardDrive } from 'lucide-react';
 import { DashboardOverview } from './dashboard-overview';
 import { DashboardRedis } from './dashboard-redis';
 import { DashboardDatabase } from './dashboard-database';
+import { DashboardInfra } from './dashboard-infra';
 
 const TABS = [
     { value: 'overview', label: 'Overview', icon: LayoutDashboard },
     { value: 'redis', label: 'Redis', icon: Server },
     { value: 'database', label: 'Database', icon: Database },
+    { value: 'infra', label: 'Infra', icon: HardDrive },
 ] as const;
 
 export function Dashboard() {
@@ -48,6 +50,7 @@ export function Dashboard() {
             {activeTab === 'overview' && <DashboardOverview />}
             {activeTab === 'redis' && <DashboardRedis />}
             {activeTab === 'database' && <DashboardDatabase />}
+            {activeTab === 'infra' && <DashboardInfra />}
         </div>
     );
 }

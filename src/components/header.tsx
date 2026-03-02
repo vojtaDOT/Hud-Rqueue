@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useSidebar, SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/components/sidebar-context';
-import { Home, ListTodo, Database, Globe, Workflow, Pin, PinOff } from 'lucide-react';
+import { Home, ListTodo, Database, Globe, Workflow, Pin, PinOff, HardDrive } from 'lucide-react';
 
 const NAV_LINKS = [
     { href: '/', label: 'Dashboard', icon: Home },
@@ -15,6 +15,7 @@ const NAV_LINKS = [
     { href: '/sources', label: 'Sources', icon: Globe },
     { href: '/pipeline', label: 'Pipeline', icon: Workflow },
     { href: '/database', label: 'Database', icon: Database },
+    { href: '/infra', label: 'Infra', icon: HardDrive },
 ] as const;
 
 export function Header() {

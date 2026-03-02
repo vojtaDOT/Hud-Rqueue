@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { findSourceDuplicate } from '@/lib/duplicate-precheck';
 
 export async function POST(request: Request) {
     try {
@@ -26,6 +27,18 @@ export async function POST(request: Request) {
             );
         }
 
+        const duplicateConflict = await findSourceDuplicate(String(base_url));
+        if (duplicateConflict) {
+            return NextResponse.json(
+                {
+                    error: 'Duplicate source base URL',
+                    code: 'DUPLICATE_CONFLICT',
+                    conflict: duplicateConflict,
+                },
+                { status: 409 },
+            );
+        }
+
         const { data, error } = await supabase
             .from('sources')
             .insert([
@@ -48,6 +61,19 @@ export async function POST(request: Request) {
             .single();
 
         if (error) {
+            if (error.code === '23505' || /duplicate key value/i.test(error.message || '')) {
+                return NextResponse.json(
+                    {
+                        error: 'Duplicate source base URL',
+                        code: 'DUPLICATE_CONFLICT',
+                        conflict: {
+                            table: 'sources',
+                            key: String(base_url),
+                        },
+                    },
+                    { status: 409 },
+                );
+            }
             console.error('Supabase error:', error);
             return NextResponse.json(
                 { error: error.message },

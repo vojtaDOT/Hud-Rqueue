@@ -1,8 +1,52 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { ALLOWED_TABLES, getTableSchema } from '@/components/database/table-schema';
+import { findDocumentDuplicate, findSourceUrlDuplicate, type DuplicateConflict } from '@/lib/duplicate-precheck';
 
 type RouteContext = { params: Promise<{ table: string }> };
+
+type MutableRow = Record<string, unknown>;
+
+function duplicateConflictResponse(conflict: DuplicateConflict) {
+    return NextResponse.json(
+        {
+            error: 'Duplicate row conflict',
+            code: 'DUPLICATE_CONFLICT',
+            conflict,
+        },
+        { status: 409 },
+    );
+}
+
+async function precheckDuplicateConflict(
+    tableName: string,
+    row: MutableRow,
+    excludePk?: string,
+): Promise<DuplicateConflict | null> {
+    if (tableName === 'source_urls') {
+        const sourceId = row.source_id ? String(row.source_id) : '';
+        const url = row.url ? String(row.url) : '';
+        if (!sourceId || !url) return null;
+        return findSourceUrlDuplicate(sourceId, url, excludePk);
+    }
+
+    if (tableName === 'documents') {
+        const sourceUrlId = row.source_url_id ? String(row.source_url_id) : '';
+        const url = row.url ? String(row.url) : '';
+        const deletedAt = row.deleted_at;
+        if (!sourceUrlId || !url) return null;
+        if (deletedAt !== undefined && deletedAt !== null && String(deletedAt).trim() !== '') return null;
+        return findDocumentDuplicate(sourceUrlId, url, excludePk);
+    }
+
+    return null;
+}
+
+function isDuplicateConstraintError(error: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    if (error.code === '23505') return true;
+    return /duplicate key value/i.test(error.message || '');
+}
 
 export async function GET(request: NextRequest, context: RouteContext) {
     const { table: tableName } = await context.params;
@@ -57,6 +101,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const body = await request.json();
+    const duplicateConflict = await precheckDuplicateConflict(tableName, body as MutableRow);
+    if (duplicateConflict) {
+        return duplicateConflictResponse(duplicateConflict);
+    }
 
     const { data, error } = await supabase
         .from(tableName)
@@ -65,6 +113,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
         .single();
 
     if (error) {
+        if (isDuplicateConstraintError(error)) {
+            return NextResponse.json(
+                {
+                    error: 'Duplicate row conflict',
+                    code: 'DUPLICATE_CONFLICT',
+                    conflict: {
+                        table: tableName,
+                        key: 'unique_constraint',
+                        existing_id: null,
+                        input: body,
+                    },
+                },
+                { status: 409 },
+            );
+        }
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -86,6 +149,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: 'Missing primary key (__pk)' }, { status: 400 });
     }
 
+    if (tableName === 'source_urls' || tableName === 'documents') {
+        const { data: existingRow, error: existingError } = await supabase
+            .from(tableName)
+            .select('*')
+            .eq(schema.primaryKey, __pk)
+            .single();
+
+        if (existingError) {
+            return NextResponse.json({ error: existingError.message }, { status: 500 });
+        }
+
+        const candidate = {
+            ...(existingRow as MutableRow),
+            ...(updates as MutableRow),
+        };
+        const duplicateConflict = await precheckDuplicateConflict(tableName, candidate, String(__pk));
+        if (duplicateConflict) {
+            return duplicateConflictResponse(duplicateConflict);
+        }
+    }
+
     const { data, error } = await supabase
         .from(tableName)
         .update(updates)
@@ -94,6 +178,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         .single();
 
     if (error) {
+        if (isDuplicateConstraintError(error)) {
+            return NextResponse.json(
+                {
+                    error: 'Duplicate row conflict',
+                    code: 'DUPLICATE_CONFLICT',
+                    conflict: {
+                        table: tableName,
+                        key: 'unique_constraint',
+                        existing_id: null,
+                        input: updates,
+                    },
+                },
+                { status: 409 },
+            );
+        }
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

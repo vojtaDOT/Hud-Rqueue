@@ -13,6 +13,10 @@ describe('normalizeUrlForDedupe', () => {
     });
 
     it('keeps query string', () => {
-        expect(normalizeUrlForDedupe('https://example.com/path/?a=1#x')).toBe('https://example.com/path/?a=1');
+        expect(normalizeUrlForDedupe('https://example.com/path/?a=1#x')).toBe('https://example.com/path?a=1');
+    });
+
+    it('removes tracking query params but keeps business params', () => {
+        expect(normalizeUrlForDedupe('https://example.com/doc.pdf?utm_source=x&a=1&fbclid=123')).toBe('https://example.com/doc.pdf?a=1');
     });
 });

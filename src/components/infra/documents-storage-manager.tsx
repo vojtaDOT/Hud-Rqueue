@@ -164,7 +164,7 @@ function getResolveSignature(canonicalId: string, duplicateIds: string[], mode: 
     return `${canonicalId}|${mode}|${sorted.join(',')}`;
 }
 
-export function DocumentsStorageManager() {
+export function DocumentsStorageManager({ embedded = false }: { embedded?: boolean }) {
     const [overview, setOverview] = React.useState<StorageOverviewResponse | null>(null);
     const [loadingOverview, setLoadingOverview] = React.useState(true);
 
@@ -437,12 +437,12 @@ export function DocumentsStorageManager() {
     };
 
     return (
-        <div className="w-full max-w-7xl mx-auto space-y-6 p-6 pt-5">
+        <div className={embedded ? 'w-full space-y-6' : 'w-full max-w-7xl mx-auto space-y-6 p-6 pt-5'}>
             <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                    <h1 className="text-2xl font-semibold tracking-tight">Infra Documents Storage Manager</h1>
+                    <h1 className="text-2xl font-semibold tracking-tight">Cleanup Process</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Cloudflare R2 `documents/` operations only. This UI never touches `contracts/`, `infra/`, or `tests/` prefixes.
+                        Document-centric cleanup tools for `documents/` blobs and related database records.
                     </p>
                 </div>
                 <Button variant="outline" onClick={refreshAll} disabled={loadingOverview || loadingDuplicates}>

@@ -5,6 +5,11 @@ import { toast } from 'sonner';
 
 import { generateUnifiedCrawlParams } from '@/lib/crawler-export';
 import { ScrapingWorkflow } from '@/lib/crawler-types';
+import {
+    buildListSourceConfig,
+    buildRssSourceConfig,
+    type RssDetectionWarningLike,
+} from '@/lib/source-config';
 import { validateWorkflow } from '@/lib/workflow-validation';
 import type { CrawlStrategy, Obec } from '@/components/sources/types';
 
@@ -16,6 +21,9 @@ interface SubmitPayload {
     workflowData: ScrapingWorkflow | null;
     playwrightEnabled: boolean;
     obec: Obec | null;
+    selectedRssFeed: string;
+    rssFeedOptions: string[];
+    rssWarnings: RssDetectionWarningLike[];
 }
 
 interface UseSourceSubmitOptions {
@@ -34,6 +42,9 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
             workflowData,
             playwrightEnabled,
             obec,
+            selectedRssFeed,
+            rssFeedOptions,
+            rssWarnings,
         } = payload;
 
         if (!name || !typeId || !baseUrl) {
@@ -46,8 +57,8 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
             return false;
         }
 
-        let workflowToSave: ScrapingWorkflow | null = null;
-        let crawlParams: ReturnType<typeof generateUnifiedCrawlParams> | null = null;
+        let crawlParams: ReturnType<typeof generateUnifiedCrawlParams> | ReturnType<typeof buildRssSourceConfig>['crawl_params'] | null = null;
+        let extractionData: ReturnType<typeof buildListSourceConfig>['extraction_data'] | ReturnType<typeof buildRssSourceConfig>['extraction_data'] | null = null;
 
         if (crawlStrategy === 'list') {
             if (!workflowData) {
@@ -55,7 +66,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
                 return false;
             }
 
-            workflowToSave = {
+            const workflowToSave: ScrapingWorkflow = {
                 ...workflowData,
                 playwright_enabled: playwrightEnabled,
             };
@@ -67,20 +78,45 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
             }
             warnings.forEach((warning) => toast.warning(warning));
 
-            crawlParams = generateUnifiedCrawlParams(workflowToSave);
+            const listConfig = buildListSourceConfig(generateUnifiedCrawlParams(workflowToSave));
+            crawlParams = listConfig.crawl_params;
+            extractionData = listConfig.extraction_data;
+        } else {
+            const feedUrl = selectedRssFeed.trim() || baseUrl.trim();
+            if (!/^https?:\/\//.test(feedUrl)) {
+                toast.error('RSS feed URL musi zacinat na http:// nebo https://');
+                return false;
+            }
+
+            const rssConfig = buildRssSourceConfig({
+                feedUrl,
+                detectedFeedCandidates: rssFeedOptions,
+                warnings: rssWarnings,
+            });
+            crawlParams = rssConfig.crawl_params;
+            extractionData = rssConfig.extraction_data;
+        }
+
+        if (!crawlParams || !extractionData) {
+            toast.error('Konfigurace zdroje neni kompletni.');
+            return false;
         }
 
         setSubmitting(true);
         try {
+            const effectiveBaseUrl = crawlStrategy === 'rss'
+                ? (selectedRssFeed.trim() || baseUrl.trim())
+                : baseUrl;
+
             const response = await fetch('/api/sources', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name,
-                    base_url: baseUrl,
+                    base_url: effectiveBaseUrl,
                     enabled: true,
                     crawl_strategy: crawlStrategy,
-                    extraction_data: workflowToSave,
+                    extraction_data: extractionData,
                     crawl_params: crawlParams,
                     crawl_interval: '1 day',
                     typ_id: parseInt(typeId, 10),

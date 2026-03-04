@@ -1,9 +1,9 @@
-import { DocumentsStorageManager } from '@/components/infra/documents-storage-manager';
+import { ObjectStoragePage } from '@/components/infra/object-storage-page';
 
 export default function InfraPage() {
     return (
         <main className="p-0">
-            <DocumentsStorageManager />
+            <ObjectStoragePage />
         </main>
     );
 }

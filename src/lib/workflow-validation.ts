@@ -38,6 +38,10 @@ function hasSelectorAction(action: BeforeAction): action is
     );
 }
 
+function isPositiveInteger(value: number): boolean {
+    return Number.isInteger(value) && value > 0;
+}
+
 export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | null; warnings: string[] } {
     if (workflow.url_types.length < 1) {
         return { error: 'Musi existovat alespon jeden URL Type.', warnings: [] };
@@ -76,8 +80,42 @@ export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | 
             if (scope.repeater && !scope.repeater.css_selector.trim()) {
                 return { error: 'Kazdy Repeater musi mit CSS selector.', warnings };
             }
-            if (scope.pagination && !scope.pagination.css_selector.trim()) {
-                return { error: 'Pagination musi mit CSS selector.', warnings };
+            if (scope.pagination) {
+                if (!Number.isFinite(scope.pagination.max_pages) || scope.pagination.max_pages < 0) {
+                    return { error: 'Pagination max_pages musi byt cislo >= 0.', warnings };
+                }
+
+                if (!scope.pagination.url) {
+                    return { error: 'Pagination URL konfigurace je povinna.', warnings };
+                }
+
+                const urlConfig = scope.pagination.url;
+                if (urlConfig.mode !== 'hybrid' && urlConfig.mode !== 'url') {
+                    return { error: 'Pagination URL mode musi byt hybrid nebo url.', warnings };
+                }
+                if (urlConfig.mode === 'hybrid' && !scope.pagination.css_selector.trim()) {
+                    return { error: 'Pagination v hybrid mode musi mit CSS selector.', warnings };
+                }
+                if (!urlConfig.pattern.trim()) {
+                    return { error: 'Pagination URL regex pattern je povinny.', warnings };
+                }
+                try {
+                    new RegExp(urlConfig.pattern);
+                } catch {
+                    return { error: 'Pagination URL regex pattern je neplatny.', warnings };
+                }
+                if (!urlConfig.template.trim()) {
+                    return { error: 'Pagination URL template je povinna.', warnings };
+                }
+                if (!urlConfig.template.includes('{page}')) {
+                    return { error: 'Pagination URL template musi obsahovat {page}.', warnings };
+                }
+                if (!isPositiveInteger(urlConfig.start_page)) {
+                    return { error: 'Pagination start_page musi byt cele cislo >= 1.', warnings };
+                }
+                if (!isPositiveInteger(urlConfig.step)) {
+                    return { error: 'Pagination step musi byt cele cislo >= 1.', warnings };
+                }
             }
         }
 

@@ -221,9 +221,20 @@ export interface WorkerRuntimeEnqueueConfig {
 
 export type ExtractType = 'text' | 'href';
 
+export type PaginationUrlMode = 'hybrid' | 'url';
+
+export interface PaginationUrlConfig {
+    mode: PaginationUrlMode;
+    pattern: string;
+    template: string;
+    start_page: number;
+    step: number;
+}
+
 export interface PaginationConfig {
     css_selector: string;
     max_pages: number;
+    url: PaginationUrlConfig | null;
 }
 
 export type PlaywrightAction =
@@ -353,6 +364,13 @@ export type UnifiedWorkerRepeaterStepV2 =
 export interface UnifiedWorkerPaginationV2 {
     selector: string;
     max_pages: number;
+    url?: {
+        mode: PaginationUrlMode;
+        pattern: string;
+        template: string;
+        start_page: number;
+        step: number;
+    } | null;
 }
 
 export interface UnifiedWorkerRepeaterNodeV2 {
@@ -383,4 +401,17 @@ export interface UnifiedWorkerCrawlParams {
     playwright: boolean;
     discovery: UnifiedWorkerPhaseV2;
     processing: UnifiedWorkerProcessingPhaseV2[];
+}
+
+export interface RssCrawlParamsV1 {
+    schema_version: 1;
+    strategy: 'rss';
+    feed_url: string;
+    item_identity: 'link_then_guid';
+    route: {
+        emit_to: 'source_urls';
+    };
+    fetch: {
+        timeout_ms: number;
+    };
 }

@@ -21,10 +21,12 @@ export function useRssDetection({
     const [detectingRss, setDetectingRss] = useState(false);
     const [rssFeedOptions, setRssFeedOptions] = useState<string[]>([]);
     const [selectedRssFeed, setSelectedRssFeed] = useState('');
+    const [rssWarnings, setRssWarnings] = useState<RssDetectionWarning[]>([]);
 
     const clearRssFeeds = useCallback(() => {
         setRssFeedOptions([]);
         setSelectedRssFeed('');
+        setRssWarnings([]);
     }, []);
 
     const detectRssFeeds = useCallback(async () => {
@@ -68,6 +70,7 @@ export function useRssDetection({
 
             setRssFeedOptions(feedUrls);
             setSelectedRssFeed(feedUrls[0]);
+            setRssWarnings(warnings);
             toast.success(`Nalezen RSS/Atom feed (${feedUrls.length})`);
 
             if (warnings.length > 0) {
@@ -127,6 +130,7 @@ export function useRssDetection({
         detectingRss,
         rssFeedOptions,
         selectedRssFeed,
+        rssWarnings,
         setSelectedRssFeed,
         detectRssFeeds,
         applySelectedRssFeed,

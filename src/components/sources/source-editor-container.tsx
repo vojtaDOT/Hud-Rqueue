@@ -49,6 +49,7 @@ export function SourceEditorContainer() {
         detectingRss,
         rssFeedOptions,
         selectedRssFeed,
+        rssWarnings,
         setSelectedRssFeed,
         detectRssFeeds,
         applySelectedRssFeed,
@@ -125,6 +126,9 @@ export function SourceEditorContainer() {
             workflowData,
             playwrightEnabled,
             obec: selectedObec,
+            selectedRssFeed,
+            rssFeedOptions,
+            rssWarnings,
         });
     };
 

@@ -3,6 +3,20 @@ import { describe, expect, it } from 'vitest';
 import type { ScrapingWorkflow } from '@/lib/crawler-types';
 import { validateWorkflow } from '@/lib/workflow-validation';
 
+function createPaginationConfig() {
+    return {
+        css_selector: 'a.next',
+        max_pages: 0,
+        url: {
+            mode: 'hybrid' as const,
+            pattern: '[?&]page=(?<page>\\d+)',
+            template: 'https://example.com/list?page={page}',
+            start_page: 1,
+            step: 1,
+        },
+    };
+}
+
 function createWorkflow(): ScrapingWorkflow {
     return {
         playwright_enabled: false,
@@ -88,5 +102,44 @@ describe('validateWorkflow', () => {
 
         const result = validateWorkflow(workflow);
         expect(result.error).toContain('Playwright');
+    });
+
+    it('fails when pagination regex is invalid', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].pagination = {
+            ...createPaginationConfig(),
+            url: {
+                ...createPaginationConfig().url,
+                pattern: '[?&]page=(',
+            },
+        };
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toContain('regex');
+    });
+
+    it('fails when pagination template does not include {page}', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].pagination = {
+            ...createPaginationConfig(),
+            url: {
+                ...createPaginationConfig().url,
+                template: 'https://example.com/list',
+            },
+        };
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toContain('{page}');
+    });
+
+    it('fails when pagination max_pages is negative', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].pagination = {
+            ...createPaginationConfig(),
+            max_pages: -1,
+        };
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toContain('max_pages');
     });
 });

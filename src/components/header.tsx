@@ -15,7 +15,7 @@ const NAV_LINKS = [
     { href: '/sources', label: 'Sources', icon: Globe },
     { href: '/pipeline', label: 'Pipeline', icon: Workflow },
     { href: '/database', label: 'Database', icon: Database },
-    { href: '/infra', label: 'Infra', icon: HardDrive },
+    { href: '/infra', label: 'Object Storage', icon: HardDrive },
 ] as const;
 
 export function Header() {

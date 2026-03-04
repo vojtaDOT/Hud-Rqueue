@@ -38,6 +38,7 @@ import {
     createDownloadFileStep,
     createEmptyPhase,
     createId,
+    createPaginationConfig,
     createRepeaterNode,
     createScopeModule,
     createSourceUrlStep,
@@ -59,6 +60,7 @@ import {
     updateRepeaterInTree,
     updateScopeInTree,
     updateStepInTree,
+    withPaginationDefaults,
 } from '@/lib/workflow-tree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -403,7 +405,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         const [chain] = updateScopeInTree(phase.chain, target.scopeId, (scope) => ({
                             ...scope,
                             pagination: {
-                                ...(scope.pagination ?? { css_selector: '', max_pages: 0 }),
+                                ...withPaginationDefaults(scope.pagination),
                                 css_selector: nextSelector,
                             },
                         }));
@@ -461,13 +463,13 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                         nextScopeId = scope.id;
                         return {
                             ...phase,
-                            chain: [...phase.chain, { ...scope, pagination: { css_selector: nextSelectorRaw, max_pages: 0 } }],
+                            chain: [...phase.chain, { ...scope, pagination: { ...createPaginationConfig(), css_selector: nextSelectorRaw } }],
                         };
                     }
                     const [chain] = updateScopeInTree(phase.chain, nextScopeId, (scope) => ({
                         ...scope,
                         pagination: {
-                            ...(scope.pagination ?? { css_selector: '', max_pages: 0 }),
+                            ...withPaginationDefaults(scope.pagination),
                             css_selector: nextSelectorRaw,
                         },
                     }));
@@ -726,7 +728,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         updateWorkflowPhase(currentPhaseKey, (phase) => {
             const [chain] = updateScopeInTree(phase.chain, effectiveSelectedScopeId, (scope) => ({
                 ...scope,
-                pagination: scope.pagination ?? { css_selector: '', max_pages: 0 },
+                pagination: withPaginationDefaults(scope.pagination),
             }));
             return { ...phase, chain };
         });
@@ -1628,7 +1630,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                             const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
                                                 ...current,
                                                 pagination: {
-                                                    ...(current.pagination ?? { css_selector: '', max_pages: 0 }),
+                                                    ...withPaginationDefaults(current.pagination),
                                                     css_selector: value,
                                                 },
                                             }));
@@ -1650,10 +1652,144 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                                         const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => ({
                                             ...current,
                                             pagination: {
-                                                ...(current.pagination ?? { css_selector: '', max_pages: 0 }),
+                                                ...withPaginationDefaults(current.pagination),
                                                 max_pages: value,
                                             },
                                         }));
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            />
+                            <Select
+                                value={scope.pagination.url?.mode ?? 'hybrid'}
+                                onValueChange={(value) => {
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => {
+                                            const pagination = withPaginationDefaults(current.pagination);
+                                            const currentUrl = pagination.url!;
+                                            return {
+                                                ...current,
+                                                pagination: {
+                                                    ...pagination,
+                                                    url: {
+                                                        ...currentUrl,
+                                                        mode: value as 'hybrid' | 'url',
+                                                    },
+                                                },
+                                            };
+                                        });
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            >
+                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
+                                    <SelectValue placeholder="Mode" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="hybrid">Hybrid URL + CSS</SelectItem>
+                                    <SelectItem value="url">URL only</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Input
+                                value={scope.pagination.url?.pattern ?? ''}
+                                placeholder="URL regex pattern"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => {
+                                            const pagination = withPaginationDefaults(current.pagination);
+                                            const currentUrl = pagination.url!;
+                                            return {
+                                                ...current,
+                                                pagination: {
+                                                    ...pagination,
+                                                    url: {
+                                                        ...currentUrl,
+                                                        pattern: value,
+                                                    },
+                                                },
+                                            };
+                                        });
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            />
+                            <div className="col-span-2">
+                                <Input
+                                    value={scope.pagination.url?.template ?? ''}
+                                    placeholder="URL template (must include {page})"
+                                    className="h-8 border-border bg-card/50 text-xs text-foreground"
+                                    onChange={(event) => {
+                                        const value = event.target.value;
+                                        updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                            const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => {
+                                                const pagination = withPaginationDefaults(current.pagination);
+                                                const currentUrl = pagination.url!;
+                                                return {
+                                                    ...current,
+                                                    pagination: {
+                                                        ...pagination,
+                                                        url: {
+                                                            ...currentUrl,
+                                                            template: value,
+                                                        },
+                                                    },
+                                                };
+                                            });
+                                            return { ...phase, chain };
+                                        });
+                                    }}
+                                />
+                            </div>
+                            <Input
+                                type="number"
+                                value={scope.pagination.url?.start_page ?? 1}
+                                placeholder="Start page"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
+                                onChange={(event) => {
+                                    const value = Number(event.target.value) || 1;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => {
+                                            const pagination = withPaginationDefaults(current.pagination);
+                                            const currentUrl = pagination.url!;
+                                            return {
+                                                ...current,
+                                                pagination: {
+                                                    ...pagination,
+                                                    url: {
+                                                        ...currentUrl,
+                                                        start_page: value,
+                                                    },
+                                                },
+                                            };
+                                        });
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            />
+                            <Input
+                                type="number"
+                                value={scope.pagination.url?.step ?? 1}
+                                placeholder="Step"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
+                                onChange={(event) => {
+                                    const value = Number(event.target.value) || 1;
+                                    updateWorkflowPhase(currentPhaseKey, (phase) => {
+                                        const [chain] = updateScopeInTree(phase.chain, scope.id, (current) => {
+                                            const pagination = withPaginationDefaults(current.pagination);
+                                            const currentUrl = pagination.url!;
+                                            return {
+                                                ...current,
+                                                pagination: {
+                                                    ...pagination,
+                                                    url: {
+                                                        ...currentUrl,
+                                                        step: value,
+                                                    },
+                                                },
+                                            };
+                                        });
                                         return { ...phase, chain };
                                     });
                                 }}

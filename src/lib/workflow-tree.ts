@@ -3,6 +3,7 @@ import type {
     DataExtractStep,
     DocumentUrlStep,
     DownloadFileStep,
+    PaginationConfig,
     PhaseConfig,
     PlaywrightAction,
     RepeaterNode,
@@ -119,6 +120,39 @@ export function createScopeModule(): ScopeModule {
         repeater: null,
         pagination: null,
         children: [],
+    };
+}
+
+export function createPaginationConfig(): PaginationConfig {
+    return {
+        css_selector: '',
+        max_pages: 0,
+        url: {
+            mode: 'hybrid',
+            pattern: '[?&]page=(?<page>\\d+)',
+            template: '',
+            start_page: 1,
+            step: 1,
+        },
+    };
+}
+
+export function withPaginationDefaults(pagination: PaginationConfig | null | undefined): PaginationConfig {
+    const defaults = createPaginationConfig();
+    if (!pagination) return defaults;
+
+    return {
+        css_selector: typeof pagination.css_selector === 'string' ? pagination.css_selector : defaults.css_selector,
+        max_pages: Number.isFinite(pagination.max_pages) ? pagination.max_pages : defaults.max_pages,
+        url: pagination.url
+            ? {
+                mode: pagination.url.mode ?? defaults.url!.mode,
+                pattern: pagination.url.pattern ?? defaults.url!.pattern,
+                template: pagination.url.template ?? defaults.url!.template,
+                start_page: Number.isFinite(pagination.url.start_page) ? pagination.url.start_page : defaults.url!.start_page,
+                step: Number.isFinite(pagination.url.step) ? pagination.url.step : defaults.url!.step,
+            }
+            : defaults.url,
     };
 }
 

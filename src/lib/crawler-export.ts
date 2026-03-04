@@ -476,6 +476,15 @@ function toWorkerScopeChain(
             ? {
                 selector: scope.pagination.css_selector,
                 max_pages: scope.pagination.max_pages,
+                url: scope.pagination.url
+                    ? {
+                        mode: scope.pagination.url.mode,
+                        pattern: scope.pagination.url.pattern,
+                        template: scope.pagination.url.template,
+                        start_page: scope.pagination.url.start_page,
+                        step: scope.pagination.url.step,
+                    }
+                    : null,
             }
             : null,
         children: toWorkerScopeChain(scope.children, resolveUrlTypeName),

@@ -126,7 +126,6 @@ async function fetchPortainerJson<T>(config: PortainerConfig, path: string): Pro
             method: 'GET',
             headers: {
                 Accept: 'application/json',
-                Authorization: `Bearer ${config.apiToken}`,
                 'X-API-Key': config.apiToken,
             },
             cache: 'no-store',

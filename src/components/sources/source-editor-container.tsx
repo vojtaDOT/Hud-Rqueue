@@ -15,6 +15,16 @@ import {
     SimulatorSidebarRef,
     SidebarQuickAction,
 } from '@/components/simulator/simulator-sidebar';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
 
 export function SourceEditorContainer() {
@@ -28,6 +38,7 @@ export function SourceEditorContainer() {
     const [playwrightEnabled, setPlaywrightEnabled] = useState(false);
     const [selectorPreview, setSelectorPreview] = useState<string | null>(null);
     const [sidebarKey, setSidebarKey] = useState(0);
+    const [showPlaywrightConfirm, setShowPlaywrightConfirm] = useState(false);
 
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
 
@@ -102,14 +113,17 @@ export function SourceEditorContainer() {
             return false;
         }
         if (!nextEnabled && sidebarRef.current?.hasAnyPlaywrightActions()) {
-            const confirmed = window.confirm(
-                'Vypnuti Playwright odstrani Playwright kroky ve Phase 1 i Phase 2. Pokracovat?',
-            );
-            if (!confirmed) return false;
-            sidebarRef.current.clearAllPlaywrightActions();
+            setShowPlaywrightConfirm(true);
+            return false; // Don't toggle yet; dialog will handle it
         }
         setPlaywrightEnabled(nextEnabled);
         return true;
+    };
+
+    const handlePlaywrightDisableConfirm = () => {
+        sidebarRef.current?.clearAllPlaywrightActions();
+        setPlaywrightEnabled(false);
+        setShowPlaywrightConfirm(false);
     };
 
     const handleIframeLoad = () => {
@@ -201,6 +215,23 @@ export function SourceEditorContainer() {
                     onSelectorPreviewChange={setSelectorPreview}
                 />
             </div>
+
+            <AlertDialog open={showPlaywrightConfirm} onOpenChange={setShowPlaywrightConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Vypnout Playwright?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Vypnuti Playwright odstrani vsechny Playwright kroky ve Phase 1 i Phase 2. Tuto akci nelze vratit.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Zrusit</AlertDialogCancel>
+                        <AlertDialogAction onClick={handlePlaywrightDisableConfirm}>
+                            Vypnout
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

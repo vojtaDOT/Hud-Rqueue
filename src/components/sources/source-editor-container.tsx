@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { RssDetectionPanel } from '@/components/sources/rss-detection-panel';
@@ -9,6 +10,7 @@ import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
+import { useSourceLoad } from '@/components/sources/hooks/use-source-load';
 import { useSourceSubmit } from '@/components/sources/hooks/use-source-submit';
 import { useSourceTypes } from '@/components/sources/hooks/use-source-types';
 import type { CrawlStrategy } from '@/components/sources/types';
@@ -29,6 +31,11 @@ import {
 import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
 
 export function SourceEditorContainer() {
+    const searchParams = useSearchParams();
+    const editSourceId = searchParams.get('edit');
+    const isEditMode = Boolean(editSourceId);
+    const { source: loadedSource, workflow: loadedWorkflow, loading: sourceLoading } = useSourceLoad(editSourceId);
+
     const [name, setName] = useState('');
     const [typeId, setTypeId] = useState('');
     const [baseUrl, setBaseUrl] = useState('');
@@ -80,22 +87,25 @@ export function SourceEditorContainer() {
     });
 
     const { submitting, submitSource } = useSourceSubmit({
+        editSourceId: editSourceId ?? undefined,
         onSubmitted: () => {
-            setName('');
-            setTypeId('');
-            setBaseUrl('');
-            setSimulatorLoading(false);
-            setCrawlStrategy('list');
-            setCrawlInterval('1 day');
-            clearRssFeeds();
-            resetObec();
-            setWorkflowData(null);
-            setPlaywrightEnabled(false);
-            setSelectorPreview(null);
-            setRssPreview(null);
-            setRssPreviewLoading(false);
-            setRssPreviewError(null);
-            sidebarRef.current?.reset();
+            if (!isEditMode) {
+                setName('');
+                setTypeId('');
+                setBaseUrl('');
+                setSimulatorLoading(false);
+                setCrawlStrategy('list');
+                setCrawlInterval('1 day');
+                clearRssFeeds();
+                resetObec();
+                setWorkflowData(null);
+                setPlaywrightEnabled(false);
+                setSelectorPreview(null);
+                setRssPreview(null);
+                setRssPreviewLoading(false);
+                setRssPreviewError(null);
+                sidebarRef.current?.reset();
+            }
         },
     });
 
@@ -138,6 +148,23 @@ export function SourceEditorContainer() {
             controller.abort();
         };
     }, [crawlStrategy, baseUrl, selectedRssFeed]);
+
+    // Populate form fields when editing an existing source
+    useEffect(() => {
+        if (!loadedSource) return;
+        setName(loadedSource.name ?? '');
+        setTypeId(String(loadedSource.typ_id ?? ''));
+        setBaseUrl(loadedSource.base_url ?? '');
+        setCrawlStrategy((loadedSource.crawl_strategy as CrawlStrategy) ?? 'list');
+        setCrawlInterval(loadedSource.crawl_interval ?? '1 day');
+        if (loadedSource.base_url) {
+            setSimulatorLoading(true);
+        }
+        if (loadedWorkflow) {
+            setWorkflowData(loadedWorkflow);
+            setPlaywrightEnabled(loadedWorkflow.playwright_enabled ?? false);
+        }
+    }, [loadedSource, loadedWorkflow]);
 
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
         const applied = sidebarRef.current?.applySelectedSelector(selector, elementInfo) ?? false;
@@ -244,6 +271,8 @@ export function SourceEditorContainer() {
                     rssDetectionStatus={detectionStatus}
                     onDetectRssFeeds={() => void detectRssFeeds()}
                     submitting={submitting}
+                    editMode={isEditMode}
+                    sourceLoading={sourceLoading}
                     rssPanel={(
                         <RssDetectionPanel
                             rssFeedOptions={rssFeedOptions}

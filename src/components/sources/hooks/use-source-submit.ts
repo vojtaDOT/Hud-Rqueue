@@ -28,10 +28,11 @@ interface SubmitPayload {
 }
 
 interface UseSourceSubmitOptions {
+    editSourceId?: string;
     onSubmitted: () => void;
 }
 
-export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
+export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOptions) {
     const [submitting, setSubmitting] = useState(false);
 
     const submitSource = useCallback(async (payload: SubmitPayload) => {
@@ -110,8 +111,10 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
                 ? (selectedRssFeed.trim() || baseUrl.trim())
                 : baseUrl;
 
-            const response = await fetch('/api/sources', {
-                method: 'POST',
+            const url = editSourceId ? `/api/sources/${editSourceId}` : '/api/sources';
+            const method = editSourceId ? 'PUT' : 'POST';
+            const response = await fetch(url, {
+                method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name,
@@ -134,7 +137,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
                 throw new Error(data.error || 'Nepodarilo se ulozit zdroj');
             }
 
-            toast.success('Zdroj byl uspesne ulozen');
+            toast.success(editSourceId ? 'Zdroj byl uspesne aktualizovan' : 'Zdroj byl uspesne ulozen');
             onSubmitted();
             return true;
         } catch (error) {
@@ -143,7 +146,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
         } finally {
             setSubmitting(false);
         }
-    }, [onSubmitted]);
+    }, [editSourceId, onSubmitted]);
 
     return {
         submitting,

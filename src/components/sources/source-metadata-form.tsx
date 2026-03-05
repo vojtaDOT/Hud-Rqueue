@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode, RefObject } from 'react';
-import { AlertCircle, CheckCircle2, ChevronRight, Globe, Info, Loader2, Rss } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Globe, Info, Loader2, Plus, Rss } from 'lucide-react';
 
 import type { RssDetectionStatus } from '@/components/sources/hooks/use-rss-detection';
 import { ObecAutocomplete } from '@/components/sources/obec-autocomplete';
@@ -45,6 +45,8 @@ interface SourceMetadataFormProps {
     submitting: boolean;
     rssPanel?: ReactNode;
     rssPreviewPanel?: ReactNode;
+    editMode?: boolean;
+    sourceLoading?: boolean;
 }
 
 export function SourceMetadataForm({
@@ -75,6 +77,8 @@ export function SourceMetadataForm({
     submitting,
     rssPanel,
     rssPreviewPanel,
+    editMode,
+    sourceLoading,
 }: SourceMetadataFormProps) {
     return (
         <div className="space-y-3">
@@ -192,6 +196,14 @@ export function SourceMetadataForm({
 
             {/* Row 4: Action buttons + RSS panel */}
             <div className="flex items-center justify-end gap-2 pt-1">
+                {editMode && (
+                    <a href="/sources" className="mr-auto">
+                        <Button type="button" variant="ghost" size="sm">
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
+                            Novy zdroj
+                        </Button>
+                    </a>
+                )}
                 <Button
                     type="button"
                     variant="outline"
@@ -214,17 +226,22 @@ export function SourceMetadataForm({
                 <Button
                     type="submit"
                     size="sm"
-                    disabled={submitting}
+                    disabled={submitting || sourceLoading}
                 >
                     {submitting ? (
                         <>
                             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            Ukladam...
+                            {editMode ? 'Aktualizuji...' : 'Ukladam...'}
+                        </>
+                    ) : sourceLoading ? (
+                        <>
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            Nacitam...
                         </>
                     ) : (
                         <>
                             <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
-                            Ulozit zdroj
+                            {editMode ? 'Aktualizovat zdroj' : 'Ulozit zdroj'}
                         </>
                     )}
                 </Button>

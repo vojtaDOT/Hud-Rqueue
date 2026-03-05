@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import {
     ArrowDown,
     ArrowUp,
@@ -23,12 +23,9 @@ import type {
     RepeaterStep,
     ScrapingWorkflow,
     ScopeModule,
-    SourceUrlType,
 } from '@/lib/crawler-types';
 import {
     actionHasSelector,
-    createEmptyPhase,
-    createId,
     createPaginationConfig,
     createScopeModule,
     createSourceUrlStep,
@@ -39,7 +36,6 @@ import {
     findScopeInTree,
     FocusTarget,
     isPlaywrightBeforeAction,
-    mapStepsInTree,
     moveItem,
     normalizeSelectorWithinScope,
     removeScopeFromTree,
@@ -67,6 +63,7 @@ import { StepChooser } from '@/components/simulator/sidebar/step-chooser';
 import { PhaseEditor } from '@/components/simulator/sidebar/phase-editor';
 import {
     useWorkflowState,
+    createDefaultWorkflow,
     BASIC_BEFORE_STEP_TYPES,
     PLAYWRIGHT_BEFORE_STEP_TYPES,
     type PhaseTab,
@@ -74,6 +71,7 @@ import {
     type PlaywrightBeforeStepType,
 } from '@/components/simulator/sidebar/hooks/use-workflow-state';
 import { useFocusSystem } from '@/components/simulator/sidebar/hooks/use-focus-system';
+import { useUrlTypeManager } from '@/components/simulator/sidebar/hooks/use-url-type-manager';
 
 export type SidebarQuickAction =
     | 'scope'
@@ -110,15 +108,15 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     playwrightEnabled,
     onSelectorPreviewChange,
 }, ref) => {
-    const ws = useWorkflowState({
-        playwrightEnabled,
-        onChange: onWorkflowChange,
-    });
+    const [workflow, setWorkflow] = useState(() => createDefaultWorkflow(playwrightEnabled));
+    const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
 
     const {
-        workflow, setWorkflow,
-        activeTab, setActiveTab,
         activeUrlTypeId, setActiveUrlTypeId, activeUrlType,
+        handleUrlTypeAdd, handleUrlTypeRename, handleUrlTypeDelete,
+    } = useUrlTypeManager(workflow, setWorkflow, setActiveTab);
+
+    const {
         currentPhase, currentPhaseKey,
         scopeRefs, repeaterRefs,
         effectiveSelectedScopeId, effectiveSelectedRepeaterId,
@@ -132,7 +130,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         addSourceUrlStep, addDocumentUrlStep,
         addDownloadFileStep, addDataExtractStep,
         addPaginationStep,
-    } = ws;
+    } = useWorkflowState({
+        workflow,
+        setWorkflow,
+        activeTab,
+        playwrightEnabled,
+        activeUrlType,
+        onChange: onWorkflowChange,
+    });
 
     const {
         focusedTarget, setFocusedTarget,
@@ -454,49 +459,6 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         resolveSelectorForTarget,
         workflow,
     ]);
-
-    const handleUrlTypeAdd = () => {
-        const newUrlType: SourceUrlType = {
-            id: createId('url-type'),
-            name: `URL Type ${workflow.url_types.length + 1}`,
-            processing: createEmptyPhase(),
-        };
-        setWorkflow((prev) => ({ ...prev, url_types: [...prev.url_types, newUrlType] }));
-        setActiveUrlTypeId(newUrlType.id);
-        setActiveTab('processing');
-    };
-
-    const handleUrlTypeRename = (urlType: SourceUrlType) => {
-        const nextName = window.prompt('URL Type name', urlType.name)?.trim();
-        if (!nextName) return;
-        setWorkflow((prev) => ({
-            ...prev,
-            url_types: prev.url_types.map((item) => (
-                item.id === urlType.id ? { ...item, name: nextName } : item
-            )),
-        }));
-    };
-
-    const handleUrlTypeDelete = (id: string) => {
-        if (workflow.url_types.length <= 1) return;
-        const nextUrlTypes = workflow.url_types.filter((item) => item.id !== id);
-        const fallbackId = nextUrlTypes[0].id;
-        setWorkflow((prev) => ({
-            ...prev,
-            url_types: nextUrlTypes,
-            discovery: {
-                ...prev.discovery,
-                chain: mapStepsInTree(prev.discovery.chain, (step) => (
-                    step.type === 'source_url' && step.url_type_id === id
-                        ? { ...step, url_type_id: fallbackId }
-                        : step
-                )),
-            },
-        }));
-        if (activeUrlTypeId === id) {
-            setActiveUrlTypeId(fallbackId);
-        }
-    };
 
     const renderBeforeAction = (action: BeforeAction, index: number) => {
         const target: FocusTarget = currentPhaseKey.phase === 'discovery'

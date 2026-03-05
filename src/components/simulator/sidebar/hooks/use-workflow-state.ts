@@ -3,6 +3,7 @@ import type {
     PhaseConfig,
     PlaywrightAction,
     ScrapingWorkflow,
+    SourceUrlType,
 } from '@/lib/crawler-types';
 import {
     collectRepeaters,
@@ -13,7 +14,6 @@ import {
     createDownloadFileStep,
     createEmptyPhase,
     createId,
-    createPaginationConfig,
     createRepeaterNode,
     createScopeModule,
     createSourceUrlStep,
@@ -71,7 +71,11 @@ export function createDefaultWorkflow(playwrightEnabled: boolean): ScrapingWorkf
 /* ------------------------------------------------------------------ */
 
 export interface UseWorkflowStateOptions {
+    workflow: ScrapingWorkflow;
+    setWorkflow: React.Dispatch<React.SetStateAction<ScrapingWorkflow>>;
+    activeTab: PhaseTab;
     playwrightEnabled: boolean;
+    activeUrlType: SourceUrlType;
     onChange?: (workflow: ScrapingWorkflow) => void;
 }
 
@@ -84,30 +88,13 @@ export type PhaseKey =
 /* ------------------------------------------------------------------ */
 
 export function useWorkflowState(options: UseWorkflowStateOptions) {
-    const { playwrightEnabled, onChange } = options;
+    const { workflow, setWorkflow, activeTab, playwrightEnabled, activeUrlType, onChange } = options;
 
     /* --- core state --- */
-    const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
-    const [workflow, setWorkflow] = useState<ScrapingWorkflow>(() => createDefaultWorkflow(playwrightEnabled));
     const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
     const [selectedRepeaterId, setSelectedRepeaterId] = useState<string | null>(null);
     const [beforeToAdd, setBeforeToAdd] = useState<BasicBeforeStepType>('remove_element');
     const [playwrightToAdd, setPlaywrightToAdd] = useState<PlaywrightBeforeStepType>('wait_selector');
-
-    /* --- derived (needs activeUrlTypeId from useUrlTypeManager, but we compute
-           currentPhase etc. using a passed-in activeUrlType) --- */
-
-    /* We need activeUrlType to compute currentPhase. Since useUrlTypeManager will
-       own activeUrlTypeId, we provide a helper that the sidebar can call with the
-       resolved activeUrlType. But to keep the migration incremental, we duplicate
-       activeUrlTypeId here temporarily — Task 2.3 will remove it. */
-
-    const [activeUrlTypeId, setActiveUrlTypeId] = useState<string>(() => workflow.url_types[0].id);
-
-    const activeUrlType = useMemo(
-        () => workflow.url_types.find((item) => item.id === activeUrlTypeId) ?? workflow.url_types[0],
-        [workflow.url_types, activeUrlTypeId],
-    );
 
     const currentPhase = useMemo<PhaseConfig>(
         () => (activeTab === 'discovery' ? workflow.discovery : activeUrlType.processing),
@@ -278,17 +265,6 @@ export function useWorkflowState(options: UseWorkflowStateOptions) {
     }, [currentPhaseKey, effectiveSelectedScopeId, updateWorkflowPhase]);
 
     return {
-        /* core state */
-        workflow,
-        setWorkflow,
-        activeTab,
-        setActiveTab,
-
-        /* temporary — will move to useUrlTypeManager in Task 2.3 */
-        activeUrlTypeId,
-        setActiveUrlTypeId,
-        activeUrlType,
-
         /* derived */
         currentPhase,
         currentPhaseKey,

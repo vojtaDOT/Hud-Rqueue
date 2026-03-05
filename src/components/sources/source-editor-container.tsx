@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 import { RssDetectionPanel } from '@/components/sources/rss-detection-panel';
+import { RssPreviewPanel, type FeedPreview } from '@/components/sources/rss-preview-panel';
 import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
@@ -39,6 +40,10 @@ export function SourceEditorContainer() {
     const [playwrightEnabled, setPlaywrightEnabled] = useState(false);
     const [selectorPreview, setSelectorPreview] = useState<string | null>(null);
     const [showPlaywrightConfirm, setShowPlaywrightConfirm] = useState(false);
+
+    const [rssPreview, setRssPreview] = useState<FeedPreview | null>(null);
+    const [rssPreviewLoading, setRssPreviewLoading] = useState(false);
+    const [rssPreviewError, setRssPreviewError] = useState<string | null>(null);
 
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
 
@@ -86,9 +91,52 @@ export function SourceEditorContainer() {
             setWorkflowData(null);
             setPlaywrightEnabled(false);
             setSelectorPreview(null);
+            setRssPreview(null);
+            setRssPreviewLoading(false);
+            setRssPreviewError(null);
             sidebarRef.current?.reset();
         },
     });
+
+    // Fetch RSS feed preview when strategy is RSS and URL is valid
+    useEffect(() => {
+        const effectiveUrl = selectedRssFeed || baseUrl;
+
+        if (crawlStrategy !== 'rss' || !effectiveUrl || !/^https?:\/\//.test(effectiveUrl)) {
+            setRssPreview(null);
+            setRssPreviewLoading(false);
+            setRssPreviewError(null);
+            return;
+        }
+
+        const controller = new AbortController();
+        setRssPreviewLoading(true);
+        setRssPreviewError(null);
+
+        fetch(`/api/sources/rss-preview?url=${encodeURIComponent(effectiveUrl)}`, {
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const body = await res.text();
+                    throw new Error(body || `HTTP ${res.status}`);
+                }
+                return res.json() as Promise<FeedPreview>;
+            })
+            .then((data) => {
+                setRssPreview(data);
+                setRssPreviewLoading(false);
+            })
+            .catch((err: unknown) => {
+                if (err instanceof Error && err.name === 'AbortError') return;
+                setRssPreviewError(err instanceof Error ? err.message : 'Nelze nacist nahled feedu');
+                setRssPreviewLoading(false);
+            });
+
+        return () => {
+            controller.abort();
+        };
+    }, [crawlStrategy, baseUrl, selectedRssFeed]);
 
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
         const applied = sidebarRef.current?.applySelectedSelector(selector, elementInfo) ?? false;
@@ -203,6 +251,13 @@ export function SourceEditorContainer() {
                                 applySelectedRssFeed();
                                 setSimulatorLoading(true);
                             }}
+                        />
+                    )}
+                    rssPreviewPanel={(
+                        <RssPreviewPanel
+                            preview={rssPreview}
+                            loading={rssPreviewLoading}
+                            error={rssPreviewError}
                         />
                     )}
                 />

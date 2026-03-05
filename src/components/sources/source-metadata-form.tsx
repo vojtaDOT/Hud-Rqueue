@@ -42,6 +42,7 @@ interface SourceMetadataFormProps {
     onDetectRssFeeds: () => void;
     submitting: boolean;
     rssPanel?: ReactNode;
+    rssPreviewPanel?: ReactNode;
 }
 
 export function SourceMetadataForm({
@@ -70,6 +71,7 @@ export function SourceMetadataForm({
     onDetectRssFeeds,
     submitting,
     rssPanel,
+    rssPreviewPanel,
 }: SourceMetadataFormProps) {
     return (
         <div className="space-y-3">
@@ -206,6 +208,7 @@ export function SourceMetadataForm({
             </div>
 
             {rssPanel}
+            {rssPreviewPanel}
         </div>
     );
 }

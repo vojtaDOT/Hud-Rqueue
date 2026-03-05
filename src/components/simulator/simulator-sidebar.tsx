@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import {
     ArrowDown,
     ArrowUp,
@@ -20,7 +20,6 @@ import type {
     BeforeAction,
     ElementSelector,
     PhaseConfig,
-    PlaywrightAction,
     RepeaterNode,
     RepeaterStep,
     ScrapingWorkflow,
@@ -29,19 +28,13 @@ import type {
 } from '@/lib/crawler-types';
 import {
     actionHasSelector,
-    appendChildScope,
-    collectRepeaters,
-    collectScopes,
-    createDataExtractStep,
-    createDefaultBeforeAction,
-    createDocumentUrlStep,
-    createDownloadFileStep,
     createEmptyPhase,
     createId,
     createPaginationConfig,
-    createRepeaterNode,
     createScopeModule,
     createSourceUrlStep,
+    createDocumentUrlStep,
+    createDownloadFileStep,
     describeTarget,
     ensureScopeAndRepeater,
     findScopeForRepeater,
@@ -77,10 +70,14 @@ import { RepeaterStepCard } from '@/components/simulator/sidebar/repeater-step-c
 import { ScopeNodeCard } from '@/components/simulator/sidebar/scope-node-card';
 import { StepChooser } from '@/components/simulator/sidebar/step-chooser';
 import { PhaseEditor } from '@/components/simulator/sidebar/phase-editor';
-
-type PhaseTab = 'discovery' | 'processing';
-type BasicBeforeStepType = 'remove_element' | 'wait_timeout';
-type PlaywrightBeforeStepType = PlaywrightAction['type'];
+import {
+    useWorkflowState,
+    BASIC_BEFORE_STEP_TYPES,
+    PLAYWRIGHT_BEFORE_STEP_TYPES,
+    type PhaseTab,
+    type BasicBeforeStepType,
+    type PlaywrightBeforeStepType,
+} from '@/components/simulator/sidebar/hooks/use-workflow-state';
 
 export type SidebarQuickAction =
     | 'scope'
@@ -106,36 +103,6 @@ export interface SimulatorSidebarRef {
     applyQuickAction: (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => void;
 }
 
-const BASIC_BEFORE_STEP_TYPES: Array<{ value: BasicBeforeStepType; label: string }> = [
-    { value: 'remove_element', label: 'Remove Element' },
-    { value: 'wait_timeout', label: 'Wait Timeout' },
-];
-
-const PLAYWRIGHT_BEFORE_STEP_TYPES: Array<{ value: PlaywrightBeforeStepType; label: string }> = [
-    { value: 'wait_selector', label: 'Wait for Selector' },
-    { value: 'wait_network', label: 'Wait for Network' },
-    { value: 'click', label: 'Click' },
-    { value: 'scroll', label: 'Scroll' },
-    { value: 'fill', label: 'Fill Input' },
-    { value: 'select_option', label: 'Select Dropdown' },
-    { value: 'evaluate', label: 'Run JavaScript' },
-    { value: 'screenshot', label: 'Screenshot' },
-];
-
-function createDefaultWorkflow(playwrightEnabled: boolean): ScrapingWorkflow {
-    return {
-        playwright_enabled: playwrightEnabled,
-        discovery: createEmptyPhase(),
-        url_types: [
-            {
-                id: createId('url-type'),
-                name: 'Default Documents',
-                processing: createEmptyPhase(),
-            },
-        ],
-    };
-}
-
 function getActionLabel(action: BeforeAction): string {
     if (action.type === 'remove_element') return 'Remove Element';
     if (action.type === 'wait_timeout') return 'Wait Timeout';
@@ -147,78 +114,32 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     playwrightEnabled,
     onSelectorPreviewChange,
 }, ref) => {
-    const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
-    const [workflow, setWorkflow] = useState<ScrapingWorkflow>(() => createDefaultWorkflow(playwrightEnabled));
-    const [activeUrlTypeId, setActiveUrlTypeId] = useState<string>(() => workflow.url_types[0].id);
-    const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
-    const [selectedRepeaterId, setSelectedRepeaterId] = useState<string | null>(null);
+    const ws = useWorkflowState({
+        playwrightEnabled,
+        onChange: onWorkflowChange,
+    });
+
+    const {
+        workflow, setWorkflow,
+        activeTab, setActiveTab,
+        activeUrlTypeId, setActiveUrlTypeId, activeUrlType,
+        currentPhase, currentPhaseKey,
+        scopeRefs, repeaterRefs,
+        effectiveSelectedScopeId, effectiveSelectedRepeaterId,
+        selectedScopeId, setSelectedScopeId,
+        selectedRepeaterId, setSelectedRepeaterId,
+        beforeToAdd, setBeforeToAdd,
+        playwrightToAdd, setPlaywrightToAdd,
+        updateWorkflowPhase,
+        addBasicBeforeAction, addPlaywrightAction,
+        addScopeStep, addRepeaterStep,
+        addSourceUrlStep, addDocumentUrlStep,
+        addDownloadFileStep, addDataExtractStep,
+        addPaginationStep,
+    } = ws;
+
     const [focusedTarget, setFocusedTarget] = useState<FocusTarget | null>(null);
     const [armedTarget, setArmedTarget] = useState<FocusTarget | null>(null);
-    const [beforeToAdd, setBeforeToAdd] = useState<BasicBeforeStepType>('remove_element');
-    const [playwrightToAdd, setPlaywrightToAdd] = useState<PlaywrightBeforeStepType>('wait_selector');
-
-    const activeUrlType = useMemo(
-        () => workflow.url_types.find((item) => item.id === activeUrlTypeId) ?? workflow.url_types[0],
-        [workflow.url_types, activeUrlTypeId],
-    );
-
-    const currentPhase = useMemo<PhaseConfig>(
-        () => (activeTab === 'discovery' ? workflow.discovery : activeUrlType.processing),
-        [activeTab, workflow.discovery, activeUrlType],
-    );
-
-    const currentPhaseKey = useMemo(
-        () => (activeTab === 'discovery'
-            ? ({ phase: 'discovery' } as const)
-            : ({ phase: 'processing', urlTypeId: activeUrlType.id } as const)),
-        [activeTab, activeUrlType.id],
-    );
-
-    const scopeRefs = useMemo(() => collectScopes(currentPhase.chain), [currentPhase.chain]);
-    const repeaterRefs = useMemo(() => collectRepeaters(currentPhase.chain), [currentPhase.chain]);
-
-    const effectiveSelectedScopeId = useMemo(
-        () => (selectedScopeId && scopeRefs.some((scope) => scope.scopeId === selectedScopeId))
-            ? selectedScopeId
-            : (scopeRefs[0]?.scopeId ?? null),
-        [selectedScopeId, scopeRefs],
-    );
-
-    const effectiveSelectedRepeaterId = useMemo(
-        () => (selectedRepeaterId && repeaterRefs.some((item) => item.repeaterId === selectedRepeaterId))
-            ? selectedRepeaterId
-            : (repeaterRefs[0]?.repeaterId ?? null),
-        [selectedRepeaterId, repeaterRefs],
-    );
-
-    useEffect(() => {
-        onWorkflowChange?.({
-            ...workflow,
-            playwright_enabled: playwrightEnabled,
-        });
-    }, [workflow, playwrightEnabled, onWorkflowChange]);
-
-    const updateWorkflowPhase = (
-        target: { phase: 'discovery' } | { phase: 'processing'; urlTypeId: string },
-        updater: (phase: PhaseConfig) => PhaseConfig,
-    ) => {
-        setWorkflow((prev) => {
-            if (target.phase === 'discovery') {
-                return {
-                    ...prev,
-                    discovery: updater(prev.discovery),
-                };
-            }
-            return {
-                ...prev,
-                url_types: prev.url_types.map((item) => (
-                    item.id === target.urlTypeId
-                        ? { ...item, processing: updater(item.processing) }
-                        : item
-                )),
-            };
-        });
-    };
 
     const setSelectorFocus = (target: FocusTarget, selector: string) => {
         setFocusedTarget(target);
@@ -627,112 +548,6 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         resolveSelectorForTarget,
         workflow,
     ]);
-
-    const addBasicBeforeAction = () => {
-        updateWorkflowPhase(currentPhaseKey, (phase) => ({
-            ...phase,
-            before: [...phase.before, createDefaultBeforeAction(beforeToAdd)],
-        }));
-    };
-
-    const addPlaywrightAction = () => {
-        updateWorkflowPhase(currentPhaseKey, (phase) => ({
-            ...phase,
-            before: [...phase.before, createDefaultBeforeAction(playwrightToAdd)],
-        }));
-    };
-
-    const addScopeStep = () => {
-        const newScope = createScopeModule();
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            if (!effectiveSelectedScopeId) {
-                return { ...phase, chain: [...phase.chain, newScope] };
-            }
-            const parent = findScopeInTree(phase.chain, effectiveSelectedScopeId);
-            if (!parent || !parent.repeater) {
-                return { ...phase, chain: [...phase.chain, newScope] };
-            }
-            const [chain, changed] = appendChildScope(phase.chain, parent.id, newScope);
-            if (!changed) {
-                return { ...phase, chain: [...phase.chain, newScope] };
-            }
-            return { ...phase, chain };
-        });
-        setSelectedScopeId(newScope.id);
-    };
-
-    const addRepeaterStep = () => {
-        if (!effectiveSelectedScopeId) return;
-        const repeater = createRepeaterNode();
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateScopeInTree(phase.chain, effectiveSelectedScopeId, (scope) => ({
-                ...scope,
-                repeater,
-            }));
-            return { ...phase, chain };
-        });
-        setSelectedRepeaterId(repeater.id);
-    };
-
-    const addSourceUrlStep = () => {
-        if (!effectiveSelectedRepeaterId || currentPhaseKey.phase !== 'discovery') return;
-        const defaultUrlTypeId = workflow.url_types[0]?.id;
-        const sourceUrlStep = createSourceUrlStep(defaultUrlTypeId);
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
-                ...repeater,
-                steps: [...repeater.steps, sourceUrlStep],
-            }));
-            return { ...phase, chain };
-        });
-    };
-
-    const addDocumentUrlStep = () => {
-        if (!effectiveSelectedRepeaterId || currentPhaseKey.phase !== 'discovery') return;
-        const documentUrlStep = createDocumentUrlStep();
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
-                ...repeater,
-                steps: [...repeater.steps, documentUrlStep],
-            }));
-            return { ...phase, chain };
-        });
-    };
-
-    const addDownloadFileStep = () => {
-        if (!effectiveSelectedRepeaterId) return;
-        const downloadStep = createDownloadFileStep();
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
-                ...repeater,
-                steps: [...repeater.steps, downloadStep],
-            }));
-            return { ...phase, chain };
-        });
-    };
-
-    const addDataExtractStep = () => {
-        if (!effectiveSelectedRepeaterId) return;
-        const dataStep = createDataExtractStep();
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateRepeaterInTree(phase.chain, effectiveSelectedRepeaterId, (repeater) => ({
-                ...repeater,
-                steps: [...repeater.steps, dataStep],
-            }));
-            return { ...phase, chain };
-        });
-    };
-
-    const addPaginationStep = () => {
-        if (!effectiveSelectedScopeId) return;
-        updateWorkflowPhase(currentPhaseKey, (phase) => {
-            const [chain] = updateScopeInTree(phase.chain, effectiveSelectedScopeId, (scope) => ({
-                ...scope,
-                pagination: withPaginationDefaults(scope.pagination),
-            }));
-            return { ...phase, chain };
-        });
-    };
 
     const handleUrlTypeAdd = () => {
         const newUrlType: SourceUrlType = {

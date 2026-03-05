@@ -76,11 +76,12 @@ export function SourceMetadataForm({
                         value={name}
                         onChange={(event) => onNameChange(event.target.value)}
                         placeholder="Nazev zdroje"
+                        required
                     />
                 </div>
                 <div>
                     <Label htmlFor="type" className="mb-1 block text-xs text-muted-foreground">Typ zdroje</Label>
-                    <Select value={typeId} onValueChange={onTypeIdChange} disabled={loadingTypes}>
+                    <Select value={typeId} onValueChange={onTypeIdChange} disabled={loadingTypes} required>
                         <SelectTrigger>
                             <SelectValue placeholder={loadingTypes ? 'Nacitani...' : 'Vyberte typ'} />
                         </SelectTrigger>
@@ -116,10 +117,12 @@ export function SourceMetadataForm({
                         <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                             id="baseUrl"
+                            type="url"
                             value={baseUrl}
                             onChange={(event) => onBaseUrlChange(event.target.value)}
                             placeholder="https://example.com/bulletin"
                             className="pl-10"
+                            required
                         />
                     </div>
                 </div>

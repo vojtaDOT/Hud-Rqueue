@@ -143,7 +143,7 @@ async function fetchSnapshot(url: string, timeoutMs = 8000): Promise<FetchAttemp
         });
 
         const contentType = response.headers.get('content-type') ?? '';
-        const body = (await response.text()).slice(0, 16000);
+        const body = (await response.text()).slice(0, 65536);
 
         return {
             snapshot: {

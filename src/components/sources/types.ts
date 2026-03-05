@@ -15,7 +15,8 @@ export interface Obec {
 
 export type CrawlStrategy = 'list' | 'rss';
 
-export type RssWarningReason = 'http_error' | 'not_feed' | 'network_error' | 'timeout';
+import type { RssWarningReason } from '@/lib/source-config';
+export type { RssWarningReason } from '@/lib/source-config';
 
 export interface RssDetectionWarning {
     url: string;

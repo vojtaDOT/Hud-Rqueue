@@ -63,6 +63,7 @@ export function SourceEditorContainer() {
         rssWarnings,
         setSelectedRssFeed,
         detectRssFeeds,
+        autoDetectOnUrl,
         applySelectedRssFeed,
         clearRssFeeds,
     } = useRssDetection({
@@ -154,6 +155,10 @@ export function SourceEditorContainer() {
         clearRssFeeds();
     };
 
+    const handleBaseUrlBlur = () => {
+        void autoDetectOnUrl(baseUrl);
+    };
+
     const handleCrawlStrategyChange = (value: CrawlStrategy) => {
         setCrawlStrategy(value);
         if (value === 'rss') {
@@ -181,6 +186,7 @@ export function SourceEditorContainer() {
                     onSelectObec={onSelectObec}
                     baseUrl={baseUrl}
                     onBaseUrlChange={handleBaseUrlChange}
+                    onBaseUrlBlur={handleBaseUrlBlur}
                     crawlStrategy={crawlStrategy}
                     onCrawlStrategyChange={handleCrawlStrategyChange}
                     crawlInterval={crawlInterval}

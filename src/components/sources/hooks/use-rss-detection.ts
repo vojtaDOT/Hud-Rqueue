@@ -12,6 +12,40 @@ interface UseRssDetectionOptions {
     setPlaywrightEnabled: (enabled: boolean) => void;
 }
 
+interface RssDetectionResult {
+    feedUrls: string[];
+    warnings: RssDetectionWarning[];
+}
+
+async function fetchAndParseRssFeeds(url: string): Promise<RssDetectionResult> {
+    const response = await fetch(`/api/sources/rss-detect?url=${encodeURIComponent(url)}`);
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error || 'Detekce RSS selhala');
+    }
+
+    const feedUrls: string[] = Array.isArray(data.feed_urls)
+        ? data.feed_urls.filter((item: unknown): item is string => typeof item === 'string')
+        : [];
+
+    const warnings: RssDetectionWarning[] = Array.isArray(data.warnings)
+        ? data.warnings.filter((item: unknown): item is RssDetectionWarning => (
+            typeof item === 'object'
+            && item !== null
+            && typeof (item as { url?: unknown }).url === 'string'
+            && (
+                (item as { reason?: unknown }).reason === 'http_error'
+                || (item as { reason?: unknown }).reason === 'not_feed'
+                || (item as { reason?: unknown }).reason === 'network_error'
+                || (item as { reason?: unknown }).reason === 'timeout'
+            )
+        ))
+        : [];
+
+    return { feedUrls, warnings };
+}
+
 export function useRssDetection({
     baseUrl,
     setBaseUrl,
@@ -37,30 +71,7 @@ export function useRssDetection({
 
         setDetectingRss(true);
         try {
-            const response = await fetch(`/api/sources/rss-detect?url=${encodeURIComponent(baseUrl)}`);
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Detekce RSS selhala');
-            }
-
-            const feedUrls: string[] = Array.isArray(data.feed_urls)
-                ? data.feed_urls.filter((item: unknown): item is string => typeof item === 'string')
-                : [];
-
-            const warnings: RssDetectionWarning[] = Array.isArray(data.warnings)
-                ? data.warnings.filter((item: unknown): item is RssDetectionWarning => (
-                    typeof item === 'object'
-                    && item !== null
-                    && typeof (item as { url?: unknown }).url === 'string'
-                    && (
-                        (item as { reason?: unknown }).reason === 'http_error'
-                        || (item as { reason?: unknown }).reason === 'not_feed'
-                        || (item as { reason?: unknown }).reason === 'network_error'
-                        || (item as { reason?: unknown }).reason === 'timeout'
-                    )
-                ))
-                : [];
+            const { feedUrls, warnings } = await fetchAndParseRssFeeds(baseUrl);
 
             if (feedUrls.length < 1) {
                 clearRssFeeds();
@@ -115,6 +126,37 @@ export function useRssDetection({
         }
     }, [baseUrl, clearRssFeeds]);
 
+    const autoDetectOnUrl = useCallback(async (url: string) => {
+        if (!/^https?:\/\//.test(url)) {
+            return;
+        }
+
+        setDetectingRss(true);
+        try {
+            const { feedUrls, warnings } = await fetchAndParseRssFeeds(url);
+
+            if (feedUrls.length === 1) {
+                setBaseUrl(feedUrls[0]);
+                setCrawlStrategy('rss');
+                setPlaywrightEnabled(false);
+                setRssFeedOptions(feedUrls);
+                setSelectedRssFeed(feedUrls[0]);
+                setRssWarnings(warnings);
+                toast.success('RSS feed detekovan a aplikovan.');
+            } else if (feedUrls.length > 1) {
+                setRssFeedOptions(feedUrls);
+                setSelectedRssFeed(feedUrls[0]);
+                setRssWarnings(warnings);
+                toast.success(`Nalezeno ${feedUrls.length} RSS feedu — vyberte feed.`);
+            }
+            // No feeds or error: stay silent
+        } catch {
+            // Silent on error
+        } finally {
+            setDetectingRss(false);
+        }
+    }, [setBaseUrl, setCrawlStrategy, setPlaywrightEnabled]);
+
     const applySelectedRssFeed = useCallback(() => {
         if (!selectedRssFeed) {
             toast.info('Nejprve vyberte RSS/Atom feed.');
@@ -133,6 +175,7 @@ export function useRssDetection({
         rssWarnings,
         setSelectedRssFeed,
         detectRssFeeds,
+        autoDetectOnUrl,
         applySelectedRssFeed,
         clearRssFeeds,
     };

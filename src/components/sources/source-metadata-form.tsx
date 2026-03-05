@@ -33,6 +33,7 @@ interface SourceMetadataFormProps {
     onSelectObec: (obec: Obec) => void;
     baseUrl: string;
     onBaseUrlChange: (value: string) => void;
+    onBaseUrlBlur?: () => void;
     crawlStrategy: CrawlStrategy;
     onCrawlStrategyChange: (value: CrawlStrategy) => void;
     crawlInterval: string;
@@ -60,6 +61,7 @@ export function SourceMetadataForm({
     onSelectObec,
     baseUrl,
     onBaseUrlChange,
+    onBaseUrlBlur,
     crawlStrategy,
     onCrawlStrategyChange,
     crawlInterval,
@@ -124,10 +126,14 @@ export function SourceMetadataForm({
                             type="url"
                             value={baseUrl}
                             onChange={(event) => onBaseUrlChange(event.target.value)}
+                            onBlur={onBaseUrlBlur}
                             placeholder="https://example.com/bulletin"
-                            className="pl-10"
+                            className="pl-10 pr-9"
                             required
                         />
+                        {detectingRss && (
+                            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                        )}
                     </div>
                 </div>
                 <div>

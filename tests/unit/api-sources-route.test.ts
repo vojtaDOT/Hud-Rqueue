@@ -178,6 +178,7 @@ describe('POST /api/sources', () => {
         expect(json.source.id).toBe(101);
         const insertedBody = insertSources.mock.calls[0][0][0];
         expect(insertedBody.crawl_params.schema_version).toBe(2);
+        expect(insertedBody.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
         expect(insertedBody.extraction_data.strategy).toBe('list');
         expect(insertedBody.extraction_data.config_version).toBe(1);
     });

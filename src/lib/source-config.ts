@@ -2,6 +2,13 @@ import { z } from 'zod';
 
 import type { RssCrawlParamsV1, UnifiedWorkerCrawlParams } from '@/lib/crawler-types';
 import { normalizeUrlForDedupe } from '@/lib/dedupe-url';
+import {
+    renderTemplate,
+    CRAWL_PARAMS_RSS_TEMPLATE,
+    EXTRACTION_DATA_LIST_TEMPLATE,
+    EXTRACTION_DATA_RSS_TEMPLATE,
+} from '@/lib/templates';
+import { WORKER_CONTRACT_METADATA_V11 } from '@/lib/worker-contract-metadata';
 
 export const IGNORED_DEDUPE_QUERY_PARAMS = [
     'utm_source',
@@ -68,6 +75,22 @@ const NullableStringSchema = z.preprocess((value) => {
     return text.length > 0 ? text : null;
 }, z.string().nullable());
 
+const RuntimeRulesSchema = z.object({
+    accepted_queue_tasks: z.tuple([z.literal('discover'), z.literal('download')]),
+    effective_crawl_params_precedence: z.literal('sources.crawl_params -> sources.extraction_data -> {}'),
+    download_snapshot_override: z.literal('When source_urls.crawl_params_snapshot is present, download uses it as crawl_params for that source_url.'),
+    spider_selection: z.literal('If effective crawl_params is unified config (contains discovery and schema_version=2), use GenericSpider; otherwise use sources.crawl_strategy (list|api|rss).'),
+}).strict();
+
+const ContractMetadataShape = {
+    template_version: z.literal('1.1').optional(),
+    worker_contract: z.literal('scrapy-worker.instructions.v1').optional(),
+    orchestration_contract: z.literal('scrapy-worker.controller-layer.v1').optional(),
+    runtime_contract: z.literal('scrapy-worker.runtime.minimal.v1').optional(),
+    flow: z.tuple([z.literal('source'), z.literal('source_urls')]).optional(),
+    runtime_rules: RuntimeRulesSchema.optional(),
+} satisfies z.ZodRawShape;
+
 const ListCrawlParamsSchema = z.object({
     schema_version: z.literal(2),
     playwright: z.boolean(),
@@ -80,6 +103,7 @@ const ListCrawlParamsSchema = z.object({
         before: z.array(z.unknown()),
         chain: z.array(z.unknown()),
     }).passthrough()),
+    ...ContractMetadataShape,
 }).passthrough();
 
 const ListExtractionDataSchema = z.object({
@@ -113,7 +137,8 @@ const RssCrawlParamsSchema = z.object({
     fetch: z.object({
         timeout_ms: z.number().int().min(1),
     }).strict(),
-}).strict();
+    ...ContractMetadataShape,
+}).passthrough();
 
 const RssExtractionDataSchema = z.object({
     config_version: z.literal(1),
@@ -142,20 +167,14 @@ export function buildListSourceConfig(crawlParams: UnifiedWorkerCrawlParams): {
     extraction_data: SourceListExtractionDataV1;
 } {
     return {
-        crawl_params: crawlParams,
-        extraction_data: {
-            config_version: 1,
-            strategy: 'list',
-            dedupe: {
-                url_norm_version: 'v2',
-                rss_identity: 'link_then_guid',
-                ignored_query_params: [...IGNORED_DEDUPE_QUERY_PARAMS],
-            },
-            pagination_defaults: {
-                mode: 'hybrid',
-                max_pages: 0,
-            },
+        crawl_params: {
+            ...WORKER_CONTRACT_METADATA_V11,
+            ...crawlParams,
         },
+        extraction_data: renderTemplate<SourceListExtractionDataV1>(
+            EXTRACTION_DATA_LIST_TEMPLATE as unknown as Record<string, unknown>,
+            { ignored_query_params: [...IGNORED_DEDUPE_QUERY_PARAMS] },
+        ),
     };
 }
 
@@ -172,21 +191,21 @@ export function buildRssSourceConfig(input: {
     const warnings = input.warnings ?? [];
 
     return {
-        crawl_params: {
-            schema_version: 1,
-            strategy: 'rss',
-            feed_url: feedUrl,
-            item_identity: 'link_then_guid',
-            route: { emit_to: 'source_urls' },
-            fetch: { timeout_ms: 8000 },
-        },
-        extraction_data: {
-            config_version: 1,
-            strategy: 'rss',
-            selected_feed_url: feedUrl,
-            detected_feed_candidates: detectedFeedCandidates,
-            warnings,
-        },
+        crawl_params: renderTemplate<RssCrawlParamsV1>(
+            CRAWL_PARAMS_RSS_TEMPLATE as unknown as Record<string, unknown>,
+            {
+                contract_metadata: { ...WORKER_CONTRACT_METADATA_V11 },
+                feed_url: feedUrl,
+            },
+        ),
+        extraction_data: renderTemplate<SourceRssExtractionDataV1>(
+            EXTRACTION_DATA_RSS_TEMPLATE as unknown as Record<string, unknown>,
+            {
+                feed_url: feedUrl,
+                detected_feed_candidates: detectedFeedCandidates,
+                warnings,
+            },
+        ),
     };
 }
 

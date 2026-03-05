@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "queue-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "PATH=/usr/local/bin:$PATH exec node node_modules/.bin/next dev"],
       "port": 3000
     }
   ]

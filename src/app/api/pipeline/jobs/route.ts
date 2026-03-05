@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { redis } from '@/lib/redis';
 import { toRedisBool } from '@/lib/redis-bool';
+import { renderTemplate, JOB_PAYLOAD_TEMPLATE } from '@/lib/templates';
 
 const JobSchema = z.object({
     task: z.enum(['discover', 'download', 'ocr']),
@@ -128,31 +129,28 @@ export async function POST(request: Request) {
                     ocr_addon: '',
                 };
 
-            const redisJob = {
-                id,
-                task: job.task,
-                run_id: runId,
-                source_id: job.source_id,
-                source_url_id: sourceUrlId,
-                document_id: documentId,
-                status: 'pending',
-                created_at: createdAt,
-                attempts: '0',
-                max_attempts: String(job.max_attempts ?? 3),
-                worker: '',
-                started_at: '',
-                completed_at: '',
-                error_message: '',
-                cron_time: '',
-                mode: ocrTemplate.mode,
-                lang: ocrTemplate.lang,
-                dpi: ocrTemplate.dpi,
-                psm: ocrTemplate.psm,
-                oem: ocrTemplate.oem,
-                min_text_chars: ocrTemplate.min_text_chars,
-                ocr_addon: ocrTemplate.ocr_addon,
-                manual: toRedisBool(job.manual ?? false),
-            };
+            const redisJob = renderTemplate<Record<string, string | number>>(
+                JOB_PAYLOAD_TEMPLATE as unknown as Record<string, unknown>,
+                {
+                    id,
+                    task: job.task,
+                    run_id: runId,
+                    source_id: job.source_id,
+                    source_url_id: sourceUrlId,
+                    document_id: documentId,
+                    created_at: createdAt,
+                    max_attempts: String(job.max_attempts ?? 3),
+                    cron_time: '',
+                    manual: toRedisBool(job.manual ?? false),
+                    ocr_mode: ocrTemplate.mode,
+                    ocr_lang: ocrTemplate.lang,
+                    ocr_dpi: ocrTemplate.dpi,
+                    ocr_psm: ocrTemplate.psm,
+                    ocr_oem: ocrTemplate.oem,
+                    ocr_min_text_chars: ocrTemplate.min_text_chars,
+                    ocr_addon: ocrTemplate.ocr_addon,
+                },
+            );
 
             pipeline.hset(`job:${id}`, redisJob);
             pipeline.rpush('queue', id);

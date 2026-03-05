@@ -24,6 +24,9 @@ describe('source-config', () => {
     it('builds list source config envelope', () => {
         const list = buildListSourceConfig(createListCrawlParams());
         expect(list.crawl_params.schema_version).toBe(2);
+        expect(list.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
+        expect(list.crawl_params.worker_contract).toBe('scrapy-worker.instructions.v1');
+        expect(list.crawl_params.flow).toEqual(['source', 'source_urls']);
         expect(list.extraction_data.config_version).toBe(1);
         expect(list.extraction_data.strategy).toBe('list');
         expect(list.extraction_data.pagination_defaults.mode).toBe('hybrid');
@@ -37,6 +40,7 @@ describe('source-config', () => {
         });
         expect(rss.crawl_params.schema_version).toBe(1);
         expect(rss.crawl_params.strategy).toBe('rss');
+        expect(rss.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
         expect(rss.crawl_params.route.emit_to).toBe('source_urls');
         expect(rss.extraction_data.strategy).toBe('rss');
         expect(rss.extraction_data.selected_feed_url).toBe('https://example.com/feed.xml');

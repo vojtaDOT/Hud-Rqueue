@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
+import { renderTemplate, RUN_PAYLOAD_TEMPLATE } from '@/lib/templates';
 
 const CreateRunSchema = z.object({
     source_id: z.string().min(1, 'source_id is required'),
@@ -209,18 +210,14 @@ export async function POST(request: Request) {
         const now = new Date().toISOString();
         const { source_id: sourceId, created_by: createdBy } = parsed.data;
 
-        const payload: Record<string, unknown> = {
-            source_id: sourceId,
-            source_url_id: null,
-            status: 'running',
-            active_stage: 'discovery',
-            started_at: now,
-            finished_at: null,
-            error_message: null,
-            created_by: createdBy || 'queue-ui',
-            created_at: now,
-            updated_at: now,
-        };
+        const payload: Record<string, unknown> = renderTemplate(
+            RUN_PAYLOAD_TEMPLATE as unknown as Record<string, unknown>,
+            {
+                source_id: sourceId,
+                source_url_id: null,
+                created_by: createdBy,
+            },
+        );
 
         const initialInsert = await insertRun(payload);
         if (initialInsert.run) {

@@ -22,6 +22,7 @@ import {
     UnifiedWorkerScopeNodeV2,
     UnifiedWorkerRepeaterStepV2,
 } from './crawler-types';
+import { renderTemplate, CRAWL_PARAMS_LIST_TEMPLATE } from './templates';
 
 function getConfigRecord(value: unknown): Record<string, unknown> {
     if (value && typeof value === 'object') {
@@ -527,15 +528,18 @@ export function hasPlaywrightBeforeAction(actions: BeforeAction[]): boolean {
 export function generateUnifiedCrawlParams(workflowData: ScrapingWorkflow): UnifiedWorkerCrawlParams {
     const resolveUrlTypeName = createUrlTypeNameResolver(workflowData.url_types);
 
-    return {
-        schema_version: 2,
-        playwright: workflowData.playwright_enabled,
-        discovery: toWorkerPhase(workflowData.discovery, resolveUrlTypeName),
-        processing: workflowData.url_types.map((urlType) => ({
-            url_type: urlType.name.trim() || urlType.id,
-            ...toWorkerPhase(urlType.processing, resolveUrlTypeName),
-        })),
-    };
+    return renderTemplate<UnifiedWorkerCrawlParams>(
+        CRAWL_PARAMS_LIST_TEMPLATE as unknown as Record<string, unknown>,
+        {
+            contract_metadata: {},
+            playwright: workflowData.playwright_enabled,
+            discovery: toWorkerPhase(workflowData.discovery, resolveUrlTypeName),
+            processing: workflowData.url_types.map((urlType) => ({
+                url_type: urlType.name.trim() || urlType.id,
+                ...toWorkerPhase(urlType.processing, resolveUrlTypeName),
+            })),
+        },
+    );
 }
 
 /**

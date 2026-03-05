@@ -184,6 +184,18 @@ function buildGuessedFeedUrls(url: URL): string[] {
     );
 }
 
+async function withConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+    const executing = new Set<Promise<void>>();
+    for (const item of items) {
+        const p = fn(item).then(() => { executing.delete(p); });
+        executing.add(p);
+        if (executing.size >= limit) {
+            await Promise.race(executing);
+        }
+    }
+    await Promise.all(executing);
+}
+
 export async function GET(request: NextRequest) {
     const targetUrl = request.nextUrl.searchParams.get('url')?.trim();
 
@@ -239,7 +251,7 @@ export async function GET(request: NextRequest) {
     const discovered: string[] = [];
     const warnings: FeedDetectionWarning[] = [];
 
-    for (const candidate of candidates) {
+    await withConcurrency(candidates, 4, async (candidate) => {
         const attempt = await probeCandidate(candidate);
         const snapshot = attempt.snapshot;
         if (!snapshot) {
@@ -248,29 +260,18 @@ export async function GET(request: NextRequest) {
                 status: null,
                 reason: attempt.errorReason ?? 'network_error',
             });
-            continue;
+            return;
         }
-
         if (!snapshot.ok) {
-            warnings.push({
-                url: candidate,
-                status: snapshot.status,
-                reason: 'http_error',
-            });
-            continue;
+            warnings.push({ url: candidate, status: snapshot.status, reason: 'http_error' });
+            return;
         }
-
         if (!isFeedSnapshot(snapshot)) {
-            warnings.push({
-                url: candidate,
-                status: snapshot.status,
-                reason: 'not_feed',
-            });
-            continue;
+            warnings.push({ url: candidate, status: snapshot.status, reason: 'not_feed' });
+            return;
         }
-
         discovered.push(snapshot.finalUrl);
-    }
+    });
 
     const feeds = uniqueUrls(discovered);
 

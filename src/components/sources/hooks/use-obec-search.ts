@@ -11,6 +11,11 @@ export function useObecSearch() {
     const [showObecDropdown, setShowObecDropdown] = useState(false);
     const [searchingObec, setSearchingObec] = useState(false);
 
+    const mountedRef = useRef(true);
+    useEffect(() => {
+        return () => { mountedRef.current = false; };
+    }, []);
+
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const obecDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +29,9 @@ export function useObecSearch() {
         setSearchingObec(true);
         try {
             const response = await fetch(`/api/regions/obce?q=${encodeURIComponent(query)}`);
+            if (!mountedRef.current) return;
             const data = await response.json();
+            if (!mountedRef.current) return;
             if (data.obce) {
                 setObecResults(data.obce);
                 setShowObecDropdown(true);
@@ -32,7 +39,9 @@ export function useObecSearch() {
         } catch (error) {
             console.error('Error searching obce:', error);
         } finally {
-            setSearchingObec(false);
+            if (mountedRef.current) {
+                setSearchingObec(false);
+            }
         }
     }, []);
 
@@ -64,7 +73,12 @@ export function useObecSearch() {
         }
 
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
     }, []);
 
     const resetObec = useCallback(() => {

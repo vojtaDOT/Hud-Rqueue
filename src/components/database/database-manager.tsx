@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
     Search,
@@ -17,6 +18,7 @@ import {
     Loader2,
     Database,
     Table2,
+    ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -351,6 +353,15 @@ export function DatabaseManager() {
                                     })}
                                     <td className="px-3 py-2 text-right whitespace-nowrap">
                                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {selectedTable === 'sources' && row[schema.primaryKey] != null && (
+                                                <Link
+                                                    href={`/sources?edit=${row[schema.primaryKey]}`}
+                                                    className="p-1.5 rounded hover:bg-muted/50 text-muted-foreground/60 hover:text-primary transition-colors"
+                                                    title="Otevřít v editoru"
+                                                >
+                                                    <ExternalLink className="w-3.5 h-3.5" />
+                                                </Link>
+                                            )}
                                             <button
                                                 onClick={() => openEdit(row)}
                                                 className="p-1.5 rounded hover:bg-muted/50 text-muted-foreground/60 hover:text-primary transition-colors"

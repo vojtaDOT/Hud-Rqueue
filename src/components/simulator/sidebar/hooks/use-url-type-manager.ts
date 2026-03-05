@@ -35,13 +35,13 @@ export function useUrlTypeManager(
         setActiveTab('processing');
     };
 
-    const handleUrlTypeRename = (urlType: SourceUrlType) => {
-        const nextName = window.prompt('URL Type name', urlType.name)?.trim();
-        if (!nextName) return;
+    const handleUrlTypeRename = (id: string, newName: string) => {
+        const trimmed = newName.trim();
+        if (!trimmed) return;
         setWorkflow((prev) => ({
             ...prev,
             url_types: prev.url_types.map((item) => (
-                item.id === urlType.id ? { ...item, name: nextName } : item
+                item.id === id ? { ...item, name: trimmed } : item
             )),
         }));
     };

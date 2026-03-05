@@ -2,13 +2,9 @@
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import {
-    Plus,
-    Settings2,
-    Trash2,
     Workflow,
 } from 'lucide-react';
 
-import { cn } from '@/lib/utils';
 import type {
     ElementSelector,
     ScrapingWorkflow,
@@ -47,6 +43,7 @@ import {
 } from '@/components/simulator/sidebar/hooks/use-workflow-state';
 import { useFocusSystem } from '@/components/simulator/sidebar/hooks/use-focus-system';
 import { useUrlTypeManager } from '@/components/simulator/sidebar/hooks/use-url-type-manager';
+import { UrlTypePanel } from '@/components/simulator/sidebar/url-type-panel';
 
 export type SidebarQuickAction =
     | 'scope'
@@ -528,70 +525,14 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
                     </TabsContent>
 
                     <TabsContent value="processing" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
-                        <div className="border-b border-border p-4">
-                            <div className="mb-3 flex items-center justify-between">
-                                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">URL Types</h3>
-                                <Button type="button" size="sm" variant="ghost" className="h-7 text-muted-foreground hover:bg-muted/50" onClick={handleUrlTypeAdd}>
-                                    <Plus className="mr-1 h-3 w-3" />
-                                    Add URL Type
-                                </Button>
-                            </div>
-                            <div className="space-y-2">
-                                {workflow.url_types.map((urlType) => (
-                                    <div
-                                        key={urlType.id}
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-pressed={activeUrlType.id === urlType.id}
-                                        onClick={() => setActiveUrlTypeId(urlType.id)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter' || event.key === ' ') {
-                                                event.preventDefault();
-                                                setActiveUrlTypeId(urlType.id);
-                                            }
-                                        }}
-                                        className={cn(
-                                            'w-full rounded-lg border px-3 py-2 text-left transition-colors',
-                                            activeUrlType.id === urlType.id
-                                                ? 'border-primary/50 bg-primary/20'
-                                                : 'border-border bg-card/50 hover:border-border',
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="truncate text-sm text-foreground">{urlType.name}</span>
-                                            <span className="flex gap-1">
-                                                <Button
-                                                    type="button"
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6 text-muted-foreground/60 hover:text-foreground"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        handleUrlTypeRename(urlType);
-                                                    }}
-                                                >
-                                                    <Settings2 className="h-3.5 w-3.5" />
-                                                </Button>
-                                                {workflow.url_types.length > 1 && (
-                                                    <Button
-                                                        type="button"
-                                                        size="icon"
-                                                        variant="ghost"
-                                                        className="h-6 w-6 text-muted-foreground/60 hover:text-red-300"
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            handleUrlTypeDelete(urlType.id);
-                                                        }}
-                                                    >
-                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                    </Button>
-                                                )}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <UrlTypePanel
+                            urlTypes={workflow.url_types}
+                            activeUrlTypeId={activeUrlType.id}
+                            onSelect={setActiveUrlTypeId}
+                            onAdd={handleUrlTypeAdd}
+                            onRename={handleUrlTypeRename}
+                            onDelete={handleUrlTypeDelete}
+                        />
 
                         <div className="min-h-0 flex-1 overflow-auto p-4">
                             {renderPhaseEditor()}

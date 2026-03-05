@@ -5,6 +5,13 @@ import { toast } from 'sonner';
 
 import type { CrawlStrategy, RssDetectionWarning, RssWarningReason } from '@/components/sources/types';
 
+export type RssDetectionStatus =
+    | { type: 'idle' }
+    | { type: 'detecting' }
+    | { type: 'success'; feedCount: number }
+    | { type: 'no_feeds' }
+    | { type: 'error'; message: string };
+
 interface UseRssDetectionOptions {
     baseUrl: string;
     setBaseUrl: (url: string) => void;
@@ -56,11 +63,13 @@ export function useRssDetection({
     const [rssFeedOptions, setRssFeedOptions] = useState<string[]>([]);
     const [selectedRssFeed, setSelectedRssFeed] = useState('');
     const [rssWarnings, setRssWarnings] = useState<RssDetectionWarning[]>([]);
+    const [detectionStatus, setDetectionStatus] = useState<RssDetectionStatus>({ type: 'idle' });
 
     const clearRssFeeds = useCallback(() => {
         setRssFeedOptions([]);
         setSelectedRssFeed('');
         setRssWarnings([]);
+        setDetectionStatus({ type: 'idle' });
     }, []);
 
     const detectRssFeeds = useCallback(async () => {
@@ -70,11 +79,13 @@ export function useRssDetection({
         }
 
         setDetectingRss(true);
+        setDetectionStatus({ type: 'detecting' });
         try {
             const { feedUrls, warnings } = await fetchAndParseRssFeeds(baseUrl);
 
             if (feedUrls.length < 1) {
                 clearRssFeeds();
+                setDetectionStatus({ type: 'no_feeds' });
                 toast.info('RSS/Atom feed nebyl nalezen nebo dostupny.');
                 return;
             }
@@ -82,6 +93,7 @@ export function useRssDetection({
             setRssFeedOptions(feedUrls);
             setSelectedRssFeed(feedUrls[0]);
             setRssWarnings(warnings);
+            setDetectionStatus({ type: 'success', feedCount: feedUrls.length });
             toast.success(`Nalezen RSS/Atom feed (${feedUrls.length})`);
 
             if (warnings.length > 0) {
@@ -120,7 +132,9 @@ export function useRssDetection({
                 );
             }
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : 'Nepodarilo se detekovat RSS feed');
+            const message = error instanceof Error ? error.message : 'Nepodarilo se detekovat RSS feed';
+            setDetectionStatus({ type: 'error', message });
+            toast.error(message);
         } finally {
             setDetectingRss(false);
         }
@@ -132,6 +146,7 @@ export function useRssDetection({
         }
 
         setDetectingRss(true);
+        setDetectionStatus({ type: 'detecting' });
         try {
             const { feedUrls, warnings } = await fetchAndParseRssFeeds(url);
 
@@ -142,16 +157,21 @@ export function useRssDetection({
                 setRssFeedOptions(feedUrls);
                 setSelectedRssFeed(feedUrls[0]);
                 setRssWarnings(warnings);
+                setDetectionStatus({ type: 'success', feedCount: feedUrls.length });
                 toast.success('RSS feed detekovan a aplikovan.');
             } else if (feedUrls.length > 1) {
                 setRssFeedOptions(feedUrls);
                 setSelectedRssFeed(feedUrls[0]);
                 setRssWarnings(warnings);
+                setDetectionStatus({ type: 'success', feedCount: feedUrls.length });
                 toast.success(`Nalezeno ${feedUrls.length} RSS feedu — vyberte feed.`);
+            } else {
+                // No feeds: stay silent
+                setDetectionStatus({ type: 'idle' });
             }
-            // No feeds or error: stay silent
         } catch {
             // Silent on error
+            setDetectionStatus({ type: 'idle' });
         } finally {
             setDetectingRss(false);
         }
@@ -170,6 +190,7 @@ export function useRssDetection({
 
     return {
         detectingRss,
+        detectionStatus,
         rssFeedOptions,
         selectedRssFeed,
         rssWarnings,

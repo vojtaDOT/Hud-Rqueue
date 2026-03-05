@@ -1,8 +1,9 @@
 'use client';
 
 import type { ReactNode, RefObject } from 'react';
-import { ChevronRight, Globe, Loader2, Rss } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Globe, Info, Loader2, Rss } from 'lucide-react';
 
+import type { RssDetectionStatus } from '@/components/sources/hooks/use-rss-detection';
 import { ObecAutocomplete } from '@/components/sources/obec-autocomplete';
 import type { CrawlStrategy, Obec, SourceType } from '@/components/sources/types';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,7 @@ interface SourceMetadataFormProps {
     crawlInterval: string;
     onCrawlIntervalChange: (value: string) => void;
     detectingRss: boolean;
+    rssDetectionStatus?: RssDetectionStatus;
     onDetectRssFeeds: () => void;
     submitting: boolean;
     rssPanel?: ReactNode;
@@ -68,6 +70,7 @@ export function SourceMetadataForm({
     crawlInterval,
     onCrawlIntervalChange,
     detectingRss,
+    rssDetectionStatus,
     onDetectRssFeeds,
     submitting,
     rssPanel,
@@ -166,6 +169,26 @@ export function SourceMetadataForm({
                     </Select>
                 </div>
             </div>
+
+            {/* Inline RSS detection status */}
+            {rssDetectionStatus?.type === 'success' && (
+                <div className="flex items-center gap-1.5 text-xs text-green-500">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Nalezeno {rssDetectionStatus.feedCount} feedu</span>
+                </div>
+            )}
+            {rssDetectionStatus?.type === 'no_feeds' && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                    <span>Zadne RSS/Atom feedy nenalezeny</span>
+                </div>
+            )}
+            {rssDetectionStatus?.type === 'error' && (
+                <div className="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    <span>{rssDetectionStatus.message}</span>
+                </div>
+            )}
 
             {/* Row 4: Action buttons + RSS panel */}
             <div className="flex items-center justify-end gap-2 pt-1">

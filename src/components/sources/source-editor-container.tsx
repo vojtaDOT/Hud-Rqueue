@@ -63,6 +63,7 @@ export function SourceEditorContainer() {
 
     const {
         detectingRss,
+        detectionStatus,
         rssFeedOptions,
         selectedRssFeed,
         rssWarnings,
@@ -240,6 +241,7 @@ export function SourceEditorContainer() {
                     crawlInterval={crawlInterval}
                     onCrawlIntervalChange={setCrawlInterval}
                     detectingRss={detectingRss}
+                    rssDetectionStatus={detectionStatus}
                     onDetectRssFeeds={() => void detectRssFeeds()}
                     submitting={submitting}
                     rssPanel={(

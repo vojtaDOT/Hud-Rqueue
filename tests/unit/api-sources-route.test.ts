@@ -181,5 +181,7 @@ describe('POST /api/sources', () => {
         expect(insertedBody.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
         expect(insertedBody.extraction_data.strategy).toBe('list');
         expect(insertedBody.extraction_data.config_version).toBe(1);
+        // workflow_data passes through from raw body (null when not provided)
+        expect(insertedBody).toHaveProperty('workflow_data');
     });
 });

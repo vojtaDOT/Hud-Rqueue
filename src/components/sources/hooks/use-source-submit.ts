@@ -125,6 +125,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
                     obec_id: obec?.id ? parseInt(obec.id, 10) : null,
                     okres_id: obec?.okres_id || null,
                     kraj_id: obec?.kraj_id || null,
+                    workflow_data: crawlStrategy === 'list' ? workflowData : null,
                 }),
             });
 

@@ -16,7 +16,6 @@ import {
 } from '@/components/ui/resizable';
 
 interface SourceSimulatorLayoutProps {
-    sidebarKey: number;
     sidebarRef: RefObject<SimulatorSidebarRef | null>;
     baseUrl: string;
     simulatorLoading: boolean;
@@ -32,7 +31,6 @@ interface SourceSimulatorLayoutProps {
 }
 
 export function SourceSimulatorLayout({
-    sidebarKey,
     sidebarRef,
     baseUrl,
     simulatorLoading,
@@ -67,7 +65,6 @@ export function SourceSimulatorLayout({
 
             <ResizablePanel defaultSize={25} minSize={15} maxSize={50}>
                 <SimulatorSidebar
-                    key={sidebarKey}
                     ref={sidebarRef}
                     onWorkflowChange={onWorkflowChange}
                     playwrightEnabled={playwrightEnabled}

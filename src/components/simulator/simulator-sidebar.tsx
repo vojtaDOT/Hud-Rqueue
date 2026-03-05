@@ -67,6 +67,7 @@ export interface SimulatorSidebarRef {
     clearAllPlaywrightActions: () => void;
     hasAnyPlaywrightActions: () => boolean;
     applyQuickAction: (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => void;
+    reset: () => void;
 }
 
 export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebarProps>(({
@@ -96,6 +97,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         addSourceUrlStep, addDocumentUrlStep,
         addDownloadFileStep, addDataExtractStep,
         addPaginationStep,
+        resetWorkflow,
     } = useWorkflowState({
         workflow,
         setWorkflow,
@@ -414,6 +416,12 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
             }
             return workflow.url_types.some((item) => item.processing.before.some((action) => isPlaywrightBeforeAction(action)));
         },
+        reset: () => {
+            resetWorkflow();
+            setActiveTab('discovery');
+            // activeUrlTypeId will auto-resolve via useMemo fallback
+            // since the old ID won't match any URL type in the new workflow
+        },
     }), [
         armedTarget,
         currentPhaseKey,
@@ -422,6 +430,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         focusedTarget,
         getFallbackTarget,
         onSelectorPreviewChange,
+        resetWorkflow,
         resolveSelectorForTarget,
         workflow,
     ]);

@@ -37,7 +37,6 @@ export function SourceEditorContainer() {
     const [workflowData, setWorkflowData] = useState<ScrapingWorkflow | null>(null);
     const [playwrightEnabled, setPlaywrightEnabled] = useState(false);
     const [selectorPreview, setSelectorPreview] = useState<string | null>(null);
-    const [sidebarKey, setSidebarKey] = useState(0);
     const [showPlaywrightConfirm, setShowPlaywrightConfirm] = useState(false);
 
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
@@ -84,7 +83,7 @@ export function SourceEditorContainer() {
             setWorkflowData(null);
             setPlaywrightEnabled(false);
             setSelectorPreview(null);
-            setSidebarKey((prev) => prev + 1);
+            sidebarRef.current?.reset();
         },
     });
 
@@ -200,7 +199,6 @@ export function SourceEditorContainer() {
 
             <div className="flex-1 overflow-hidden">
                 <SourceSimulatorLayout
-                    sidebarKey={sidebarKey}
                     sidebarRef={sidebarRef}
                     baseUrl={baseUrl}
                     simulatorLoading={simulatorLoading}

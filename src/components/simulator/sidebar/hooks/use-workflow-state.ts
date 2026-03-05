@@ -264,6 +264,14 @@ export function useWorkflowState(options: UseWorkflowStateOptions) {
         });
     }, [currentPhaseKey, effectiveSelectedScopeId, updateWorkflowPhase]);
 
+    const resetWorkflow = useCallback(() => {
+        setWorkflow(createDefaultWorkflow(playwrightEnabled));
+        setSelectedScopeId(null);
+        setSelectedRepeaterId(null);
+        setBeforeToAdd('remove_element');
+        setPlaywrightToAdd('wait_selector');
+    }, [playwrightEnabled, setWorkflow]);
+
     return {
         /* derived */
         currentPhase,
@@ -298,5 +306,8 @@ export function useWorkflowState(options: UseWorkflowStateOptions) {
         addDownloadFileStep,
         addDataExtractStep,
         addPaginationStep,
+
+        /* reset */
+        resetWorkflow,
     };
 }

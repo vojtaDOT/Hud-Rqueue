@@ -18,6 +18,7 @@ interface SubmitPayload {
     typeId: string;
     baseUrl: string;
     crawlStrategy: CrawlStrategy;
+    crawlInterval: string;
     workflowData: ScrapingWorkflow | null;
     playwrightEnabled: boolean;
     obec: Obec | null;
@@ -39,6 +40,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
             typeId,
             baseUrl,
             crawlStrategy,
+            crawlInterval,
             workflowData,
             playwrightEnabled,
             obec,
@@ -118,7 +120,7 @@ export function useSourceSubmit({ onSubmitted }: UseSourceSubmitOptions) {
                     crawl_strategy: crawlStrategy,
                     extraction_data: extractionData,
                     crawl_params: crawlParams,
-                    crawl_interval: '1 day',
+                    crawl_interval: crawlInterval || '1 day',
                     typ_id: parseInt(typeId, 10),
                     obec_id: obec?.id ? parseInt(obec.id, 10) : null,
                     okres_id: obec?.okres_id || null,

@@ -35,6 +35,8 @@ interface SourceMetadataFormProps {
     onBaseUrlChange: (value: string) => void;
     crawlStrategy: CrawlStrategy;
     onCrawlStrategyChange: (value: CrawlStrategy) => void;
+    crawlInterval: string;
+    onCrawlIntervalChange: (value: string) => void;
     detectingRss: boolean;
     onDetectRssFeeds: () => void;
     submitting: boolean;
@@ -60,6 +62,8 @@ export function SourceMetadataForm({
     onBaseUrlChange,
     crawlStrategy,
     onCrawlStrategyChange,
+    crawlInterval,
+    onCrawlIntervalChange,
     detectingRss,
     onDetectRssFeeds,
     submitting,
@@ -109,8 +113,8 @@ export function SourceMetadataForm({
                 selectedKrajName={selectedObec?.kraj_nazev}
             />
 
-            {/* Row 3: Base URL + Strategy + Actions */}
-            <div className="grid grid-cols-[1fr_120px] gap-3">
+            {/* Row 3: Base URL + Interval + Strategy + Actions */}
+            <div className="grid grid-cols-[1fr_140px_120px] gap-3">
                 <div>
                     <Label htmlFor="baseUrl" className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
                     <div className="relative">
@@ -125,6 +129,21 @@ export function SourceMetadataForm({
                             required
                         />
                     </div>
+                </div>
+                <div>
+                    <Label htmlFor="crawlInterval" className="mb-1 block text-xs text-muted-foreground">Interval</Label>
+                    <Select value={crawlInterval} onValueChange={onCrawlIntervalChange}>
+                        <SelectTrigger id="crawlInterval">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="1 hour">1 hodina</SelectItem>
+                            <SelectItem value="6 hours">6 hodin</SelectItem>
+                            <SelectItem value="1 day">1 den</SelectItem>
+                            <SelectItem value="3 days">3 dny</SelectItem>
+                            <SelectItem value="1 week">1 tyden</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
                 <div>
                     <Label htmlFor="crawlStrategy" className="mb-1 block text-xs text-muted-foreground">Strategie</Label>

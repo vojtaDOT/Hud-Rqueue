@@ -32,6 +32,7 @@ export function SourceEditorContainer() {
     const [typeId, setTypeId] = useState('');
     const [baseUrl, setBaseUrl] = useState('');
     const [crawlStrategy, setCrawlStrategy] = useState<CrawlStrategy>('list');
+    const [crawlInterval, setCrawlInterval] = useState('1 day');
 
     const [simulatorLoading, setSimulatorLoading] = useState(false);
     const [workflowData, setWorkflowData] = useState<ScrapingWorkflow | null>(null);
@@ -78,6 +79,7 @@ export function SourceEditorContainer() {
             setBaseUrl('');
             setSimulatorLoading(false);
             setCrawlStrategy('list');
+            setCrawlInterval('1 day');
             clearRssFeeds();
             resetObec();
             setWorkflowData(null);
@@ -136,6 +138,7 @@ export function SourceEditorContainer() {
             typeId,
             baseUrl,
             crawlStrategy,
+            crawlInterval,
             workflowData,
             playwrightEnabled,
             obec: selectedObec,
@@ -180,6 +183,8 @@ export function SourceEditorContainer() {
                     onBaseUrlChange={handleBaseUrlChange}
                     crawlStrategy={crawlStrategy}
                     onCrawlStrategyChange={handleCrawlStrategyChange}
+                    crawlInterval={crawlInterval}
+                    onCrawlIntervalChange={setCrawlInterval}
                     detectingRss={detectingRss}
                     onDetectRssFeeds={() => void detectRssFeeds()}
                     submitting={submitting}

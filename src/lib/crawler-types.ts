@@ -228,3 +228,14 @@ export interface RssCrawlParamsV1 extends Partial<WorkerContractMetadataV11> {
         timeout_ms: number;
     };
 }
+
+export const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
+    'wait_selector',
+    'wait_network',
+    'click',
+    'scroll',
+    'fill',
+    'select_option',
+    'evaluate',
+    'screenshot',
+]);

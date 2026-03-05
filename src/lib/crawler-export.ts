@@ -3,6 +3,7 @@
 import {
     BeforeAction,
     PhaseConfig,
+    PLAYWRIGHT_ACTION_TYPES,
     ScopeModule,
     RepeaterStep,
     ScrapingWorkflow,
@@ -13,17 +14,6 @@ import {
     UnifiedWorkerRepeaterStepV2,
 } from './crawler-types';
 import { renderTemplate, CRAWL_PARAMS_LIST_TEMPLATE } from './templates';
-
-const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
-    'wait_selector',
-    'wait_network',
-    'click',
-    'scroll',
-    'fill',
-    'select_option',
-    'evaluate',
-    'screenshot',
-]);
 
 function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeAction[] {
     return before.map((action) => {

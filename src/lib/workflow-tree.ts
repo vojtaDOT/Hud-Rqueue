@@ -1,15 +1,16 @@
-import type {
-    BeforeAction,
-    DataExtractStep,
-    DocumentUrlStep,
-    DownloadFileStep,
-    PaginationConfig,
-    PhaseConfig,
-    PlaywrightAction,
-    RepeaterNode,
-    RepeaterStep,
-    ScopeModule,
-    SourceUrlStep,
+import {
+    PLAYWRIGHT_ACTION_TYPES,
+    type BeforeAction,
+    type DataExtractStep,
+    type DocumentUrlStep,
+    type DownloadFileStep,
+    type PaginationConfig,
+    type PhaseConfig,
+    type PlaywrightAction,
+    type RepeaterNode,
+    type RepeaterStep,
+    type ScopeModule,
+    type SourceUrlStep,
 } from '@/lib/crawler-types';
 
 export type SelectorKey = 'selector' | 'url_selector' | 'filename_selector';
@@ -38,16 +39,7 @@ export interface ScopeRef {
     scopeLabel: string;
 }
 
-export const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
-    'wait_selector',
-    'wait_network',
-    'click',
-    'scroll',
-    'fill',
-    'select_option',
-    'evaluate',
-    'screenshot',
-]);
+export { PLAYWRIGHT_ACTION_TYPES };
 
 export function createId(prefix: string): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

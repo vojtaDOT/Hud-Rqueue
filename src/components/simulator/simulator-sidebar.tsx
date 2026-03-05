@@ -1,10 +1,9 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle } from 'react';
 import {
     ArrowDown,
     ArrowUp,
-    Crosshair,
     Download,
     FileText,
     FolderTree,
@@ -37,13 +36,9 @@ import {
     createDownloadFileStep,
     describeTarget,
     ensureScopeAndRepeater,
-    findScopeForRepeater,
-    findScopeForStep,
     findScopeInTree,
-    firstStepTarget,
     FocusTarget,
     isPlaywrightBeforeAction,
-    isSameTarget,
     mapStepsInTree,
     moveItem,
     normalizeSelectorWithinScope,
@@ -78,6 +73,7 @@ import {
     type BasicBeforeStepType,
     type PlaywrightBeforeStepType,
 } from '@/components/simulator/sidebar/hooks/use-workflow-state';
+import { useFocusSystem } from '@/components/simulator/sidebar/hooks/use-focus-system';
 
 export type SidebarQuickAction =
     | 'scope'
@@ -138,112 +134,22 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         addPaginationStep,
     } = ws;
 
-    const [focusedTarget, setFocusedTarget] = useState<FocusTarget | null>(null);
-    const [armedTarget, setArmedTarget] = useState<FocusTarget | null>(null);
-
-    const setSelectorFocus = (target: FocusTarget, selector: string) => {
-        setFocusedTarget(target);
-        onSelectorPreviewChange?.(selector.trim() ? selector : null);
-    };
-
-    const armSelectorTarget = (target: FocusTarget, selector: string) => {
-        setFocusedTarget(target);
-        setArmedTarget(target);
-        onSelectorPreviewChange?.(selector.trim() ? selector : null);
-    };
-
-    const cancelArmedTarget = useCallback(() => {
-        setArmedTarget(null);
-    }, []);
-
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
-            if (!armedTarget) return;
-            event.preventDefault();
-            setArmedTarget(null);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [armedTarget]);
-
-    const syncPreviewOnChange = (target: FocusTarget, value: string) => {
-        if (isSameTarget(target, focusedTarget)) {
-            onSelectorPreviewChange?.(value.trim() ? value : null);
-        }
-    };
-
-    const renderPickButton = (target: FocusTarget, selector: string) => (
-        <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className={cn(
-                'h-8 w-8 border border-border',
-                isSameTarget(target, armedTarget) ? 'bg-primary/30 text-primary' : 'text-muted-foreground',
-            )}
-            title="Pick target selector"
-            onClick={() => armSelectorTarget(target, selector)}
-        >
-            <Crosshair className="h-3.5 w-3.5" />
-        </Button>
-    );
-
-    const getFallbackTarget = useCallback((): FocusTarget | null => {
-        if (effectiveSelectedRepeaterId) {
-            return currentPhaseKey.phase === 'discovery'
-                ? { phase: 'discovery', section: 'repeater', repeaterId: effectiveSelectedRepeaterId }
-                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'repeater', repeaterId: effectiveSelectedRepeaterId };
-        }
-
-        if (effectiveSelectedScopeId) {
-            return currentPhaseKey.phase === 'discovery'
-                ? { phase: 'discovery', section: 'scope', scopeId: effectiveSelectedScopeId }
-                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'scope', scopeId: effectiveSelectedScopeId };
-        }
-
-        const firstActionIndex = currentPhase.before.findIndex((action) => actionHasSelector(action));
-        if (firstActionIndex >= 0) {
-            return currentPhaseKey.phase === 'discovery'
-                ? { phase: 'discovery', section: 'before', index: firstActionIndex }
-                : { phase: 'processing', urlTypeId: currentPhaseKey.urlTypeId, section: 'before', index: firstActionIndex };
-        }
-
-        return firstStepTarget(currentPhase.chain, currentPhaseKey);
-    }, [
-        currentPhase.before,
-        currentPhase.chain,
+    const {
+        focusedTarget, setFocusedTarget,
+        armedTarget, setArmedTarget,
+        setSelectorFocus,
+        cancelArmedTarget,
+        syncPreviewOnChange,
+        getFallbackTarget,
+        resolveSelectorForTarget,
+        renderPickButton,
+    } = useFocusSystem({
+        onSelectorPreviewChange,
         currentPhaseKey,
+        currentPhase,
         effectiveSelectedRepeaterId,
         effectiveSelectedScopeId,
-    ]);
-
-    const resolveSelectorForTarget = useCallback((
-        phase: PhaseConfig,
-        target: FocusTarget,
-        selector: string,
-        elementInfo?: ElementSelector,
-    ): string => {
-        const baseSelector = (elementInfo?.localSelector ?? selector).trim();
-        if (!baseSelector) return '';
-
-        if (target.section === 'repeater') {
-            const scope = findScopeForRepeater(phase.chain, target.repeaterId);
-            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
-        }
-
-        if (target.section === 'step') {
-            const scope = findScopeForStep(phase.chain, target.stepId);
-            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
-        }
-
-        if (target.section === 'pagination') {
-            const scope = findScopeInTree(phase.chain, target.scopeId);
-            return normalizeSelectorWithinScope(baseSelector, scope?.css_selector);
-        }
-
-        return baseSelector;
-    }, []);
+    });
 
     useImperativeHandle(ref, () => ({
         applySelectedSelector: (selector: string, elementInfo?: ElementSelector) => {

@@ -237,6 +237,34 @@ body::before {
   }
 }
 
+@keyframes dark-bubble-rise {
+  0% {
+    transform: translate3d(0, 18px, 0) scale(0.92);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.22;
+  }
+  100% {
+    transform: translate3d(var(--particle-x-drift, 0px), -176px, 0) scale(1.08);
+    opacity: 0;
+  }
+}
+
+@keyframes light-mote-drift {
+  0% {
+    transform: translate3d(0, 10px, 0) scale(0.96);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.24;
+  }
+  100% {
+    transform: translate3d(var(--particle-x-drift, 0px), -108px, 0) scale(1.03);
+    opacity: 0;
+  }
+}
+
 .pipeline-stage-enter {
   animation: pipeline-stage-enter 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -281,5 +309,10 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .ocean-motion {
     animation: none !important;
+  }
+
+  .ocean-particle {
+    animation: none !important;
+    opacity: 0.06 !important;
   }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { type RssAuthoringValues } from '@/components/sources/rss-authoring-panel';
@@ -30,6 +31,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
 import { buildRssAuthoringSummary, buildRssSourceConfig } from '@/lib/source-config';
 
@@ -66,6 +68,7 @@ export function SourceEditorContainer() {
     const [playwrightEnabled, setPlaywrightEnabled] = useState(false);
     const [selectorPreview, setSelectorPreview] = useState<string | null>(null);
     const [showPlaywrightConfirm, setShowPlaywrightConfirm] = useState(false);
+    const [panelPlacement, setPanelPlacement] = useState<'right' | 'bottom'>('right');
 
     const [rssPreview, setRssPreview] = useState<FeedPreview | null>(null);
     const [rssPreviewLoading, setRssPreviewLoading] = useState(false);
@@ -352,6 +355,27 @@ export function SourceEditorContainer() {
         <ToolboxTabs
             activeTab={activeToolboxTab}
             onTabChange={handleToolboxTabChange}
+            rightSlot={(
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="hidden md:inline-flex text-muted-foreground hover:text-foreground"
+                    onClick={() => setPanelPlacement((current) => current === 'right' ? 'bottom' : 'right')}
+                    aria-label={panelPlacement === 'right'
+                        ? 'Presunout panel pod preview'
+                        : 'Presunout panel vpravo'}
+                    title={panelPlacement === 'right'
+                        ? 'Presunout panel pod preview'
+                        : 'Presunout panel vpravo'}
+                >
+                    {panelPlacement === 'right' ? (
+                        <PanelBottomOpen className="h-4 w-4" />
+                    ) : (
+                        <PanelRightOpen className="h-4 w-4" />
+                    )}
+                </Button>
+            )}
         />
     );
 
@@ -389,7 +413,7 @@ export function SourceEditorContainer() {
     ) : undefined;
 
     return (
-        <div className="flex h-full w-full flex-col">
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col">
             <form onSubmit={handleFormSubmit} className="relative z-10 border-b border-border bg-card/50 px-4 py-4 sm:px-6">
                 <SourceMetadataForm
                     name={name}
@@ -433,6 +457,8 @@ export function SourceEditorContainer() {
                     onSelectorPreviewChange={setSelectorPreview}
                     sidebarHeader={sidebarHeader}
                     sidebarOverride={sidebarOverride}
+                    panelPlacement={panelPlacement}
+                    onPanelPlacementChange={setPanelPlacement}
                 />
             </div>
 

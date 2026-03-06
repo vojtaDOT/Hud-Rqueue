@@ -17,6 +17,7 @@ interface ObecAutocompleteProps {
     onSelectObec: (obec: Obec) => void;
     selectedOkresName?: string;
     selectedKrajName?: string;
+    showRegionFields?: boolean;
 }
 
 export function ObecAutocomplete({
@@ -29,28 +30,29 @@ export function ObecAutocomplete({
     onSelectObec,
     selectedOkresName,
     selectedKrajName,
+    showRegionFields = true,
 }: ObecAutocompleteProps) {
-    return (
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_140px]">
-            <div className="relative" ref={obecDropdownRef}>
-                <Label htmlFor="obec" className="mb-1 block text-xs text-muted-foreground">Obec</Label>
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                        id="obec"
-                        value={obecSearch}
-                        onChange={(event) => onObecInputChange(event.target.value)}
-                        placeholder="Vyhledat obec..."
-                        className="pl-10"
-                    />
-                    {searchingObec && (
-                        <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-                    )}
-                </div>
+    const obecField = (
+        <div className="relative" ref={obecDropdownRef}>
+            <Label htmlFor="obec" className="mb-1 block text-xs text-muted-foreground">Obec</Label>
+            <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                    id="obec"
+                    value={obecSearch}
+                    onChange={(event) => onObecInputChange(event.target.value)}
+                    placeholder="Vyhledat obec..."
+                    className="pl-10"
+                />
+                {searchingObec && (
+                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
+            </div>
 
-                {showObecDropdown && obecResults.length > 0 && (
-                    <div className="absolute z-[1000] mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-popover shadow-xl">
-                        {obecResults.map((item) => (
+            {showObecDropdown && (
+                <div className="absolute z-[1000] mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-popover shadow-xl">
+                    {obecResults.length > 0 ? (
+                        obecResults.map((item) => (
                             <button
                                 key={item.id}
                                 type="button"
@@ -60,10 +62,24 @@ export function ObecAutocomplete({
                                 <span>{item.nazev}</span>
                                 <span className="text-xs text-muted-foreground">{item.okres_nazev}</span>
                             </button>
-                        ))}
-                    </div>
-                )}
-            </div>
+                        ))
+                    ) : (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Zadna obec nenalezena.
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+
+    if (!showRegionFields) {
+        return obecField;
+    }
+
+    return (
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_140px]">
+            {obecField}
 
             <div>
                 <Label className="mb-1 block text-xs text-muted-foreground">Okres</Label>

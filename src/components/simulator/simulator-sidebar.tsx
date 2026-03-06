@@ -26,7 +26,6 @@ import {
     updateStepInTree,
     withPaginationDefaults,
 } from '@/lib/workflow-tree';
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BeforeActionRenderer } from '@/components/simulator/sidebar/before-action-renderer';
 import { ScopeNodeRenderer } from '@/components/simulator/sidebar/scope-node-renderer';
@@ -44,6 +43,7 @@ import {
 import { useFocusSystem } from '@/components/simulator/sidebar/hooks/use-focus-system';
 import { useUrlTypeManager } from '@/components/simulator/sidebar/hooks/use-url-type-manager';
 import { UrlTypePanel } from '@/components/simulator/sidebar/url-type-panel';
+import { cn } from '@/lib/utils';
 
 export type SidebarQuickAction =
     | 'scope'
@@ -59,6 +59,7 @@ interface SimulatorSidebarProps {
     onWorkflowChange?: (workflowData: ScrapingWorkflow) => void;
     playwrightEnabled: boolean;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    className?: string;
 }
 
 export interface SimulatorSidebarRef {
@@ -74,6 +75,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     onWorkflowChange,
     playwrightEnabled,
     onSelectorPreviewChange,
+    className,
 }, ref) => {
     const [workflow, setWorkflow] = useState(() => createDefaultWorkflow(playwrightEnabled));
     const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
@@ -501,7 +503,10 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     );
 
     return (
-        <aside className="flex h-full w-full flex-col overflow-hidden border-l border-border bg-card/50 backdrop-blur-sm">
+        <aside className={cn(
+            'flex h-full w-full flex-col overflow-hidden border-l border-border bg-card/50 backdrop-blur-sm',
+            className,
+        )}>
             <div className="border-b border-border p-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">

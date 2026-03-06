@@ -67,8 +67,7 @@ export function SourceMetadataForm({
 }: SourceMetadataFormProps) {
     return (
         <div className="space-y-3">
-            {/* Row 1: Name + Type */}
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_180px_minmax(260px,0.85fr)]">
                 <div>
                     <Label htmlFor="name" className="mb-1 block text-xs text-muted-foreground">Nazev</Label>
                     <Input
@@ -94,26 +93,22 @@ export function SourceMetadataForm({
                         </SelectContent>
                     </Select>
                 </div>
+                <ObecAutocomplete
+                    obecDropdownRef={obecDropdownRef}
+                    obecSearch={obecSearch}
+                    searchingObec={searchingObec}
+                    showObecDropdown={showObecDropdown}
+                    obecResults={obecResults}
+                    onObecInputChange={onObecInputChange}
+                    onSelectObec={onSelectObec}
+                    showRegionFields={false}
+                />
             </div>
 
-            {/* Row 2: Obec autocomplete */}
-            <ObecAutocomplete
-                obecDropdownRef={obecDropdownRef}
-                obecSearch={obecSearch}
-                searchingObec={searchingObec}
-                showObecDropdown={showObecDropdown}
-                obecResults={obecResults}
-                onObecInputChange={onObecInputChange}
-                onSelectObec={onSelectObec}
-                selectedOkresName={selectedObec?.okres_nazev}
-                selectedKrajName={selectedObec?.kraj_nazev}
-            />
-
-            {/* Row 3: Base URL + Interval + Actions */}
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_140px_140px_140px_auto]">
                 <div>
                     <Label htmlFor="baseUrl" className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
-                    <div className="relative">
+                    <div className="group relative">
                         <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                             id="baseUrl"
@@ -123,9 +118,31 @@ export function SourceMetadataForm({
                             onBlur={onBaseUrlBlur}
                             placeholder="https://example.com/bulletin"
                             className="pl-10"
+                            title={baseUrl || undefined}
                             required
                         />
+                        {baseUrl && (
+                            <div className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden max-w-[32rem] rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg group-hover:block group-focus-within:block">
+                                <span className="block break-all">{baseUrl}</span>
+                            </div>
+                        )}
                     </div>
+                </div>
+                <div>
+                    <Label className="mb-1 block text-xs text-muted-foreground">Okres</Label>
+                    <Input
+                        value={selectedObec?.okres_nazev || ''}
+                        disabled
+                        placeholder="-"
+                    />
+                </div>
+                <div>
+                    <Label className="mb-1 block text-xs text-muted-foreground">Kraj</Label>
+                    <Input
+                        value={selectedObec?.kraj_nazev || ''}
+                        disabled
+                        placeholder="-"
+                    />
                 </div>
                 <div>
                     <Label htmlFor="crawlInterval" className="mb-1 block text-xs text-muted-foreground">Interval</Label>
@@ -142,7 +159,7 @@ export function SourceMetadataForm({
                         </SelectContent>
                     </Select>
                 </div>
-                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end md:pt-6">
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end lg:pt-6">
                     {editMode && (
                         <a href="/sources">
                             <Button type="button" variant="ghost" size="sm" className="w-full whitespace-nowrap sm:w-auto">

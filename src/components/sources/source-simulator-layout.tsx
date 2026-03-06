@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode, type RefObject } from 'react';
+import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 
 import { SimulatorFrame } from '@/components/simulator/simulator-frame';
 import {
@@ -14,6 +15,7 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from '@/components/ui/resizable';
+import { Button } from '@/components/ui/button';
 
 interface SourceSimulatorLayoutProps {
     sidebarRef: RefObject<SimulatorSidebarRef | null>;
@@ -32,6 +34,8 @@ interface SourceSimulatorLayoutProps {
     sidebarHeader?: ReactNode;
     /** When provided, replaces the SimulatorSidebar below the header */
     sidebarOverride?: ReactNode;
+    panelPlacement: 'right' | 'bottom';
+    onPanelPlacementChange: (placement: 'right' | 'bottom') => void;
 }
 
 export function SourceSimulatorLayout({
@@ -49,8 +53,51 @@ export function SourceSimulatorLayout({
     onSelectorPreviewChange,
     sidebarHeader,
     sidebarOverride,
+    panelPlacement,
+    onPanelPlacementChange,
 }: SourceSimulatorLayoutProps) {
     const [desktopLayout, setDesktopLayout] = useState(false);
+
+    const renderSidebarContent = (placement: 'right' | 'bottom') => placement === 'bottom'
+        ? (sidebarOverride ?? (
+            <SimulatorSidebar
+                ref={sidebarRef}
+                className="h-auto min-h-[32rem] border-l-0"
+                onWorkflowChange={onWorkflowChange}
+                playwrightEnabled={playwrightEnabled}
+                onSelectorPreviewChange={onSelectorPreviewChange}
+            />
+        ))
+        : (sidebarOverride ?? (
+            <SimulatorSidebar
+                ref={sidebarRef}
+                onWorkflowChange={onWorkflowChange}
+                playwrightEnabled={playwrightEnabled}
+                onSelectorPreviewChange={onSelectorPreviewChange}
+            />
+        ));
+
+    const layoutToggle = (
+        <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="hidden md:inline-flex text-muted-foreground hover:text-foreground"
+            onClick={() => onPanelPlacementChange(panelPlacement === 'right' ? 'bottom' : 'right')}
+            aria-label={panelPlacement === 'right'
+                ? 'Presunout panel pod preview'
+                : 'Presunout panel vpravo'}
+            title={panelPlacement === 'right'
+                ? 'Presunout panel pod preview'
+                : 'Presunout panel vpravo'}
+        >
+            {panelPlacement === 'right' ? (
+                <PanelBottomOpen className="h-4 w-4" />
+            ) : (
+                <PanelRightOpen className="h-4 w-4" />
+            )}
+        </Button>
+    );
 
     useEffect(() => {
         const media = window.matchMedia('(min-width: 768px)');
@@ -93,17 +140,40 @@ export function SourceSimulatorLayout({
                     {sidebarHeader}
                     <div className="overflow-hidden rounded-xl border border-border bg-card">
                         <div className="max-h-[70vh] overflow-y-auto">
-                            {sidebarOverride ?? (
-                                <SimulatorSidebar
-                                    ref={sidebarRef}
-                                    onWorkflowChange={onWorkflowChange}
-                                    playwrightEnabled={playwrightEnabled}
-                                    onSelectorPreviewChange={onSelectorPreviewChange}
-                                />
-                            )}
+                            {renderSidebarContent('right')}
                         </div>
                     </div>
                 </section>
+            </div>
+        );
+    }
+
+    if (panelPlacement === 'bottom') {
+        return (
+            <div className="h-full overflow-y-auto">
+                <div className="flex min-h-full flex-col">
+                    <div className="min-h-[32rem] shrink-0">
+                        <SimulatorFrame
+                            url={baseUrl}
+                            loading={simulatorLoading}
+                            onLoad={onIframeLoad}
+                            className="h-[min(68vh,48rem)] min-h-[32rem]"
+                            onElementSelect={onElementSelect}
+                            onElementRemove={onElementRemove}
+                            onQuickAction={onQuickAction}
+                            playwrightEnabled={playwrightEnabled}
+                            onPlaywrightToggleRequest={onPlaywrightToggleRequest}
+                            highlightSelector={selectorPreview}
+                        />
+                    </div>
+
+                    <div className="shrink-0 border-t border-border bg-card/50 backdrop-blur-sm">
+                        {sidebarHeader}
+                        <div className="min-h-[32rem]">
+                            {renderSidebarContent('bottom')}
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -129,16 +199,9 @@ export function SourceSimulatorLayout({
 
             <ResizablePanel defaultSize={25} minSize={15} maxSize={50}>
                 <div className="flex h-full flex-col">
-                    {sidebarHeader}
+                    {sidebarHeader ?? layoutToggle}
                     <div className="flex-1 overflow-hidden">
-                        {sidebarOverride ?? (
-                            <SimulatorSidebar
-                                ref={sidebarRef}
-                                onWorkflowChange={onWorkflowChange}
-                                playwrightEnabled={playwrightEnabled}
-                                onSelectorPreviewChange={onSelectorPreviewChange}
-                            />
-                        )}
+                        {renderSidebarContent('right')}
                     </div>
                 </div>
             </ResizablePanel>

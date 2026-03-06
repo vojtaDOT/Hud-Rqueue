@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x0008;
 const GPU_BUFFER_USAGE_UNIFORM = 0x0040;
@@ -102,6 +102,46 @@ interface WebGPU {
   requestAdapter(): Promise<WebGPUAdapter | null>;
 }
 
+interface BeamLayer {
+  blur: number;
+  delay: number;
+  duration: number;
+  height: string;
+  id: string;
+  left?: string;
+  opacity: number;
+  reverse: boolean;
+  right?: string;
+  rotate: number;
+  theme: 'light' | 'dark';
+  top: string;
+  width: string;
+}
+
+interface ParticleLayer {
+  delay: number;
+  duration: number;
+  id: string;
+  left: string;
+  opacity: number;
+  size: number;
+  theme: 'light' | 'dark';
+  top: string;
+  xDrift: number;
+}
+
+interface BackgroundVariant {
+  darkBeams: BeamLayer[];
+  darkParticles: ParticleLayer[];
+  darkSurfaceOpacity: number;
+  lightBeams: BeamLayer[];
+  lightParticles: ParticleLayer[];
+  lightSurfaceOpacity: number;
+}
+
+const SESSION_SEED_KEY = 'hud-queue-background-seed';
+const TARGET_FRAME_TIME = 1000 / 24;
+
 const OCEAN_BEAMS_SHADER = /* wgsl */ `
 struct Uniforms {
   resolution: vec2<f32>,
@@ -178,7 +218,7 @@ function configureCanvas(
   device: WebGPUDevice,
   format: string,
 ) {
-  const pixelRatio = window.devicePixelRatio || 1;
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.25);
   const width = Math.max(1, Math.round(window.innerWidth * pixelRatio));
   const height = Math.max(1, Math.round(window.innerHeight * pixelRatio));
 
@@ -196,8 +236,138 @@ function configureCanvas(
   return { height, pixelRatio, width };
 }
 
+function createSeededRandom(seed: number) {
+  let state = seed >>> 0;
+
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+}
+
+function getSessionSeed() {
+  if (typeof window === 'undefined') {
+    return 1;
+  }
+
+  const existingSeed = window.sessionStorage.getItem(SESSION_SEED_KEY);
+  if (existingSeed) {
+    return Number(existingSeed) || 1;
+  }
+
+  const nextSeed = Math.floor(Math.random() * 2147483646) + 1;
+  window.sessionStorage.setItem(SESSION_SEED_KEY, String(nextSeed));
+  return nextSeed;
+}
+
+function createBeamLayer(theme: 'light' | 'dark', random: () => number, index: number): BeamLayer {
+  const fromLeft = random() > (theme === 'light' ? 0.28 : 0.38);
+  const widthBase = theme === 'light' ? 24 : 28;
+  const widthRange = theme === 'light' ? 20 : 22;
+  const heightBase = theme === 'light' ? 58 : 66;
+  const heightRange = theme === 'light' ? 18 : 24;
+  const rotateBase = theme === 'light' ? 6 : 10;
+  const rotateRange = theme === 'light' ? 20 : 26;
+  const blurBase = theme === 'light' ? 34 : 42;
+  const blurRange = theme === 'light' ? 26 : 30;
+
+  return {
+    blur: Math.round(blurBase + random() * blurRange),
+    delay: Number((random() * 8).toFixed(2)),
+    duration: Number((22 + random() * 16).toFixed(2)),
+    height: `${Math.round(heightBase + random() * heightRange)}%`,
+    id: `${theme}-${index}`,
+    left: fromLeft ? `${Math.round(-16 + random() * 40)}%` : undefined,
+    opacity: Number(((theme === 'light' ? 0.9 : 0.78) + random() * 0.24).toFixed(2)),
+    reverse: random() > 0.5,
+    right: fromLeft ? undefined : `${Math.round(-10 + random() * 18)}%`,
+    rotate: Number((((fromLeft ? 1 : -1) * (rotateBase + random() * rotateRange))).toFixed(2)),
+    theme,
+    top: `${Math.round(-20 + random() * 14)}%`,
+    width: `${Math.round(widthBase + random() * widthRange)}%`,
+  };
+}
+
+function createParticleLayer(theme: 'light' | 'dark', random: () => number, index: number): ParticleLayer {
+  const isLight = theme === 'light';
+
+  return {
+    delay: Number((random() * 10).toFixed(2)),
+    duration: Number(((isLight ? 20 : 24) + random() * (isLight ? 14 : 18)).toFixed(2)),
+    id: `${theme}-particle-${index}`,
+    left: `${Math.round(random() * 100)}%`,
+    opacity: Number(((isLight ? 0.42 : 0.28) + random() * (isLight ? 0.22 : 0.14)).toFixed(2)),
+    size: Number(((isLight ? 3.5 : 3) + random() * (isLight ? 5.5 : 4.5)).toFixed(2)),
+    theme,
+    top: `${Math.round(10 + random() * 82)}%`,
+    xDrift: Number((((random() - 0.5) * (isLight ? 28 : 10))).toFixed(2)),
+  };
+}
+
+function createBackgroundVariant(seed: number): BackgroundVariant {
+  const random = createSeededRandom(seed);
+  const lightCount = 3 + Math.floor(random() * 3);
+  const darkCount = 3 + Math.floor(random() * 2);
+  const lightParticleCount = 14 + Math.floor(random() * 10);
+  const darkParticleCount = 8 + Math.floor(random() * 6);
+
+  return {
+    darkBeams: Array.from({ length: darkCount }, (_, index) => createBeamLayer('dark', random, index)),
+    darkParticles: Array.from({ length: darkParticleCount }, (_, index) => createParticleLayer('dark', random, index)),
+    darkSurfaceOpacity: Number((0.88 + random() * 0.18).toFixed(2)),
+    lightBeams: Array.from({ length: lightCount }, (_, index) => createBeamLayer('light', random, index)),
+    lightParticles: Array.from({ length: lightParticleCount }, (_, index) => createParticleLayer('light', random, index)),
+    lightSurfaceOpacity: Number((1.02 + random() * 0.2).toFixed(2)),
+  };
+}
+
+const DEFAULT_VARIANT = createBackgroundVariant(7);
+
+function getBeamStyle(beam: BeamLayer) {
+  const isLight = beam.theme === 'light';
+  const color = isLight ? '127, 195, 220' : '132, 210, 255';
+  const startAlpha = isLight ? 0.28 : 0.18;
+  const midAlpha = isLight ? 0.12 : 0.06;
+  const tailAlpha = isLight ? 0.035 : 0.015;
+
+  return {
+    animation: `ocean-beam-drift ${beam.duration}s ease-in-out ${beam.delay}s infinite ${beam.reverse ? 'alternate-reverse' : 'alternate'}`,
+    background: `linear-gradient(180deg, rgba(${color}, ${startAlpha}) 0%, rgba(${color}, ${midAlpha}) 24%, rgba(${color}, ${tailAlpha}) 50%, transparent 74%)`,
+    filter: `blur(${beam.blur}px)`,
+    height: beam.height,
+    left: beam.left,
+    maskImage: 'linear-gradient(180deg, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.34) 48%, transparent 100%)',
+    opacity: beam.opacity,
+    right: beam.right,
+    top: beam.top,
+    transform: `rotate(${beam.rotate}deg)`,
+    width: beam.width,
+  } as const;
+}
+
+function getParticleStyle(particle: ParticleLayer) {
+  const isLight = particle.theme === 'light';
+  const color = isLight ? '132, 182, 201' : '176, 226, 255';
+
+  return {
+    animation: `${isLight ? 'light-mote-drift' : 'dark-bubble-rise'} ${particle.duration}s linear ${particle.delay}s infinite`,
+    background: `radial-gradient(circle, rgba(${color}, ${isLight ? 0.72 : 0.3}) 0%, rgba(${color}, ${isLight ? 0.34 : 0.12}) 46%, transparent 76%)`,
+    boxShadow: isLight
+      ? `0 0 ${particle.size * 4}px rgba(${color}, 0.18)`
+      : `0 0 ${particle.size * 4}px rgba(${color}, 0.12)`,
+    height: `${particle.size}px`,
+    left: particle.left,
+    opacity: particle.opacity,
+    top: particle.top,
+    transform: `translate3d(0, 0, 0)`,
+    width: `${particle.size}px`,
+    ['--particle-x-drift' as '--particle-x-drift']: `${particle.xDrift}px`,
+  } as const;
+}
+
 export function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [variant, setVariant] = useState<BackgroundVariant>(DEFAULT_VARIANT);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -208,8 +378,11 @@ export function AnimatedBackground() {
     let cancelled = false;
     let animationFrameId = 0;
     let cleanupResize = () => {};
+    let lastFrameTime = 0;
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    setVariant(createBackgroundVariant(getSessionSeed()));
 
     const setupWebGPU = async () => {
       const gpu = (navigator as Navigator & { gpu?: WebGPU }).gpu;
@@ -295,10 +468,22 @@ export function AnimatedBackground() {
 
       const startTime = performance.now();
 
-      const renderFrame = () => {
+      const renderFrame = (frameTime: number) => {
         if (cancelled) {
           return;
         }
+
+        if (document.hidden) {
+          animationFrameId = window.requestAnimationFrame(renderFrame);
+          return;
+        }
+
+        if (!prefersReducedMotion && frameTime - lastFrameTime < TARGET_FRAME_TIME) {
+          animationFrameId = window.requestAnimationFrame(renderFrame);
+          return;
+        }
+
+        lastFrameTime = frameTime;
 
         const elapsed = prefersReducedMotion ? 0 : (performance.now() - startTime) / 1000;
         uniformValues[0] = viewport.width;
@@ -347,81 +532,61 @@ export function AnimatedBackground() {
   }, []);
 
   return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden transition-opacity duration-700"
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-0 overflow-hidden transition-opacity duration-700"
     >
-      <div className="absolute inset-0 dark:hidden bg-[radial-gradient(circle_at_16%_-4%,rgba(232,245,250,0.78),transparent_28%),radial-gradient(circle_at_80%_0%,rgba(167,214,226,0.42),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0))]" />
-      <div className="absolute inset-0 hidden dark:block bg-[radial-gradient(circle_at_top,rgba(56,111,154,0.22),transparent_32%),linear-gradient(180deg,rgba(3,8,18,0.06),rgba(3,8,18,0.01))]" />
+      <div className="absolute inset-0 z-0 dark:hidden bg-[radial-gradient(circle_at_16%_-4%,rgba(232,245,250,0.78),transparent_28%),radial-gradient(circle_at_80%_0%,rgba(167,214,226,0.42),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0))]" />
+      <div className="absolute inset-0 z-0 hidden dark:block bg-[radial-gradient(circle_at_top,rgba(56,111,154,0.22),transparent_32%),linear-gradient(180deg,rgba(3,8,18,0.06),rgba(3,8,18,0.01))]" />
       <div
-        className="ocean-motion absolute -top-[10%] left-[-12%] h-[64%] w-[42%] rotate-[14deg] rounded-full blur-3xl dark:hidden"
-        style={{
-          animation: 'ocean-beam-drift 30s ease-in-out infinite alternate',
-          background:
-            'linear-gradient(180deg, rgba(135, 208, 224, 0.14) 0%, rgba(135, 208, 224, 0.06) 24%, rgba(135, 208, 224, 0.016) 48%, transparent 72%)',
-          maskImage:
-            'linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.34) 50%, transparent 100%)',
-        }}
-      />
-      <div
-        className="ocean-motion absolute -top-[18%] left-[24%] h-[70%] w-[28%] rotate-[9deg] rounded-full blur-[60px] dark:hidden"
-        style={{
-          animation: 'ocean-beam-drift 34s ease-in-out infinite alternate-reverse',
-          background:
-            'linear-gradient(180deg, rgba(124, 194, 217, 0.11) 0%, rgba(124, 194, 217, 0.04) 28%, rgba(124, 194, 217, 0.01) 54%, transparent 76%)',
-          maskImage:
-            'linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.26) 44%, transparent 100%)',
-        }}
-      />
-      <div
-        className="ocean-motion absolute inset-x-0 top-0 h-[32%] dark:hidden"
+        className="ocean-motion absolute inset-x-0 top-0 z-10 h-[32%] dark:hidden"
         style={{
           animation: 'ocean-surface-pulse 18s ease-in-out infinite',
+          opacity: variant.lightSurfaceOpacity,
           background:
-            'radial-gradient(circle at 50% 0%, rgba(196, 231, 240, 0.14) 0%, rgba(196, 231, 240, 0.04) 24%, transparent 56%)',
+            'radial-gradient(circle at 50% 0%, rgba(196, 231, 240, 0.2) 0%, rgba(196, 231, 240, 0.08) 24%, transparent 56%)',
         }}
       />
       <div
-        className="ocean-motion absolute -top-[12%] left-[-14%] hidden h-[72%] w-[48%] rotate-[16deg] rounded-full blur-3xl dark:block"
-        style={{
-          animation: 'ocean-beam-drift 24s ease-in-out infinite alternate',
-          background:
-            'linear-gradient(180deg, rgba(132, 210, 255, 0.18) 0%, rgba(132, 210, 255, 0.06) 24%, rgba(132, 210, 255, 0.015) 44%, transparent 72%)',
-          maskImage:
-            'linear-gradient(180deg, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.38) 46%, transparent 100%)',
-        }}
-      />
-      <div
-        className="ocean-motion absolute -top-[20%] left-[18%] hidden h-[86%] w-[34%] rotate-[10deg] rounded-full blur-[56px] dark:block"
-        style={{
-          animation: 'ocean-beam-drift 28s ease-in-out infinite alternate-reverse',
-          background:
-            'linear-gradient(180deg, rgba(118, 195, 245, 0.12) 0%, rgba(118, 195, 245, 0.045) 28%, rgba(118, 195, 245, 0.012) 54%, transparent 76%)',
-          maskImage:
-            'linear-gradient(180deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.28) 44%, transparent 100%)',
-        }}
-      />
-      <div
-        className="ocean-motion absolute -top-[18%] right-[-8%] hidden h-[82%] w-[42%] -rotate-[12deg] rounded-full blur-3xl dark:block"
-        style={{
-          animation: 'ocean-beam-drift 26s ease-in-out infinite alternate',
-          background:
-            'linear-gradient(180deg, rgba(142, 222, 255, 0.14) 0%, rgba(142, 222, 255, 0.04) 26%, rgba(142, 222, 255, 0.01) 52%, transparent 78%)',
-          maskImage:
-            'linear-gradient(180deg, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.3) 42%, transparent 100%)',
-        }}
-      />
-      <div
-        className="ocean-motion absolute inset-x-0 top-0 hidden h-[38%] dark:block"
+        className="ocean-motion absolute inset-x-0 top-0 z-10 hidden h-[38%] dark:block"
         style={{
           animation: 'ocean-surface-pulse 16s ease-in-out infinite',
+          opacity: variant.darkSurfaceOpacity,
           background:
             'radial-gradient(circle at 50% 0%, rgba(121, 205, 255, 0.10) 0%, rgba(121, 205, 255, 0.03) 26%, transparent 58%)',
         }}
       />
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full opacity-[0.34] mix-blend-multiply dark:opacity-85 dark:mix-blend-normal" />
-      <div className="absolute inset-0 dark:hidden bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0),rgba(227,241,247,0.72)_72%)]" />
-      <div className="absolute inset-0 hidden dark:block bg-[radial-gradient(circle_at_50%_120%,rgba(1,7,18,0),rgba(1,7,18,0.58)_72%)]" />
+      {variant.lightBeams.map((beam) => (
+        <div
+          key={beam.id}
+          className="ocean-motion absolute z-10 rounded-full dark:hidden"
+          style={getBeamStyle(beam)}
+        />
+      ))}
+      {variant.darkBeams.map((beam) => (
+        <div
+          key={beam.id}
+          className="ocean-motion absolute z-10 hidden rounded-full dark:block"
+          style={getBeamStyle(beam)}
+        />
+      ))}
+      <canvas ref={canvasRef} className="absolute inset-0 z-20 h-full w-full opacity-[0.46] mix-blend-multiply dark:opacity-72 dark:mix-blend-normal" />
+      {variant.lightParticles.map((particle) => (
+        <div
+          key={particle.id}
+          className="ocean-particle absolute z-30 rounded-full dark:hidden"
+          style={getParticleStyle(particle)}
+        />
+      ))}
+      {variant.darkParticles.map((particle) => (
+        <div
+          key={particle.id}
+          className="ocean-particle absolute z-30 hidden rounded-full dark:block"
+          style={getParticleStyle(particle)}
+        />
+      ))}
+      <div className="absolute inset-0 z-20 dark:hidden bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0),rgba(227,241,247,0.72)_72%)]" />
+      <div className="absolute inset-0 z-20 hidden dark:block bg-[radial-gradient(circle_at_50%_120%,rgba(1,7,18,0),rgba(1,7,18,0.58)_72%)]" />
     </div>
   );
 }

@@ -132,7 +132,7 @@ export function Header() {
 
                 <div className={cn(
                     'border-t border-border/60 px-2 py-2 shrink-0 flex items-center',
-                    expanded ? 'justify-between' : 'justify-center',
+                    expanded ? 'justify-between' : 'justify-center gap-1.5',
                 )}>
                     <button
                         onClick={togglePin}
@@ -141,7 +141,7 @@ export function Header() {
                     >
                         {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
                     </button>
-                    {expanded && <ThemeToggle />}
+                    <ThemeToggle />
                 </div>
             </aside>
         </>

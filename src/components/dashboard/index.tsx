@@ -20,7 +20,7 @@ export function Dashboard() {
 
     return (
         <div className="w-full space-y-6">
-            <div className="overflow-x-auto">
+            <div className="flex justify-center overflow-x-auto">
                 <nav
                     className={cn(
                         'inline-flex min-w-max items-center gap-1 px-1.5 py-1.5 rounded-xl',

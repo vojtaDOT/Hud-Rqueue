@@ -3,7 +3,7 @@ import { SourceEditorContainer } from '@/components/sources/source-editor-contai
 
 export default function SourcesPage() {
     return (
-        <main className="min-h-dvh w-full flex flex-col">
+        <main className="flex min-h-dvh w-full flex-col md:h-dvh">
             <Suspense>
                 <SourceEditorContainer />
             </Suspense>

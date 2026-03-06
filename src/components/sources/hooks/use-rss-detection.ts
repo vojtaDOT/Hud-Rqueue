@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 
 import type { CrawlStrategy, RssDetectionWarning, RssWarningReason } from '@/components/sources/types';
+import type { RssProbeCandidate, RssProbeResult } from '@/lib/source-config';
 
 export type RssDetectionStatus =
     | { type: 'idle' }
@@ -14,22 +15,53 @@ export type RssDetectionStatus =
 
 interface UseRssDetectionOptions {
     baseUrl: string;
-    setBaseUrl: (url: string) => void;
     setCrawlStrategy: (strategy: CrawlStrategy) => void;
     setPlaywrightEnabled: (enabled: boolean) => void;
+}
+
+interface RssDetectionApiResponse {
+    detected: boolean;
+    feed_urls: string[];
+    checked_url: string;
+    warnings: RssDetectionWarning[];
+    probe_result: RssProbeResult | null;
 }
 
 interface RssDetectionResult {
     feedUrls: string[];
     warnings: RssDetectionWarning[];
+    probeResult: RssProbeResult | null;
+}
+
+function isValidWarning(item: unknown): item is RssDetectionWarning {
+    return (
+        typeof item === 'object'
+        && item !== null
+        && typeof (item as { url?: unknown }).url === 'string'
+        && (
+            (item as { reason?: unknown }).reason === 'http_error'
+            || (item as { reason?: unknown }).reason === 'not_feed'
+            || (item as { reason?: unknown }).reason === 'network_error'
+            || (item as { reason?: unknown }).reason === 'timeout'
+        )
+    );
+}
+
+function isValidCandidate(item: unknown): item is RssProbeCandidate {
+    return (
+        typeof item === 'object'
+        && item !== null
+        && typeof (item as { feed_url?: unknown }).feed_url === 'string'
+        && typeof (item as { confidence?: unknown }).confidence === 'number'
+    );
 }
 
 async function fetchAndParseRssFeeds(url: string): Promise<RssDetectionResult> {
     const response = await fetch(`/api/sources/rss-detect?url=${encodeURIComponent(url)}`);
-    const data = await response.json();
+    const data: RssDetectionApiResponse = await response.json();
 
     if (!response.ok) {
-        throw new Error(data.error || 'Detekce RSS selhala');
+        throw new Error((data as unknown as { error?: string }).error || 'Detekce RSS selhala');
     }
 
     const feedUrls: string[] = Array.isArray(data.feed_urls)
@@ -37,25 +69,28 @@ async function fetchAndParseRssFeeds(url: string): Promise<RssDetectionResult> {
         : [];
 
     const warnings: RssDetectionWarning[] = Array.isArray(data.warnings)
-        ? data.warnings.filter((item: unknown): item is RssDetectionWarning => (
-            typeof item === 'object'
-            && item !== null
-            && typeof (item as { url?: unknown }).url === 'string'
-            && (
-                (item as { reason?: unknown }).reason === 'http_error'
-                || (item as { reason?: unknown }).reason === 'not_feed'
-                || (item as { reason?: unknown }).reason === 'network_error'
-                || (item as { reason?: unknown }).reason === 'timeout'
-            )
-        ))
+        ? data.warnings.filter(isValidWarning)
         : [];
 
-    return { feedUrls, warnings };
+    let probeResult: RssProbeResult | null = null;
+    if (data.probe_result && typeof data.probe_result === 'object') {
+        const pr = data.probe_result;
+        probeResult = {
+            canonical_url: typeof pr.canonical_url === 'string' ? pr.canonical_url : url,
+            page_kind: pr.page_kind ?? 'error',
+            selected_candidate: pr.selected_candidate ?? null,
+            candidates: Array.isArray(pr.candidates)
+                ? pr.candidates.filter(isValidCandidate)
+                : [],
+            warnings,
+        };
+    }
+
+    return { feedUrls, warnings, probeResult };
 }
 
 export function useRssDetection({
     baseUrl,
-    setBaseUrl,
     setCrawlStrategy,
     setPlaywrightEnabled,
 }: UseRssDetectionOptions) {
@@ -64,12 +99,14 @@ export function useRssDetection({
     const [selectedRssFeed, setSelectedRssFeed] = useState('');
     const [rssWarnings, setRssWarnings] = useState<RssDetectionWarning[]>([]);
     const [detectionStatus, setDetectionStatus] = useState<RssDetectionStatus>({ type: 'idle' });
+    const [probeResult, setProbeResult] = useState<RssProbeResult | null>(null);
 
     const clearRssFeeds = useCallback(() => {
         setRssFeedOptions([]);
         setSelectedRssFeed('');
         setRssWarnings([]);
         setDetectionStatus({ type: 'idle' });
+        setProbeResult(null);
     }, []);
 
     const detectRssFeeds = useCallback(async () => {
@@ -81,17 +118,27 @@ export function useRssDetection({
         setDetectingRss(true);
         setDetectionStatus({ type: 'detecting' });
         try {
-            const { feedUrls, warnings } = await fetchAndParseRssFeeds(baseUrl);
+            const { feedUrls, warnings, probeResult: pr } = await fetchAndParseRssFeeds(baseUrl);
+
+            setProbeResult(pr);
 
             if (feedUrls.length < 1) {
                 clearRssFeeds();
+                // Re-set probeResult after clearRssFeeds resets it
+                setProbeResult(pr);
                 setDetectionStatus({ type: 'no_feeds' });
                 toast.info('RSS/Atom feed nebyl nalezen nebo dostupny.');
                 return;
             }
 
+            // Auto-select: if top candidate confidence >= 0.90, use it; otherwise use first feed_url
+            const topCandidate = pr?.selected_candidate ?? pr?.candidates?.[0] ?? null;
+            const autoSelectUrl = (topCandidate && topCandidate.confidence >= 0.90)
+                ? topCandidate.feed_url
+                : feedUrls[0];
+
             setRssFeedOptions(feedUrls);
-            setSelectedRssFeed(feedUrls[0]);
+            setSelectedRssFeed(autoSelectUrl);
             setRssWarnings(warnings);
             setDetectionStatus({ type: 'success', feedCount: feedUrls.length });
             toast.success(`Nalezen RSS/Atom feed (${feedUrls.length})`);
@@ -148,10 +195,11 @@ export function useRssDetection({
         setDetectingRss(true);
         setDetectionStatus({ type: 'detecting' });
         try {
-            const { feedUrls, warnings } = await fetchAndParseRssFeeds(url);
+            const { feedUrls, warnings, probeResult: pr } = await fetchAndParseRssFeeds(url);
+
+            setProbeResult(pr);
 
             if (feedUrls.length === 1) {
-                setBaseUrl(feedUrls[0]);
                 setCrawlStrategy('rss');
                 setPlaywrightEnabled(false);
                 setRssFeedOptions(feedUrls);
@@ -175,18 +223,17 @@ export function useRssDetection({
         } finally {
             setDetectingRss(false);
         }
-    }, [setBaseUrl, setCrawlStrategy, setPlaywrightEnabled]);
+    }, [setCrawlStrategy, setPlaywrightEnabled]);
 
     const applySelectedRssFeed = useCallback(() => {
         if (!selectedRssFeed) {
             toast.info('Nejprve vyberte RSS/Atom feed.');
             return;
         }
-        setBaseUrl(selectedRssFeed);
         setCrawlStrategy('rss');
         setPlaywrightEnabled(false);
-        toast.success('Vybrany feed byl pouzit jako Base URL.');
-    }, [selectedRssFeed, setBaseUrl, setCrawlStrategy, setPlaywrightEnabled]);
+        toast.success('Vybrany feed aplikovan.');
+    }, [selectedRssFeed, setCrawlStrategy, setPlaywrightEnabled]);
 
     return {
         detectingRss,
@@ -194,6 +241,7 @@ export function useRssDetection({
         rssFeedOptions,
         selectedRssFeed,
         rssWarnings,
+        probeResult,
         setSelectedRssFeed,
         detectRssFeeds,
         autoDetectOnUrl,

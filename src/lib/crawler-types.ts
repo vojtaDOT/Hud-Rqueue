@@ -227,6 +227,9 @@ export interface RssCrawlParamsV1 extends Partial<WorkerContractMetadataV11> {
     fetch: {
         timeout_ms: number;
     };
+    allow_html_documents?: boolean;
+    use_playwright?: boolean;
+    entry_link_selector?: string;
 }
 
 export const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([

@@ -51,11 +51,46 @@ export interface RssDetectionWarningLike {
     reason: RssWarningReason;
 }
 
+export type RssDiscoveryMethod = 'link_alternate' | 'anchor_href' | 'common_path' | 'direct_feed';
+export type RssFeedType = 'rss2' | 'atom' | 'rdf' | 'unknown';
+
+export interface RssProbeCandidate {
+    feed_url: string;
+    feed_type: RssFeedType;
+    confidence: number;
+    discovery_method: RssDiscoveryMethod;
+    content_type: string;
+    title: string | null;
+    same_origin: boolean;
+}
+
+export interface RssProbeResult {
+    canonical_url: string;
+    page_kind: 'html' | 'feed' | 'error';
+    selected_candidate: RssProbeCandidate | null;
+    candidates: RssProbeCandidate[];
+    warnings: RssDetectionWarningLike[];
+}
+
+export interface RssAuthoringDraft {
+    strategy: 'rss';
+    feed_url: string;
+    allow_html_documents: boolean;
+    use_playwright: boolean;
+    entry_link_selector: string;
+    confidence: number;
+    probe_warnings: RssDetectionWarningLike[];
+}
+
 export interface SourceRssExtractionDataV1 extends SourceConfigEnvelopeBaseV1 {
     strategy: 'rss';
     selected_feed_url: string;
     detected_feed_candidates: string[];
     warnings: RssDetectionWarningLike[];
+    probe_result?: RssProbeResult;
+    authoring_summary?: string;
+    authoring_version?: number;
+    selected_preset?: string;
 }
 
 export type SourceConfigEnvelopeV1 = SourceListExtractionDataV1 | SourceRssExtractionDataV1;
@@ -137,8 +172,29 @@ const RssCrawlParamsSchema = z.object({
     fetch: z.object({
         timeout_ms: z.number().int().min(1),
     }).strict(),
+    allow_html_documents: z.boolean().optional().default(false),
+    use_playwright: z.boolean().optional().default(false),
+    entry_link_selector: z.string().trim().optional(),
     ...ContractMetadataShape,
 }).passthrough();
+
+const RssProbeCandidateSchema = z.object({
+    feed_url: UrlSchema,
+    feed_type: z.enum(['rss2', 'atom', 'rdf', 'unknown']),
+    confidence: z.number().min(0).max(1),
+    discovery_method: z.enum(['link_alternate', 'anchor_href', 'common_path', 'direct_feed']),
+    content_type: z.string(),
+    title: z.string().nullable(),
+    same_origin: z.boolean(),
+}).strict();
+
+const RssProbeResultSchema = z.object({
+    canonical_url: z.string(),
+    page_kind: z.enum(['html', 'feed', 'error']),
+    selected_candidate: RssProbeCandidateSchema.nullable(),
+    candidates: z.array(RssProbeCandidateSchema),
+    warnings: z.array(RssWarningSchema),
+}).strict();
 
 const RssExtractionDataSchema = z.object({
     config_version: z.literal(1),
@@ -146,6 +202,10 @@ const RssExtractionDataSchema = z.object({
     selected_feed_url: UrlSchema,
     detected_feed_candidates: z.array(UrlSchema),
     warnings: z.array(RssWarningSchema),
+    probe_result: RssProbeResultSchema.nullish(),
+    authoring_summary: z.string().optional(),
+    authoring_version: z.number().int().optional(),
+    selected_preset: z.string().optional(),
 }).strict();
 
 const BaseSourcePayloadSchema = z.object({
@@ -182,6 +242,10 @@ export function buildRssSourceConfig(input: {
     feedUrl: string;
     detectedFeedCandidates?: string[];
     warnings?: RssDetectionWarningLike[];
+    allowHtmlDocuments?: boolean;
+    usePlaywright?: boolean;
+    entryLinkSelector?: string;
+    probeResult?: RssProbeResult | null;
 }): {
     crawl_params: RssCrawlParamsV1;
     extraction_data: SourceRssExtractionDataV1;
@@ -189,6 +253,16 @@ export function buildRssSourceConfig(input: {
     const feedUrl = input.feedUrl.trim();
     const detectedFeedCandidates = (input.detectedFeedCandidates ?? []).map((item) => item.trim()).filter(Boolean);
     const warnings = input.warnings ?? [];
+    const allowHtmlDocuments = input.allowHtmlDocuments ?? false;
+    const usePlaywright = input.usePlaywright ?? false;
+    const entryLinkSelector = (input.entryLinkSelector ?? '').trim();
+
+    const summary = buildRssAuthoringSummary({
+        feedUrl,
+        allowHtmlDocuments,
+        usePlaywright,
+        entryLinkSelector,
+    });
 
     return {
         crawl_params: renderTemplate<RssCrawlParamsV1>(
@@ -196,6 +270,9 @@ export function buildRssSourceConfig(input: {
             {
                 contract_metadata: { ...WORKER_CONTRACT_METADATA_V11 },
                 feed_url: feedUrl,
+                allow_html_documents: allowHtmlDocuments,
+                use_playwright: usePlaywright,
+                entry_link_selector: entryLinkSelector,
             },
         ),
         extraction_data: renderTemplate<SourceRssExtractionDataV1>(
@@ -204,9 +281,41 @@ export function buildRssSourceConfig(input: {
                 feed_url: feedUrl,
                 detected_feed_candidates: detectedFeedCandidates,
                 warnings,
+                probe_result: input.probeResult ?? null,
+                authoring_summary: summary,
+                selected_preset: 'rss_v1',
             },
         ),
     };
+}
+
+export function buildRssAuthoringSummary(input: {
+    feedUrl: string;
+    allowHtmlDocuments: boolean;
+    usePlaywright: boolean;
+    entryLinkSelector: string;
+}): string {
+    const parts: string[] = [
+        'Detect feed',
+        'Use RSS strategy',
+        'Discover per entry',
+    ];
+
+    if (input.entryLinkSelector) {
+        parts.push(`Follow detail page via "${input.entryLinkSelector}"`);
+    }
+
+    if (input.allowHtmlDocuments) {
+        parts.push('Store HTML pages');
+    } else {
+        parts.push('Do not store HTML pages');
+    }
+
+    if (input.usePlaywright) {
+        parts.push('Use Playwright for rendering');
+    }
+
+    return parts.join(' → ');
 }
 
 export function buildRssItemIdentityKey(input: {

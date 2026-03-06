@@ -9,9 +9,11 @@ import {
     buildListSourceConfig,
     buildRssSourceConfig,
     type RssDetectionWarningLike,
+    type RssProbeResult,
 } from '@/lib/source-config';
 import { validateWorkflow } from '@/lib/workflow-validation';
 import type { CrawlStrategy, Obec } from '@/components/sources/types';
+import type { RssAuthoringValues } from '@/components/sources/rss-authoring-panel';
 
 interface SubmitPayload {
     name: string;
@@ -25,6 +27,8 @@ interface SubmitPayload {
     selectedRssFeed: string;
     rssFeedOptions: string[];
     rssWarnings: RssDetectionWarningLike[];
+    rssAuthoring?: RssAuthoringValues;
+    probeResult?: RssProbeResult | null;
 }
 
 interface UseSourceSubmitOptions {
@@ -48,6 +52,8 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
             selectedRssFeed,
             rssFeedOptions,
             rssWarnings,
+            rssAuthoring,
+            probeResult,
         } = payload;
 
         if (!name || !typeId || !baseUrl) {
@@ -95,6 +101,10 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
                 feedUrl,
                 detectedFeedCandidates: rssFeedOptions,
                 warnings: rssWarnings,
+                allowHtmlDocuments: rssAuthoring?.allowHtmlDocuments,
+                usePlaywright: rssAuthoring?.usePlaywright,
+                entryLinkSelector: rssAuthoring?.entryLinkSelector,
+                probeResult: probeResult ?? null,
             });
             crawlParams = rssConfig.crawl_params;
             extractionData = rssConfig.extraction_data;

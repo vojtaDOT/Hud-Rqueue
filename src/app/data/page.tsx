@@ -2,8 +2,8 @@ import { DataSeeder } from '@/components/data-seeder';
 
 export default function DataPage() {
     return (
-        <main className="p-6 pt-5">
-            <div className="max-w-4xl mx-auto">
+        <main className="px-4 py-5 sm:px-6">
+            <div className="mx-auto max-w-4xl">
                 <DataSeeder />
             </div>
         </main>

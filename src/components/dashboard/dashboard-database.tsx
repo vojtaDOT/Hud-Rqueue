@@ -251,8 +251,8 @@ export function DashboardDatabase() {
                                                     <td className="p-3 tabular-nums">{n.nodeport}</td>
                                                     <td className="p-3 capitalize">{n.noderole === 'primary' ? 'coordinator' : n.noderole}</td>
                                                     <td className="p-3">
-                                                        <span className={`inline-flex items-center gap-1.5 ${n.isactive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                            <span className={`h-1.5 w-1.5 rounded-full ${n.isactive ? 'bg-green-500' : 'bg-red-500'}`} />
+                                                        <span className={`inline-flex items-center gap-1.5 ${n.isactive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                            <span className={`h-1.5 w-1.5 rounded-full ${n.isactive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                                                             {n.isactive ? 'Yes' : 'No'}
                                                         </span>
                                                     </td>

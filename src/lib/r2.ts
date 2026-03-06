@@ -157,7 +157,7 @@ export async function listObjectsPage(prefix = '', cursor: string | null = null,
         MaxKeys: safePageSize,
     }));
 
-    const items: ListedObjectItem[] = (response.Contents ?? [])
+    const items = (response.Contents ?? [])
         .map((item) => {
             const key = item.Key;
             if (!key) return null;
@@ -169,7 +169,7 @@ export async function listObjectsPage(prefix = '', cursor: string | null = null,
                 storageClass: item.StorageClass ?? null,
             };
         })
-        .filter((item): item is ListedObjectItem => Boolean(item));
+        .filter((item): item is NonNullable<typeof item> => item !== null);
 
     return {
         prefix: safePrefix,
@@ -308,6 +308,32 @@ export async function deleteAnyObjects(keys: string[]): Promise<{ deletedCount: 
         failedCount,
         results,
     };
+}
+
+export async function listDocumentPrefixes(): Promise<string[]> {
+    const s3 = getR2Client();
+    const bucket = getR2Bucket();
+
+    const prefixes: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+        const response = await s3.send(new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: 'documents/',
+            Delimiter: '/',
+            ContinuationToken: continuationToken,
+            MaxKeys: 1000,
+        }));
+
+        for (const cp of response.CommonPrefixes ?? []) {
+            if (cp.Prefix) prefixes.push(cp.Prefix);
+        }
+
+        continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    return prefixes;
 }
 
 export async function listObjectsByPrefix(prefix: string, maxKeys = 20): Promise<ListedPrefix> {

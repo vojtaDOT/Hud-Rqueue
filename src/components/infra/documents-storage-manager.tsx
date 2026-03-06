@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
     AlertCircle,
     CheckCircle2,
+    FolderSearch,
     Loader2,
     RefreshCw,
     ShieldAlert,
@@ -78,6 +79,21 @@ interface DuplicateResponse {
     pageSize: number;
     total: number;
     groups: DuplicateGroup[];
+}
+
+interface OrphanedFolder {
+    uuid: string;
+    prefix: string;
+    objectCount: number;
+    sampleKeys: string[];
+}
+
+interface OrphanScanResponse {
+    success: boolean;
+    r2PrefixCount: number;
+    dbUuidCount: number;
+    orphanCount: number;
+    orphans: OrphanedFolder[];
 }
 
 interface CleanupPreviewTarget {
@@ -194,6 +210,11 @@ export function DocumentsStorageManager({ embedded = false }: { embedded?: boole
     const [resolveDryRunSignature, setResolveDryRunSignature] = React.useState<string | null>(null);
     const [resolveApplyResult, setResolveApplyResult] = React.useState<ResolveDuplicatesResponse | null>(null);
 
+    const [orphanScan, setOrphanScan] = React.useState<OrphanScanResponse | null>(null);
+    const [orphanLoading, setOrphanLoading] = React.useState(false);
+    const [orphanVisibleCount, setOrphanVisibleCount] = React.useState(20);
+    const [orphanDeleting, setOrphanDeleting] = React.useState(false);
+
     const refreshOverview = React.useCallback(async () => {
         setLoadingOverview(true);
         try {
@@ -256,6 +277,61 @@ export function DocumentsStorageManager({ embedded = false }: { embedded?: boole
             refreshOverview(),
             refreshDuplicates(duplicateKind, duplicatePage),
         ]);
+    };
+
+    const handleDeleteOrphans = async () => {
+        if (!orphanScan || orphanScan.orphans.length === 0) return;
+        setOrphanDeleting(true);
+        try {
+            const res = await fetch('/api/storage/cleanup/orphans', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prefixes: orphanScan.orphans.map((o) => o.prefix) }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || 'Delete failed');
+            if (json.failed === 0) {
+                toast.success(`Deleted ${json.deleted} orphaned folder(s)`);
+                setOrphanScan(null);
+            } else {
+                toast.warning(`Deleted ${json.deleted}, failed ${json.failed}`);
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Orphan delete failed');
+        } finally {
+            setOrphanDeleting(false);
+        }
+    };
+
+    const handleOrphanScan = async () => {
+        setOrphanLoading(true);
+        setOrphanVisibleCount(20);
+        try {
+            const response = await fetch('/api/storage/cleanup/orphans', { cache: 'no-store' });
+            const json = await response.json();
+            if (!response.ok) throw new Error(json.error || 'Failed to scan for orphaned folders');
+            setOrphanScan(json);
+            if (json.orphanCount === 0) {
+                toast.success('No orphaned folders found');
+            } else {
+                toast.success(`Found ${json.orphanCount} orphaned folder${json.orphanCount > 1 ? 's' : ''}`);
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Orphan scan failed');
+        } finally {
+            setOrphanLoading(false);
+        }
+    };
+
+    const handleFeedOrphansToCleanup = () => {
+        if (!orphanScan || orphanScan.orphans.length === 0) return;
+        const uuids = orphanScan.orphans.map((o) => o.uuid).join('\n');
+        setCleanupUuidsText((prev) => {
+            const existing = prev.trim();
+            return existing ? `${existing}\n${uuids}` : uuids;
+        });
+        setCleanupMode('blob_only');
+        toast.success(`${orphanScan.orphans.length} orphan UUID(s) added to cleanup input`);
     };
 
     const handleCreatePreview = async () => {
@@ -473,6 +549,88 @@ export function DocumentsStorageManager({ embedded = false }: { embedded?: boole
                         </div>
                     ) : (
                         <p className="text-sm text-muted-foreground">No overview data available.</p>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Orphaned R2 Folders</CardTitle>
+                    <CardDescription>
+                        Scan R2 for <code className="text-xs">documents/&lt;uuid&gt;/</code> prefixes that have no matching document in the database.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex items-center gap-2">
+                        <Button onClick={handleOrphanScan} disabled={orphanLoading}>
+                            {orphanLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
+                            Scan for orphans
+                        </Button>
+                        {orphanScan && orphanScan.orphans.length > 0 && (
+                            <>
+                                <Button variant="outline" onClick={handleFeedOrphansToCleanup}>
+                                    <Trash2 className="h-4 w-4" />
+                                    Send to cleanup
+                                </Button>
+                                <Button variant="destructive" onClick={handleDeleteOrphans} disabled={orphanDeleting}>
+                                    {orphanDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                    Delete all orphans
+                                </Button>
+                            </>
+                        )}
+                    </div>
+
+                    {orphanScan && (
+                        <>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                                <MetricCard label="R2 prefixes" value={orphanScan.r2PrefixCount} icon={<CheckCircle2 className="h-4 w-4" />} />
+                                <MetricCard label="DB UUIDs" value={orphanScan.dbUuidCount} icon={<CheckCircle2 className="h-4 w-4" />} />
+                                <MetricCard
+                                    label="Orphaned folders"
+                                    value={orphanScan.orphanCount}
+                                    icon={orphanScan.orphanCount > 0
+                                        ? <AlertCircle className="h-4 w-4 text-amber-500" />
+                                        : <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                    }
+                                />
+                            </div>
+
+                            {orphanScan.orphans.length > 0 && (
+                                <div className="rounded-md border overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead className="bg-muted/40 border-b">
+                                            <tr>
+                                                <th className="text-left p-2">UUID</th>
+                                                <th className="text-left p-2">Prefix</th>
+                                                <th className="text-left p-2">Objects</th>
+                                                <th className="text-left p-2">Sample keys</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {orphanScan.orphans.slice(0, orphanVisibleCount).map((orphan) => (
+                                                <tr key={orphan.uuid} className="border-b border-border/40 align-top">
+                                                    <td className="p-2 font-mono">{orphan.uuid}</td>
+                                                    <td className="p-2 font-mono">{orphan.prefix}</td>
+                                                    <td className="p-2 tabular-nums">{orphan.objectCount}</td>
+                                                    <td className="p-2 font-mono break-all">{orphan.sampleKeys.join(', ') || '—'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {orphanScan.orphans.length > orphanVisibleCount && (
+                                        <div className="flex items-center justify-center py-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => setOrphanVisibleCount((prev) => prev + 20)}
+                                            >
+                                                Show more ({orphanScan.orphans.length - orphanVisibleCount} remaining)
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </>
                     )}
                 </CardContent>
             </Card>

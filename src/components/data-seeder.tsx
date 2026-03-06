@@ -171,7 +171,7 @@ export function DataSeeder() {
     };
 
     return (
-        <div className="w-full max-w-4xl mx-auto space-y-8">
+        <div className="mx-auto w-full max-w-4xl space-y-8">
             {/* Regions Card */}
             <Card>
                 <CardHeader>
@@ -182,7 +182,7 @@ export function DataSeeder() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <textarea
-                        className="w-full h-48 p-3 rounded-md border bg-background text-foreground font-mono text-sm resize-y"
+                        className="h-48 w-full resize-y rounded-md border bg-background p-3 font-mono text-sm text-foreground"
                         placeholder='{ "polozky": [...] }'
                         value={regionsJson}
                         onChange={(e) => setRegionsJson(e.target.value)}
@@ -218,7 +218,7 @@ export function DataSeeder() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <textarea
-                        className="w-full h-48 p-3 rounded-md border bg-background text-foreground font-mono text-sm resize-y"
+                        className="h-48 w-full resize-y rounded-md border bg-background p-3 font-mono text-sm text-foreground"
                         placeholder='{ "polozky": [...] }'
                         value={districtsJson}
                         onChange={(e) => setDistrictsJson(e.target.value)}
@@ -254,7 +254,7 @@ export function DataSeeder() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <textarea
-                        className="w-full h-48 p-3 rounded-md border bg-background text-foreground font-mono text-sm resize-y"
+                        className="h-48 w-full resize-y rounded-md border bg-background p-3 font-mono text-sm text-foreground"
                         placeholder='{ "polozky": [...] }'
                         value={municipalitiesJson}
                         onChange={(e) => setMunicipalitiesJson(e.target.value)}

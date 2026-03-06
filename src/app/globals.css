@@ -76,6 +76,14 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.91 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --noise-opacity: 0.018;
+  --scrollbar-thumb: oklch(0.55 0 0 / 24%);
+  --scrollbar-thumb-hover: oklch(0.45 0 0 / 34%);
+  --page-gradient:
+    radial-gradient(circle at top, oklch(0.98 0.02 200 / 0.85), transparent 38%),
+    linear-gradient(180deg, oklch(1 0 0) 0%, oklch(0.975 0 0) 100%);
+  --pipeline-connector-start: oklch(0.72 0.12 205 / 0.12);
+  --pipeline-connector-mid: oklch(0.74 0.13 205 / 0.5);
 }
 
 .dark {
@@ -110,6 +118,14 @@
   --sidebar-accent-foreground: oklch(0.93 0 0);
   --sidebar-border: oklch(1 0 0 / 6%);
   --sidebar-ring: oklch(0.75 0.14 190);
+  --noise-opacity: 0.025;
+  --scrollbar-thumb: oklch(1 0 0 / 12%);
+  --scrollbar-thumb-hover: oklch(1 0 0 / 20%);
+  --page-gradient:
+    radial-gradient(circle at top, oklch(0.22 0.03 225 / 0.35), transparent 35%),
+    linear-gradient(180deg, oklch(0.14 0.006 260) 0%, oklch(0.11 0.004 260) 100%);
+  --pipeline-connector-start: oklch(0.75 0.14 190 / 0.2);
+  --pipeline-connector-mid: oklch(0.8 0.14 190 / 0.8);
 }
 
 @layer base {
@@ -118,6 +134,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image: var(--page-gradient);
+    background-attachment: fixed;
   }
 }
 
@@ -128,7 +146,7 @@ body::before {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  opacity: 0.025;
+  opacity: var(--noise-opacity);
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
@@ -143,11 +161,11 @@ body::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: oklch(1 0 0 / 12%);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(1 0 0 / 20%);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ── Pipeline animations ── */
@@ -200,9 +218,9 @@ body::before {
 .pipeline-flow-connector {
   background-image: linear-gradient(
     90deg,
-    oklch(0.75 0.14 190 / 0.2),
-    oklch(0.80 0.14 190 / 0.8),
-    oklch(0.75 0.14 190 / 0.2)
+    var(--pipeline-connector-start),
+    var(--pipeline-connector-mid),
+    var(--pipeline-connector-start)
   );
   background-size: 200% 100%;
   animation: pipeline-flow-connector-run 1200ms linear infinite;

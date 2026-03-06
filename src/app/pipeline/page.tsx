@@ -8,7 +8,7 @@ function parseDevFlag(value: string | undefined): boolean {
 export default function PipelinePage() {
     const devMode = parseDevFlag(process.env.DEV);
     return (
-        <main className="p-6 pt-5">
+        <main className="px-4 py-5 sm:px-6">
             <ManualPipeline devMode={devMode} />
         </main>
     );

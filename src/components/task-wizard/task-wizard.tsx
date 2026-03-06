@@ -87,13 +87,13 @@ function SegmentedToggle<T extends string>({
     onChange: (v: T) => void;
 }) {
     return (
-        <div className="flex rounded-lg border p-0.5 gap-0.5 w-fit">
+        <div className="flex w-full flex-wrap rounded-lg border p-0.5 gap-0.5 sm:w-fit">
             {options.map((opt) => (
                 <button
                     key={opt.value}
                     onClick={() => onChange(opt.value)}
                     className={cn(
-                        'px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                        'flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all sm:flex-none',
                         value === opt.value
                             ? 'bg-primary text-primary-foreground shadow-sm'
                             : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -212,7 +212,7 @@ export function TaskWizard() {
     };
 
     return (
-        <Card className="w-full max-w-2xl mx-auto">
+        <Card className="mx-auto w-full max-w-2xl">
             <CardHeader>
                 <CardTitle>Create Job</CardTitle>
                 <CardDescription>Add a task to the Redis queue</CardDescription>
@@ -221,7 +221,7 @@ export function TaskWizard() {
                 {/* ── Type toggle ── */}
                 <div className="space-y-2">
                     <Label className="text-sm">Job type</Label>
-                    <div className="flex rounded-lg border p-1 gap-1">
+                    <div className="flex flex-col rounded-lg border p-1 gap-1 sm:flex-row">
                         {([
                             { type: 'scrapy' as JobType, label: 'Scrapy', icon: Bug },
                             { type: 'ocr' as JobType, label: 'OCR', icon: ScanText },
@@ -246,7 +246,7 @@ export function TaskWizard() {
                 {/* ── Scrapy: target + picker ── */}
                 {data.jobType === 'scrapy' && (
                     <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <Label className="text-sm">Pick from</Label>
                             <SegmentedToggle
                                 options={[
@@ -278,7 +278,7 @@ export function TaskWizard() {
                 {/* ── OCR: target + picker ── */}
                 {data.jobType === 'ocr' && (
                     <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <Label className="text-sm">Pick from</Label>
                             <SegmentedToggle
                                 options={[
@@ -344,7 +344,7 @@ export function TaskWizard() {
                             </div>
                         </div>
 
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-3">
                             <Label className="text-sm">Bulk / Stress test</Label>
                             <Switch checked={bulkEnabled} onCheckedChange={handleBulkToggle} />
                         </div>
@@ -418,7 +418,7 @@ export function TaskWizard() {
                                         min={1}
                                         value={data.maxAttempts}
                                         onChange={(e) => patch({ maxAttempts: Number(e.target.value) || 1 })}
-                                        className="h-9 max-w-[120px]"
+                                        className="h-9 w-full sm:max-w-[120px]"
                                     />
                                 </div>
                                 <div className="space-y-1.5">

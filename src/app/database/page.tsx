@@ -2,7 +2,7 @@ import { DatabaseManager } from '@/components/database/database-manager';
 
 export default function DatabasePage() {
     return (
-        <main className="h-dvh w-full overflow-hidden flex flex-col">
+        <main className="min-h-dvh w-full flex flex-col">
             <DatabaseManager />
         </main>
     );

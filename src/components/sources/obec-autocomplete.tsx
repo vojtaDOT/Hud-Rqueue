@@ -31,7 +31,7 @@ export function ObecAutocomplete({
     selectedKrajName,
 }: ObecAutocompleteProps) {
     return (
-        <div className="grid grid-cols-[1fr_140px_140px] gap-3">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_140px]">
             <div className="relative" ref={obecDropdownRef}>
                 <Label htmlFor="obec" className="mb-1 block text-xs text-muted-foreground">Obec</Label>
                 <div className="relative">

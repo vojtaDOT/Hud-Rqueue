@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
-import { RssDetectionPanel } from '@/components/sources/rss-detection-panel';
-import { RssPreviewPanel, type FeedPreview } from '@/components/sources/rss-preview-panel';
+import { type RssAuthoringValues } from '@/components/sources/rss-authoring-panel';
+import { type FeedPreview } from '@/components/sources/rss-preview-panel';
+import { RssToolboxPanel } from '@/components/sources/rss-toolbox-panel';
 import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
+import { ToolboxTabs, type ToolboxTab } from '@/components/sources/toolbox-tabs';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
 import { useSourceLoad } from '@/components/sources/hooks/use-source-load';
@@ -29,6 +31,23 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
+import { buildRssAuthoringSummary, buildRssSourceConfig } from '@/lib/source-config';
+
+const DEFAULT_RSS_AUTHORING: RssAuthoringValues = {
+    allowHtmlDocuments: false,
+    usePlaywright: false,
+    entryLinkSelector: '',
+};
+
+/** Map CrawlStrategy → ToolboxTab */
+function strategyToTab(strategy: CrawlStrategy): ToolboxTab {
+    return strategy === 'rss' ? 'rss' : 'path';
+}
+
+/** Map ToolboxTab → CrawlStrategy */
+function tabToStrategy(tab: ToolboxTab): CrawlStrategy {
+    return tab === 'rss' ? 'rss' : 'list';
+}
 
 export function SourceEditorContainer() {
     const searchParams = useSearchParams();
@@ -52,6 +71,12 @@ export function SourceEditorContainer() {
     const [rssPreviewLoading, setRssPreviewLoading] = useState(false);
     const [rssPreviewError, setRssPreviewError] = useState<string | null>(null);
 
+    // RSS authoring state
+    const [rssAuthoring, setRssAuthoring] = useState<RssAuthoringValues>(DEFAULT_RSS_AUTHORING);
+
+    // Toolbox tab state mirrors the effective strategy chosen by toolbox or RSS autodetect
+    const [activeToolboxTab, setActiveToolboxTab] = useState<ToolboxTab>('path');
+
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
 
     const { sourceTypes, loadingTypes } = useSourceTypes();
@@ -74,6 +99,7 @@ export function SourceEditorContainer() {
         rssFeedOptions,
         selectedRssFeed,
         rssWarnings,
+        probeResult,
         setSelectedRssFeed,
         detectRssFeeds,
         autoDetectOnUrl,
@@ -81,7 +107,6 @@ export function SourceEditorContainer() {
         clearRssFeeds,
     } = useRssDetection({
         baseUrl,
-        setBaseUrl,
         setCrawlStrategy,
         setPlaywrightEnabled,
     });
@@ -104,10 +129,58 @@ export function SourceEditorContainer() {
                 setRssPreview(null);
                 setRssPreviewLoading(false);
                 setRssPreviewError(null);
+                setRssAuthoring(DEFAULT_RSS_AUTHORING);
+                setActiveToolboxTab('path');
                 sidebarRef.current?.reset();
             }
         },
     });
+
+    // Keep toolbox tab aligned when strategy changes programmatically.
+    useEffect(() => {
+        setActiveToolboxTab(strategyToTab(crawlStrategy));
+    }, [crawlStrategy]);
+
+    // Compute RSS summary and JSON preview on the fly
+    const rssSummary = useMemo(() => {
+        if (crawlStrategy !== 'rss') return '';
+        const feedUrl = selectedRssFeed || baseUrl;
+        if (!feedUrl) return '';
+        return buildRssAuthoringSummary({
+            feedUrl,
+            allowHtmlDocuments: rssAuthoring.allowHtmlDocuments,
+            usePlaywright: rssAuthoring.usePlaywright,
+            entryLinkSelector: rssAuthoring.entryLinkSelector,
+        });
+    }, [crawlStrategy, selectedRssFeed, baseUrl, rssAuthoring]);
+
+    const rssConfigPreview = useMemo(() => {
+        if (crawlStrategy !== 'rss') return null;
+        const feedUrl = (selectedRssFeed || baseUrl).trim();
+        if (!feedUrl || !/^https?:\/\//.test(feedUrl)) return null;
+        try {
+            return buildRssSourceConfig({
+                feedUrl,
+                detectedFeedCandidates: rssFeedOptions,
+                warnings: rssWarnings,
+                allowHtmlDocuments: rssAuthoring.allowHtmlDocuments,
+                usePlaywright: rssAuthoring.usePlaywright,
+                entryLinkSelector: rssAuthoring.entryLinkSelector,
+                probeResult,
+            });
+        } catch {
+            return null;
+        }
+    }, [crawlStrategy, selectedRssFeed, baseUrl, rssFeedOptions, rssWarnings, rssAuthoring, probeResult]);
+
+    // Validate CSS selector shape
+    const selectorValidationError = useMemo(() => {
+        const sel = rssAuthoring.entryLinkSelector.trim();
+        if (!sel) return null;
+        if (/^[0-9]/.test(sel)) return 'CSS selektor nesmi zacinat cislem';
+        if (/[{}]/.test(sel)) return 'CSS selektor nesmi obsahovat slozene zavorky';
+        return null;
+    }, [rssAuthoring.entryLinkSelector]);
 
     // Fetch RSS feed preview when strategy is RSS and URL is valid
     useEffect(() => {
@@ -164,6 +237,15 @@ export function SourceEditorContainer() {
             setWorkflowData(loadedWorkflow);
             setPlaywrightEnabled(loadedWorkflow.playwright_enabled ?? false);
         }
+        // Restore RSS authoring values from saved crawl_params when in RSS mode
+        if (loadedSource.crawl_strategy === 'rss' && loadedSource.crawl_params) {
+            const cp = loadedSource.crawl_params as Record<string, unknown>;
+            setRssAuthoring({
+                allowHtmlDocuments: cp.allow_html_documents === true,
+                usePlaywright: cp.use_playwright === true,
+                entryLinkSelector: typeof cp.entry_link_selector === 'string' ? cp.entry_link_selector : '',
+            });
+        }
     }, [loadedSource, loadedWorkflow]);
 
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
@@ -192,7 +274,7 @@ export function SourceEditorContainer() {
         }
         if (!nextEnabled && sidebarRef.current?.hasAnyPlaywrightActions()) {
             setShowPlaywrightConfirm(true);
-            return false; // Don't toggle yet; dialog will handle it
+            return false;
         }
         setPlaywrightEnabled(nextEnabled);
         return true;
@@ -210,6 +292,12 @@ export function SourceEditorContainer() {
 
     const handleFormSubmit = async (event: FormEvent) => {
         event.preventDefault();
+
+        if (crawlStrategy === 'rss' && selectorValidationError) {
+            toast.error(selectorValidationError);
+            return;
+        }
+
         await submitSource({
             name,
             typeId,
@@ -222,6 +310,8 @@ export function SourceEditorContainer() {
             selectedRssFeed,
             rssFeedOptions,
             rssWarnings,
+            rssAuthoring,
+            probeResult,
         });
     };
 
@@ -240,11 +330,67 @@ export function SourceEditorContainer() {
         if (value === 'rss') {
             setPlaywrightEnabled(false);
         }
+        if (value !== 'rss') {
+            setRssAuthoring(DEFAULT_RSS_AUTHORING);
+        }
     };
+
+    const handleToolboxTabChange = (tab: ToolboxTab) => {
+        setActiveToolboxTab(tab);
+        const newStrategy = tabToStrategy(tab);
+        if (newStrategy !== crawlStrategy) {
+            handleCrawlStrategyChange(newStrategy);
+        }
+    };
+
+    const handleSelectProbeCandidate = (feedUrl: string) => {
+        setSelectedRssFeed(feedUrl);
+    };
+
+    // Sidebar header: tab switcher (always visible above sidebar content)
+    const sidebarHeader = (
+        <ToolboxTabs
+            activeTab={activeToolboxTab}
+            onTabChange={handleToolboxTabChange}
+        />
+    );
+
+    // Sidebar override: only when RSS tab active — replaces SimulatorSidebar
+    const sidebarOverride = activeToolboxTab === 'rss' ? (
+        <RssToolboxPanel
+            baseUrl={baseUrl}
+            detectingRss={detectingRss}
+            detectionStatus={detectionStatus}
+            onDetectRssFeeds={() => void detectRssFeeds()}
+            rssFeedOptions={rssFeedOptions}
+            selectedRssFeed={selectedRssFeed}
+            onSelectedRssFeedChange={setSelectedRssFeed}
+            onApplySelectedRssFeed={applySelectedRssFeed}
+            probeResult={probeResult}
+            onSelectCandidate={handleSelectProbeCandidate}
+            rssPreview={rssPreview}
+            rssPreviewLoading={rssPreviewLoading}
+            rssPreviewError={rssPreviewError}
+            rssAuthoring={rssAuthoring}
+            onRssAuthoringChange={setRssAuthoring}
+            selectorError={selectorValidationError}
+            rssSummary={rssSummary}
+            crawlParamsPreview={
+                rssConfigPreview
+                    ? (rssConfigPreview.crawl_params as unknown as Record<string, unknown>)
+                    : null
+            }
+            extractionDataPreview={
+                rssConfigPreview
+                    ? (rssConfigPreview.extraction_data as unknown as Record<string, unknown>)
+                    : null
+            }
+        />
+    ) : undefined;
 
     return (
         <div className="flex h-full w-full flex-col">
-            <form onSubmit={handleFormSubmit} className="relative z-10 border-b border-border bg-card/50 px-5 py-4">
+            <form onSubmit={handleFormSubmit} className="relative z-10 border-b border-border bg-card/50 px-4 py-4 sm:px-6">
                 <SourceMetadataForm
                     name={name}
                     onNameChange={setName}
@@ -263,38 +409,15 @@ export function SourceEditorContainer() {
                     baseUrl={baseUrl}
                     onBaseUrlChange={handleBaseUrlChange}
                     onBaseUrlBlur={handleBaseUrlBlur}
-                    crawlStrategy={crawlStrategy}
-                    onCrawlStrategyChange={handleCrawlStrategyChange}
                     crawlInterval={crawlInterval}
                     onCrawlIntervalChange={setCrawlInterval}
-                    detectingRss={detectingRss}
-                    rssDetectionStatus={detectionStatus}
-                    onDetectRssFeeds={() => void detectRssFeeds()}
                     submitting={submitting}
                     editMode={isEditMode}
                     sourceLoading={sourceLoading}
-                    rssPanel={(
-                        <RssDetectionPanel
-                            rssFeedOptions={rssFeedOptions}
-                            selectedRssFeed={selectedRssFeed}
-                            onSelectedRssFeedChange={setSelectedRssFeed}
-                            onApplySelectedRssFeed={() => {
-                                applySelectedRssFeed();
-                                setSimulatorLoading(true);
-                            }}
-                        />
-                    )}
-                    rssPreviewPanel={(
-                        <RssPreviewPanel
-                            preview={rssPreview}
-                            loading={rssPreviewLoading}
-                            error={rssPreviewError}
-                        />
-                    )}
                 />
             </form>
 
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden min-h-0">
                 <SourceSimulatorLayout
                     sidebarRef={sidebarRef}
                     baseUrl={baseUrl}
@@ -308,6 +431,8 @@ export function SourceEditorContainer() {
                     onPlaywrightToggleRequest={handlePlaywrightToggleRequest}
                     onWorkflowChange={setWorkflowData}
                     onSelectorPreviewChange={setSelectorPreview}
+                    sidebarHeader={sidebarHeader}
+                    sidebarOverride={sidebarOverride}
                 />
             </div>
 

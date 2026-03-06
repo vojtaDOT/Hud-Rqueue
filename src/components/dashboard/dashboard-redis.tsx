@@ -286,10 +286,10 @@ export function DashboardRedis() {
                         </div>
                     )}
                     {live && (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                             <span className="relative flex h-2 w-2">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                                <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                             </span>
                             Live
                         </span>
@@ -368,7 +368,7 @@ export function DashboardRedis() {
                                                     <td className="p-3 text-muted-foreground">{formatJobTime(job.started_at)}</td>
                                                     <td className="p-3 text-muted-foreground">{formatJobTime(job.completed_at)}</td>
                                                     <td className="p-3 text-muted-foreground">{jobDuration(job) ?? '—'}</td>
-                                                    <td className="p-3 max-w-[200px] truncate text-red-600 dark:text-red-400" title={job.error_message}>
+                                                    <td className="p-3 max-w-[200px] truncate text-rose-600 dark:text-rose-400" title={job.error_message}>
                                                         {job.error_message || '—'}
                                                     </td>
                                                 </tr>

@@ -1,11 +1,10 @@
 'use client';
 
-import type { ReactNode, RefObject } from 'react';
-import { AlertCircle, CheckCircle2, ChevronRight, Globe, Info, Loader2, Plus, Rss } from 'lucide-react';
+import type { RefObject } from 'react';
+import { ChevronRight, Globe, Loader2, Plus } from 'lucide-react';
 
-import type { RssDetectionStatus } from '@/components/sources/hooks/use-rss-detection';
 import { ObecAutocomplete } from '@/components/sources/obec-autocomplete';
-import type { CrawlStrategy, Obec, SourceType } from '@/components/sources/types';
+import type { Obec, SourceType } from '@/components/sources/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,16 +34,9 @@ interface SourceMetadataFormProps {
     baseUrl: string;
     onBaseUrlChange: (value: string) => void;
     onBaseUrlBlur?: () => void;
-    crawlStrategy: CrawlStrategy;
-    onCrawlStrategyChange: (value: CrawlStrategy) => void;
     crawlInterval: string;
     onCrawlIntervalChange: (value: string) => void;
-    detectingRss: boolean;
-    rssDetectionStatus?: RssDetectionStatus;
-    onDetectRssFeeds: () => void;
     submitting: boolean;
-    rssPanel?: ReactNode;
-    rssPreviewPanel?: ReactNode;
     editMode?: boolean;
     sourceLoading?: boolean;
 }
@@ -67,23 +59,16 @@ export function SourceMetadataForm({
     baseUrl,
     onBaseUrlChange,
     onBaseUrlBlur,
-    crawlStrategy,
-    onCrawlStrategyChange,
     crawlInterval,
     onCrawlIntervalChange,
-    detectingRss,
-    rssDetectionStatus,
-    onDetectRssFeeds,
     submitting,
-    rssPanel,
-    rssPreviewPanel,
     editMode,
     sourceLoading,
 }: SourceMetadataFormProps) {
     return (
         <div className="space-y-3">
             {/* Row 1: Name + Type */}
-            <div className="grid grid-cols-[1fr_180px] gap-3">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
                 <div>
                     <Label htmlFor="name" className="mb-1 block text-xs text-muted-foreground">Nazev</Label>
                     <Input
@@ -124,8 +109,8 @@ export function SourceMetadataForm({
                 selectedKrajName={selectedObec?.kraj_nazev}
             />
 
-            {/* Row 3: Base URL + Interval + Strategy + Actions */}
-            <div className="grid grid-cols-[1fr_140px_120px] gap-3">
+            {/* Row 3: Base URL + Interval + Actions */}
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
                 <div>
                     <Label htmlFor="baseUrl" className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
                     <div className="relative">
@@ -137,12 +122,9 @@ export function SourceMetadataForm({
                             onChange={(event) => onBaseUrlChange(event.target.value)}
                             onBlur={onBaseUrlBlur}
                             placeholder="https://example.com/bulletin"
-                            className="pl-10 pr-9"
+                            className="pl-10"
                             required
                         />
-                        {detectingRss && (
-                            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-                        )}
                     </div>
                 </div>
                 <div>
@@ -160,95 +142,40 @@ export function SourceMetadataForm({
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label htmlFor="crawlStrategy" className="mb-1 block text-xs text-muted-foreground">Strategie</Label>
-                    <Select value={crawlStrategy} onValueChange={(value) => onCrawlStrategyChange(value as CrawlStrategy)}>
-                        <SelectTrigger id="crawlStrategy">
-                            <SelectValue placeholder="Strategie" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="list">List</SelectItem>
-                            <SelectItem value="rss">RSS</SelectItem>
-                        </SelectContent>
-                    </Select>
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end md:pt-6">
+                    {editMode && (
+                        <a href="/sources">
+                            <Button type="button" variant="ghost" size="sm" className="w-full whitespace-nowrap sm:w-auto">
+                                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                Novy zdroj
+                            </Button>
+                        </a>
+                    )}
+                    <Button
+                        type="submit"
+                        size="sm"
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={submitting || sourceLoading}
+                    >
+                        {submitting ? (
+                            <>
+                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                {editMode ? 'Aktualizuji...' : 'Ukladam...'}
+                            </>
+                        ) : sourceLoading ? (
+                            <>
+                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                Nacitam...
+                            </>
+                        ) : (
+                            <>
+                                <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
+                                {editMode ? 'Aktualizovat zdroj' : 'Ulozit zdroj'}
+                            </>
+                        )}
+                    </Button>
                 </div>
             </div>
-
-            {/* Inline RSS detection status */}
-            {rssDetectionStatus?.type === 'success' && (
-                <div className="flex items-center gap-1.5 text-xs text-green-500">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    <span>Nalezeno {rssDetectionStatus.feedCount} feedu</span>
-                </div>
-            )}
-            {rssDetectionStatus?.type === 'no_feeds' && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Info className="h-3.5 w-3.5" />
-                    <span>Zadne RSS/Atom feedy nenalezeny</span>
-                </div>
-            )}
-            {rssDetectionStatus?.type === 'error' && (
-                <div className="flex items-center gap-1.5 text-xs text-destructive">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    <span>{rssDetectionStatus.message}</span>
-                </div>
-            )}
-
-            {/* Row 4: Action buttons + RSS panel */}
-            <div className="flex items-center justify-end gap-2 pt-1">
-                {editMode && (
-                    <a href="/sources" className="mr-auto">
-                        <Button type="button" variant="ghost" size="sm">
-                            <Plus className="mr-1.5 h-3.5 w-3.5" />
-                            Novy zdroj
-                        </Button>
-                    </a>
-                )}
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={onDetectRssFeeds}
-                    disabled={detectingRss || !/^https?:\/\//.test(baseUrl)}
-                >
-                    {detectingRss ? (
-                        <>
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            Hledam RSS...
-                        </>
-                    ) : (
-                        <>
-                            <Rss className="mr-1.5 h-3.5 w-3.5" />
-                            Detekovat RSS
-                        </>
-                    )}
-                </Button>
-                <Button
-                    type="submit"
-                    size="sm"
-                    disabled={submitting || sourceLoading}
-                >
-                    {submitting ? (
-                        <>
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            {editMode ? 'Aktualizuji...' : 'Ukladam...'}
-                        </>
-                    ) : sourceLoading ? (
-                        <>
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            Nacitam...
-                        </>
-                    ) : (
-                        <>
-                            <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
-                            {editMode ? 'Aktualizovat zdroj' : 'Ulozit zdroj'}
-                        </>
-                    )}
-                </Button>
-            </div>
-
-            {rssPanel}
-            {rssPreviewPanel}
         </div>
     );
 }

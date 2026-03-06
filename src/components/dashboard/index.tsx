@@ -20,10 +20,10 @@ export function Dashboard() {
 
     return (
         <div className="w-full space-y-6">
-            <div className="flex justify-center">
+            <div className="overflow-x-auto">
                 <nav
                     className={cn(
-                        'inline-flex items-center gap-1 px-1.5 py-1.5 rounded-xl',
+                        'inline-flex min-w-max items-center gap-1 px-1.5 py-1.5 rounded-xl',
                         'bg-card/80 backdrop-blur-sm',
                         'border border-border/60',
                         'shadow-sm',
@@ -34,14 +34,14 @@ export function Dashboard() {
                             key={value}
                             onClick={() => setActiveTab(value)}
                             className={cn(
-                                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 sm:px-4',
                                 activeTab === value
                                     ? 'text-primary bg-primary/10 shadow-sm'
                                     : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                             )}
                         >
                             <Icon className="h-4 w-4" />
-                            <span className="hidden sm:inline">{label}</span>
+                            <span>{label}</span>
                         </button>
                     ))}
                 </nav>

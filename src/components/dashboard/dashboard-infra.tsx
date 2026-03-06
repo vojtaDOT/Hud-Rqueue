@@ -124,20 +124,20 @@ function formatUptime(seconds: number | null): string {
 function healthClass(health: InfraMetricsResponse['containers'][number]['health']): string {
     switch (health) {
         case 'healthy':
-            return 'text-green-600 dark:text-green-400';
+            return 'text-emerald-600 dark:text-emerald-400';
         case 'unhealthy':
-            return 'text-red-600 dark:text-red-400';
+            return 'text-rose-600 dark:text-rose-400';
         case 'starting':
-            return 'text-yellow-600 dark:text-yellow-400';
+            return 'text-amber-600 dark:text-amber-400';
         default:
             return 'text-muted-foreground';
     }
 }
 
 function statusClass(state: string): string {
-    if (state === 'running') return 'text-green-600 dark:text-green-400';
-    if (state === 'paused') return 'text-yellow-600 dark:text-yellow-400';
-    if (state === 'exited' || state === 'dead') return 'text-red-600 dark:text-red-400';
+    if (state === 'running') return 'text-emerald-600 dark:text-emerald-400';
+    if (state === 'paused') return 'text-amber-600 dark:text-amber-400';
+    if (state === 'exited' || state === 'dead') return 'text-rose-600 dark:text-rose-400';
     return 'text-muted-foreground';
 }
 
@@ -304,10 +304,10 @@ export function DashboardInfra() {
                 </div>
                 <div className="flex items-center gap-2">
                     {live && (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                             <span className="relative flex h-2 w-2">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                                <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                             </span>
                             Live
                         </span>

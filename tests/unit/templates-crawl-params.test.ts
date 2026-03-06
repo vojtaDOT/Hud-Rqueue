@@ -62,6 +62,9 @@ describe('CRAWL_PARAMS_RSS_TEMPLATE', () => {
             {
                 contract_metadata: metadata,
                 feed_url: 'https://example.com/feed.xml',
+                allow_html_documents: false,
+                use_playwright: false,
+                entry_link_selector: '',
             },
         );
 
@@ -71,6 +74,9 @@ describe('CRAWL_PARAMS_RSS_TEMPLATE', () => {
         expect(result.item_identity).toBe('link_then_guid');
         expect(result.route).toEqual({ emit_to: 'source_urls' });
         expect(result.fetch).toEqual({ timeout_ms: 8000 });
+        expect(result.allow_html_documents).toBe(false);
+        expect(result.use_playwright).toBe(false);
+        expect(result).not.toHaveProperty('entry_link_selector');
         expect(result.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
     });
 });
@@ -96,12 +102,23 @@ describe('EXTRACTION_DATA_RSS_TEMPLATE', () => {
     it('renders RSS extraction data', () => {
         const warnings = [{ url: 'https://bad.com', status: 404, reason: 'http_error' }];
 
+        const probeResult = {
+            canonical_url: 'https://example.com',
+            page_kind: 'html',
+            selected_candidate: null,
+            candidates: [],
+            warnings: [],
+        };
+
         const result = renderTemplate<Record<string, unknown>>(
             EXTRACTION_DATA_RSS_TEMPLATE as unknown as Record<string, unknown>,
             {
                 feed_url: 'https://example.com/rss',
                 detected_feed_candidates: ['https://example.com/rss', 'https://example.com/atom'],
                 warnings,
+                probe_result: probeResult,
+                authoring_summary: 'Detect feed → Use RSS strategy → Discover per entry → Do not store HTML pages',
+                selected_preset: 'rss_v1',
             },
         );
 
@@ -113,5 +130,9 @@ describe('EXTRACTION_DATA_RSS_TEMPLATE', () => {
             'https://example.com/atom',
         ]);
         expect(result.warnings).toEqual(warnings);
+        expect(result.probe_result).toEqual(probeResult);
+        expect(result.authoring_summary).toBe('Detect feed → Use RSS strategy → Discover per entry → Do not store HTML pages');
+        expect(result.authoring_version).toBe(1);
+        expect(result.selected_preset).toBe('rss_v1');
     });
 });

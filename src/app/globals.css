@@ -45,45 +45,46 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.50 0 0);
-  --accent: oklch(0.96 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --background: oklch(0.985 0.008 220);
+  --foreground: oklch(0.24 0.028 246);
+  --card: oklch(0.995 0.004 220);
+  --card-foreground: oklch(0.24 0.028 246);
+  --popover: oklch(0.995 0.004 220);
+  --popover-foreground: oklch(0.24 0.028 246);
+  --primary: oklch(0.58 0.12 224);
+  --primary-foreground: oklch(0.985 0.004 220);
+  --secondary: oklch(0.95 0.012 216);
+  --secondary-foreground: oklch(0.29 0.026 244);
+  --muted: oklch(0.958 0.008 220);
+  --muted-foreground: oklch(0.52 0.018 238);
+  --accent: oklch(0.95 0.016 205);
+  --accent-foreground: oklch(0.29 0.026 244);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0 0);
-  --input: oklch(0.91 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.9 0.01 220);
+  --input: oklch(0.92 0.01 220);
+  --ring: oklch(0.63 0.1 224);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.96 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.91 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  --noise-opacity: 0.018;
-  --scrollbar-thumb: oklch(0.55 0 0 / 24%);
-  --scrollbar-thumb-hover: oklch(0.45 0 0 / 34%);
+  --sidebar: oklch(0.992 0.005 220);
+  --sidebar-foreground: oklch(0.24 0.028 246);
+  --sidebar-primary: oklch(0.58 0.12 224);
+  --sidebar-primary-foreground: oklch(0.985 0.004 220);
+  --sidebar-accent: oklch(0.95 0.016 205);
+  --sidebar-accent-foreground: oklch(0.29 0.026 244);
+  --sidebar-border: oklch(0.9 0.01 220);
+  --sidebar-ring: oklch(0.63 0.1 224);
+  --noise-opacity: 0.014;
+  --scrollbar-thumb: oklch(0.58 0.02 230 / 24%);
+  --scrollbar-thumb-hover: oklch(0.5 0.02 230 / 34%);
   --page-gradient:
-    radial-gradient(circle at top, oklch(0.98 0.02 200 / 0.85), transparent 38%),
-    linear-gradient(180deg, oklch(1 0 0) 0%, oklch(0.975 0 0) 100%);
-  --pipeline-connector-start: oklch(0.72 0.12 205 / 0.12);
-  --pipeline-connector-mid: oklch(0.74 0.13 205 / 0.5);
+    radial-gradient(circle at 18% -8%, oklch(0.995 0.02 210 / 0.96), transparent 31%),
+    radial-gradient(circle at 82% 0%, oklch(0.972 0.03 190 / 0.62), transparent 28%),
+    linear-gradient(180deg, oklch(0.995 0.007 210) 0%, oklch(0.985 0.01 215) 42%, oklch(0.972 0.014 205) 100%);
+  --pipeline-connector-start: oklch(0.62 0.1 224 / 0.14);
+  --pipeline-connector-mid: oklch(0.66 0.11 212 / 0.48);
 }
 
 .dark {
@@ -206,6 +207,36 @@ body::before {
   }
 }
 
+@keyframes ocean-beam-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scaleY(1);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate3d(2%, 1.5%, 0) scaleY(1.03);
+    opacity: 0.88;
+  }
+  100% {
+    transform: translate3d(-2.5%, 4%, 0) scaleY(1.08);
+    opacity: 0.66;
+  }
+}
+
+@keyframes ocean-surface-pulse {
+  0% {
+    transform: scale(1) translateY(0);
+    opacity: 0.32;
+  }
+  50% {
+    transform: scale(1.04) translateY(1.5%);
+    opacity: 0.48;
+  }
+  100% {
+    transform: scale(1.01) translateY(0.5%);
+    opacity: 0.28;
+  }
+}
+
 .pipeline-stage-enter {
   animation: pipeline-stage-enter 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -245,4 +276,10 @@ body::before {
 
 .page-description {
   @apply text-sm text-muted-foreground;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ocean-motion {
+    animation: none !important;
+  }
 }

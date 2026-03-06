@@ -367,22 +367,22 @@ function getStepHealthFromCounts(total: number, success: number, failed: number)
 function getStepHealthClasses(health: StepHealth): { circle: string; label: string; connector: string } {
     if (health === 'success') {
         return {
-            circle: 'border-green-500 bg-green-500/20 text-green-300',
-            label: 'text-green-200',
+            circle: 'border-green-500 bg-green-500/15 text-green-700 dark:bg-green-500/20 dark:text-green-300',
+            label: 'text-green-700 dark:text-green-200',
             connector: 'bg-green-500/80',
         };
     }
     if (health === 'warning') {
         return {
-            circle: 'border-amber-500 bg-amber-500/20 text-amber-200',
-            label: 'text-amber-200',
+            circle: 'border-amber-500 bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+            label: 'text-amber-700 dark:text-amber-200',
             connector: 'bg-amber-500/80',
         };
     }
     if (health === 'error') {
         return {
-            circle: 'border-red-500 bg-red-500/20 text-red-300',
-            label: 'text-red-200',
+            circle: 'border-red-500 bg-red-500/15 text-red-700 dark:bg-red-500/20 dark:text-red-300',
+            label: 'text-red-700 dark:text-red-200',
             connector: 'bg-red-500/75',
         };
     }
@@ -1941,16 +1941,16 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         const count = sourceStats.countBySource.get(sourceId) ?? 0;
 
         if (count === 0) {
-            return <span className="text-red-400 font-medium">neobjeveno</span>;
+            return <span className="font-medium text-red-600 dark:text-red-400">neobjeveno</span>;
         }
 
         const reference = parseDate(source.last_crawled_at) ?? parseDate(sourceStats.latestBySource.get(sourceId));
         if (!reference) {
-            return <span className="text-red-400 font-medium">neobjeveno</span>;
+            return <span className="font-medium text-red-600 dark:text-red-400">neobjeveno</span>;
         }
 
         const dayDiff = daysBetween(new Date(), reference);
-        const colorClass = dayDiff <= 1 ? 'text-green-400' : 'text-amber-400';
+        const colorClass = dayDiff <= 1 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400';
         const label = dayDiff === 0
             ? 'objeveno dnes'
             : dayDiff === 1
@@ -2012,9 +2012,9 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                 const canDeleteRun = runScope === 'active' && isRunIncomplete(runStatus);
                                 const deletingRun = Boolean(deletingRunIds[runId]);
                                 const badgeClass = runStatus === 'completed'
-                                    ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                                    ? 'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-300'
                                     : runStatus === 'failed'
-                                        ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                        ? 'bg-red-500/10 text-red-700 border-red-500/30 dark:text-red-300'
                                         : runStatus === 'canceled'
                                             ? 'bg-muted text-muted-foreground border-border'
                                             : 'bg-primary/15 text-primary border-primary/30';
@@ -2053,7 +2053,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                 size="icon"
                                                 onClick={() => void handleDeleteRun(run)}
                                                 disabled={deletingRun}
-                                                className="mr-2 self-center h-7 w-7 shrink-0 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
+                                                className="mr-2 self-center h-7 w-7 shrink-0 text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-300"
                                                 title={`Smazat nedokončený run #${runId}`}
                                             >
                                                 {deletingRun ? (
@@ -2103,7 +2103,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                     </span>
                                 </td>
                                 <td className="p-2">{job.attempts}</td>
-                                <td className="p-2 text-red-400">{job.error_message || '—'}</td>
+                                <td className="p-2 text-red-600 dark:text-red-400">{job.error_message || '—'}</td>
                             </tr>
                         ))
                     )}
@@ -2337,22 +2337,22 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         errors: Array<{ id: string; source: string; message: string }>,
     ) => {
         return (
-            <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-2">
+            <div className="space-y-2 rounded-md border border-red-500/30 bg-red-500/5 p-3">
                 <div className="flex items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-red-300">{title}</h4>
+                    <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">{title}</h4>
                     {ingestionLoading && (
-                        <span className="inline-flex items-center gap-1 text-xs text-red-200/80">
+                        <span className="inline-flex items-center gap-1 text-xs text-red-700/80 dark:text-red-200/80">
                             <Loader2 className="h-3 w-3 animate-spin" />
                             loading db...
                         </span>
                     )}
                 </div>
                 {errors.length === 0 ? (
-                    <p className="text-xs text-red-200/80">Žádné chyby v tomto kroku.</p>
+                    <p className="text-xs text-red-700/80 dark:text-red-200/80">Žádné chyby v tomto kroku.</p>
                 ) : (
                     <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
                         {errors.map((error) => (
-                            <div key={error.id} className="text-xs text-red-100">
+                            <div key={error.id} className="text-xs text-red-700 dark:text-red-100">
                                 <span className="font-semibold">{error.source}:</span>{' '}
                                 <span className="break-all">{error.message}</span>
                             </div>
@@ -2367,10 +2367,10 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         if (!devMode) return null;
         return (
             <details className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-sky-300">
+                <summary className="cursor-pointer text-xs font-semibold text-sky-700 dark:text-sky-300">
                     {title}
                 </summary>
-                <pre className="mt-2 max-h-80 overflow-auto rounded bg-card/70 p-2 text-[11px] text-sky-100">
+                <pre className="mt-2 max-h-80 overflow-auto rounded bg-card/70 p-2 text-[11px] text-sky-800 dark:text-sky-100">
                     {toPrettyJson(payload)}
                 </pre>
             </details>
@@ -2427,7 +2427,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         {operator.phase && <span>phase: {operator.phase}</span>}
                         {operator.step && <span>step: {operator.step}</span>}
                         {operator.status && <span>status: {operator.status}</span>}
-                        {operator.stale && <span className="text-amber-300">stale</span>}
+                        {operator.stale && <span className="text-amber-700 dark:text-amber-300">stale</span>}
                     </div>
                 </div>
             )}
@@ -2518,7 +2518,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     queueOperatorTrackedJobIds,
                 })}
                 {downloadSkippedByDiscovery && (
-                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
                     </div>
                 )}
@@ -2606,7 +2606,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     </Button>
                 </div>
                 {downloadSkippedByDiscovery && (
-                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
                     </div>
                 )}
@@ -2649,8 +2649,8 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                         <span className={cn(
                                             'text-xs font-medium px-2 py-1 rounded-full',
                                             hasBlob
-                                                ? 'bg-green-500/15 text-green-400'
-                                                : 'bg-amber-500/15 text-amber-400',
+                                                ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                                                : 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
                                         )}>
                                             {hasBlob ? 'Blob OK' : 'Blob missing'}
                                         </span>
@@ -2678,20 +2678,20 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                 <ExternalLink className="h-3 w-3" />
                                             </a>
                                         ) : (
-                                            <span className="text-amber-300">není dostupná</span>
+                                            <span className="text-amber-700 dark:text-amber-300">není dostupná</span>
                                         )}
                                     </div>
 
                                     {devMode && (
                                         <div className="space-y-2 rounded border border-sky-500/30 bg-sky-500/5 p-2 text-xs">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <span className="font-semibold text-sky-300">Blob UUID:</span>
-                                                <span className="font-mono text-sky-100 break-all">{blobUuid ?? '—'}</span>
+                                                <span className="font-semibold text-sky-700 dark:text-sky-300">Blob UUID:</span>
+                                                <span className="font-mono break-all text-sky-800 dark:text-sky-100">{blobUuid ?? '—'}</span>
                                                 {blobUuid && (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleCopyToClipboard(blobUuid, 'Blob UUID')}
-                                                        className="inline-flex items-center justify-center rounded border border-sky-400/40 bg-sky-500/10 p-1 text-sky-200 hover:bg-sky-500/20"
+                                                        className="inline-flex items-center justify-center rounded border border-sky-400/40 bg-sky-500/10 p-1 text-sky-700 hover:bg-sky-500/20 dark:text-sky-200"
                                                         title="Kopírovat UUID"
                                                     >
                                                         <Copy className="h-3.5 w-3.5" />
@@ -2699,7 +2699,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                 )}
                                             </div>
 
-                                            <div className="grid gap-1 text-[11px] text-sky-100 sm:grid-cols-2">
+                                            <div className="grid gap-1 text-[11px] text-sky-800 dark:text-sky-100 sm:grid-cols-2">
                                                 <span>Size: {formatBytes(debugDetails.fileSizeBytes)}</span>
                                                 <span>Content-Type: {debugDetails.fileContentType ?? '—'}</span>
                                                 <span>Checksum: {debugDetails.fileChecksum ?? '—'}</span>
@@ -2715,19 +2715,19 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
 
                                             <div className="flex flex-wrap items-center gap-2">
                                                 {missingBlobMeta && (
-                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-200">
                                                         <TriangleAlert className="h-3 w-3" />
                                                         Missing blob metadata
                                                     </span>
                                                 )}
                                                 {zeroSize && (
-                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-200">
                                                         <TriangleAlert className="h-3 w-3" />
                                                         File size = 0
                                                     </span>
                                                 )}
                                                 {missingContentType && (
-                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-200">
                                                         <TriangleAlert className="h-3 w-3" />
                                                         Missing content-type
                                                     </span>
@@ -2861,7 +2861,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                             </td>
                                             <td className="p-2 align-top">{latestJob?.attempts ?? '—'}</td>
                                             <td className="p-2 align-top">{retries}</td>
-                                            <td className="p-2 align-top text-red-400 break-words max-w-[20rem]">
+                                            <td className="max-w-[20rem] break-words p-2 align-top text-red-600 dark:text-red-400">
                                                 {latestJob?.error_message || '—'}
                                             </td>
                                             <td className="p-2 align-top">
@@ -2938,11 +2938,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                             </div>
                             <div className="rounded-lg border p-3">
                                 <p className="text-xs text-muted-foreground">OCR completed</p>
-                                <p className="text-2xl font-bold text-green-400">{summary.ocrCompleted}</p>
+                                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{summary.ocrCompleted}</p>
                             </div>
                             <div className="rounded-lg border p-3">
                                 <p className="text-xs text-muted-foreground">OCR failed</p>
-                                <p className="text-2xl font-bold text-red-400">{summary.ocrFailed}</p>
+                                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{summary.ocrFailed}</p>
                             </div>
                         </div>
                     )}
@@ -3004,7 +3004,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             )}>
                 <span className={cn(
                     'inline-flex items-center gap-1 rounded-full border px-2 py-0.5',
-                    isBusy ? 'border-primary/40 text-primary bg-primary/10' : 'border-green-500/40 text-green-300 bg-green-500/10',
+                    isBusy ? 'border-primary/40 text-primary bg-primary/10' : 'border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-300',
                 )}>
                     {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
                     {isBusy ? 'RUNNING' : 'IDLE'}
@@ -3018,9 +3018,9 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 <span className={cn(
                     'inline-flex items-center rounded-full border px-2 py-0.5',
                     operatorConnectionState === 'connected'
-                        ? 'border-green-500/40 text-green-300 bg-green-500/10'
+                        ? 'border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-300'
                         : operatorConnectionState === 'error'
-                            ? 'border-red-500/40 text-red-300 bg-red-500/10'
+                            ? 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300'
                             : 'border-primary/40 text-primary bg-primary/10',
                 )}>
                     Queue-Operator: {operatorConnectionState}
@@ -3031,7 +3031,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     </span>
                 )}
                 {operatorSourceStale && (
-                    <span className="inline-flex items-center rounded-full border border-amber-500/40 px-2 py-0.5 text-amber-200 bg-amber-500/10">
+                    <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-200">
                         stale data
                     </span>
                 )}
@@ -3083,7 +3083,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                                 useHistoricalColor
                                                     ? stepHealthClasses.circle
                                                     : isDone
-                                                        ? 'border-green-500 bg-green-500/20 text-green-300'
+                                                        ? 'border-green-500 bg-green-500/15 text-green-700 dark:bg-green-500/20 dark:text-green-300'
                                                         : isActive
                                                             ? 'border-primary bg-primary/20 text-primary shadow-[0_0_0_3px_hsl(var(--primary)/0.15)]'
                                                             : 'border-muted-foreground/40 text-muted-foreground',

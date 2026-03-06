@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/components/sidebar-context";
 import { Header } from "@/components/header";
 import { MainContent } from "@/components/main-content";
+import { AnimatedBackground } from "@/components/animated-background";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,10 +41,15 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <SidebarProvider>
-            <Header />
-            <MainContent>
-              {children}
-            </MainContent>
+            <div className="relative isolate min-h-dvh overflow-x-clip">
+              <AnimatedBackground />
+              <div className="relative z-10">
+                <Header />
+                <MainContent>
+                  {children}
+                </MainContent>
+              </div>
+            </div>
           </SidebarProvider>
           <Toaster />
         </ThemeProvider>

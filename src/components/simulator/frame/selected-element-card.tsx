@@ -16,10 +16,10 @@ const QUICK_ACTIONS: Array<{ action: SidebarQuickAction; label: string; classNam
     { action: 'scope', label: 'Pouzit jako Scope', className: 'bg-muted/50 text-foreground/80 hover:bg-muted' },
     { action: 'repeater', label: 'Pouzit jako Repeater', className: 'bg-muted/50 text-foreground/80 hover:bg-muted' },
     { action: 'source_url', label: 'Pouzit jako Source URL', className: 'bg-primary/20 text-primary hover:bg-primary/30' },
-    { action: 'document_url', label: 'Pouzit jako Document URL', className: 'bg-sky-500/20 text-sky-100 hover:bg-sky-500/30' },
-    { action: 'download_url', label: 'Pouzit jako Download URL', className: 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30' },
-    { action: 'filename_selector', label: 'Pouzit jako Filename', className: 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30' },
-    { action: 'pagination', label: 'Pouzit jako Pagination', className: 'bg-red-500/20 text-red-100 hover:bg-red-500/30' },
+    { action: 'document_url', label: 'Pouzit jako Document URL', className: 'bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:bg-sky-500/30' },
+    { action: 'download_url', label: 'Pouzit jako Download URL', className: 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:text-emerald-100 dark:hover:bg-emerald-500/30' },
+    { action: 'filename_selector', label: 'Pouzit jako Filename', className: 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:text-emerald-100 dark:hover:bg-emerald-500/30' },
+    { action: 'pagination', label: 'Pouzit jako Pagination', className: 'bg-red-500/10 text-red-700 hover:bg-red-500/15 dark:bg-red-500/20 dark:text-red-100 dark:hover:bg-red-500/30' },
     { action: 'auto_scaffold', label: 'Auto Scaffold', className: 'bg-primary/20 text-primary hover:bg-primary/30' },
 ];
 
@@ -45,7 +45,7 @@ export function SelectedElementCard({
                 </div>
                 <button
                     onClick={onRemoveElement}
-                    className="mr-2 text-muted-foreground transition-colors hover:text-red-400"
+                    className="mr-2 text-muted-foreground transition-colors hover:text-red-600 dark:hover:text-red-400"
                     title="Odstranit element z DOM"
                 >
                     <Eraser className="h-4 w-4" />

@@ -76,10 +76,10 @@ export function RepeaterStepRenderer({
         <RepeaterStepCard
             header={(
                 <>
-                    {step.type === 'source_url' && <Link2 className="h-3.5 w-3.5 text-cyan-300" />}
-                    {step.type === 'document_url' && <FileText className="h-3.5 w-3.5 text-sky-300" />}
-                    {step.type === 'download_file' && <Download className="h-3.5 w-3.5 text-emerald-300" />}
-                    {step.type === 'data_extract' && <FolderTree className="h-3.5 w-3.5 text-green-300" />}
+                    {step.type === 'source_url' && <Link2 className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />}
+                    {step.type === 'document_url' && <FileText className="h-3.5 w-3.5 text-sky-600 dark:text-sky-300" />}
+                    {step.type === 'download_file' && <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />}
+                    {step.type === 'data_extract' && <FolderTree className="h-3.5 w-3.5 text-green-600 dark:text-green-300" />}
                     <span>{stepTitle}</span>
                 </>
             )}
@@ -119,7 +119,7 @@ export function RepeaterStepRenderer({
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className="h-6 w-6 text-red-300"
+                        className="h-6 w-6 text-red-600 dark:text-red-300"
                         onClick={() => updatePhase(phaseKey, (phase) => {
                             const [chain] = removeStepFromTree(phase.chain, step.id);
                             return { ...phase, chain };

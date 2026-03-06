@@ -68,14 +68,14 @@ export function StepChooser({
     return (
         <>
             {armedTargetLabel && (
-                <section className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3">
-                    <div className="flex items-center justify-between gap-2 text-xs text-cyan-100">
+                <section className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
+                    <div className="flex items-center justify-between gap-2 text-xs text-cyan-700 dark:text-cyan-100">
                         <span className="font-semibold">Armed: {armedTargetLabel}</span>
                         <Button
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="h-7 text-cyan-100 hover:bg-cyan-500/20"
+                            className="h-7 text-cyan-700 hover:bg-cyan-500/15 dark:text-cyan-100 dark:hover:bg-cyan-500/20"
                             onClick={onCancelArmed}
                         >
                             <X className="mr-1 h-3.5 w-3.5" />
@@ -146,7 +146,7 @@ export function StepChooser({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
+                                className="h-8 border-cyan-500/40 bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/15 dark:bg-transparent dark:text-cyan-100 dark:hover:bg-cyan-500/20"
                                 onClick={onAddScope}
                             >
                                 + Scope
@@ -155,7 +155,7 @@ export function StepChooser({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-8 border-amber-500/40 bg-transparent text-amber-100"
+                                className="h-8 border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/20"
                                 disabled={!effectiveSelectedScopeId}
                                 onClick={onAddRepeater}
                             >
@@ -181,7 +181,7 @@ export function StepChooser({
                                         type="button"
                                         size="sm"
                                         variant="outline"
-                                        className="h-8 border-cyan-500/40 bg-transparent text-cyan-100"
+                                        className="h-8 border-cyan-500/40 bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/15 dark:bg-transparent dark:text-cyan-100 dark:hover:bg-cyan-500/20"
                                         disabled={!effectiveSelectedRepeaterId}
                                         onClick={onAddSourceUrl}
                                     >
@@ -191,7 +191,7 @@ export function StepChooser({
                                         type="button"
                                         size="sm"
                                         variant="outline"
-                                        className="h-8 border-sky-500/40 bg-transparent text-sky-100"
+                                        className="h-8 border-sky-500/40 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:bg-transparent dark:text-sky-100 dark:hover:bg-sky-500/20"
                                         disabled={!effectiveSelectedRepeaterId}
                                         onClick={onAddDocumentUrl}
                                     >
@@ -203,7 +203,7 @@ export function StepChooser({
                                     type="button"
                                     size="sm"
                                     variant="outline"
-                                    className="h-8 border-emerald-500/40 bg-transparent text-emerald-100"
+                                    className="h-8 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:bg-transparent dark:text-emerald-100 dark:hover:bg-emerald-500/20"
                                     disabled={!effectiveSelectedRepeaterId}
                                     onClick={onAddDownloadFile}
                                 >
@@ -215,7 +215,7 @@ export function StepChooser({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-8 border-green-500/40 bg-transparent text-green-100"
+                                className="h-8 border-green-500/40 bg-green-500/10 text-green-700 hover:bg-green-500/15 dark:bg-transparent dark:text-green-100 dark:hover:bg-green-500/20"
                                 disabled={!effectiveSelectedRepeaterId}
                                 onClick={onAddDataExtract}
                             >
@@ -225,7 +225,7 @@ export function StepChooser({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-8 border-red-500/40 bg-transparent text-red-100"
+                                className="h-8 border-red-500/40 bg-red-500/10 text-red-700 hover:bg-red-500/15 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-500/20"
                                 disabled={!effectiveSelectedScopeId}
                                 onClick={onAddPagination}
                             >

@@ -484,6 +484,29 @@ export async function GET(request: NextRequest) {
                         return { isList: false };
                     }
 
+                    function getPatternSelector(el) {
+                        const path = [];
+                        let cur = el;
+                        let depth = 0;
+                        while (cur && cur.nodeType === 1 && depth < 5) {
+                            let sel = cur.tagName.toLowerCase();
+                            if (cur.id && /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(cur.id)) { path.unshift(sel + '#' + cur.id); break; }
+                            if (cur.className && typeof cur.className === 'string') {
+                                const cls = cur.className.trim().split(/\\s+/).filter(c => c && /^[a-zA-Z_-]/.test(c) && !c.includes(':'))[0];
+                                if (cls) sel += '.' + cls;
+                            }
+                            path.unshift(sel);
+                            cur = cur.parentElement;
+                            depth++;
+                        }
+                        const patternSel = path.join(' > ');
+                        try {
+                            const count = document.querySelectorAll(patternSel).length;
+                            if (count > 1) return { patternSelector: patternSel, matchCount: count };
+                        } catch {}
+                        return { patternSelector: null, matchCount: 0 };
+                    }
+
                     const inspectorNodeMap = new Map();
 
                     function getInspectorBadges(el) {
@@ -807,24 +830,31 @@ export async function GET(request: NextRequest) {
                         const sel = getSelector(t);
                         const list = detectList(t);
                         const finalSelector = list.isList ? list.listSelector : sel;
-                        
+
                         // Build full selector with iframe path
                         let fullSelector = finalSelector;
                         if (FRAME_PATH.length > 0) {
                             fullSelector = FRAME_PATH.join(' >>> ') + ' >>> ' + finalSelector;
                         }
-                        
+
+                        const patternInfo = list.isList ? getPatternSelector(t) : { patternSelector: null, matchCount: 0 };
+                        const selectorMatchCount = (function() {
+                            try { return document.querySelectorAll(finalSelector).length; } catch { return 0; }
+                        })();
+
                         const msg = {
                             type: 'element-select',
-                            elementInfo: { 
+                            elementInfo: {
                                 selector: fullSelector,
                                 localSelector: finalSelector,
                                 framePath: FRAME_PATH,
-                                tagName: t.tagName.toLowerCase(), 
+                                tagName: t.tagName.toLowerCase(),
                                 textContent: (t.textContent || '').substring(0, 100).trim(),
-                                isList: list.isList, 
+                                isList: list.isList,
                                 listItemCount: list.count,
-                                inIframe: FRAME_PATH.length > 0
+                                inIframe: FRAME_PATH.length > 0,
+                                patternSelector: patternInfo.patternSelector,
+                                matchCount: patternInfo.matchCount || selectorMatchCount
                             }
                         };
 
@@ -875,6 +905,12 @@ export async function GET(request: NextRequest) {
                             document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                 try { iframe.contentWindow?.postMessage(e.data, '*'); } catch {}
                             });
+                        }
+                        else if (e.data.type === 'count-selector-matches') {
+                            const sel = e.data.selector;
+                            let count = 0;
+                            try { count = document.querySelectorAll(sel).length; } catch {}
+                            window.parent.postMessage({ type: 'selector-match-count', selector: sel, count: count }, '*');
                         }
                         else if (e.data.type === 'inspector:hover') {
                             if (!e.data.selector) {

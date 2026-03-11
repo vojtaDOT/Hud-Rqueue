@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,6 +12,7 @@ import { XmlWorkspace } from '@/components/sources/rss/xml-workspace';
 import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
 import { SimulatorSidebarV2, type SimulatorSidebarV2Ref } from '@/components/sources/timeline/simulator-sidebar-v2';
+import type { SelectorTarget } from '@/components/sources/timeline/nodes/use-selector-preview';
 import { ToolboxTabs, type ToolboxTab } from '@/components/sources/toolbox-tabs';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
@@ -85,6 +86,10 @@ export function SourceEditorContainer() {
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
     const sidebarV2Ref = useRef<SimulatorSidebarV2Ref>(null);
     const [workflowDataV2, setWorkflowDataV2] = useState<ScrapingWorkflowV2 | null>(null);
+
+    // V2 pick-from-preview state
+    const [selectorTarget, setSelectorTarget] = useState<SelectorTarget | null>(null);
+    const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
 
     const { sourceTypes, loadingTypes } = useSourceTypes();
 
@@ -260,7 +265,23 @@ export function SourceEditorContainer() {
         }
     }, [loadedSource, loadedWorkflow, loadedWorkflowV2]);
 
+    const handleMatchCount = useCallback((selector: string, count: number) => {
+        setMatchCounts((prev) => {
+            if (prev[selector] === count) return prev;
+            return { ...prev, [selector]: count };
+        });
+    }, []);
+
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
+        // V2 sidebar: if a pick target is set, fill the pattern selector into that target
+        if (selectorTarget && sidebarV2Ref.current) {
+            const patternSel = elementInfo?.patternSelector || selector;
+            sidebarV2Ref.current.fillSelectorTarget(selectorTarget, patternSel);
+            toast.success('Selector byl vlozen do aktivniho pole.');
+            return;
+        }
+
+        // V1 sidebar fallback
         const applied = sidebarRef.current?.applySelectedSelector(selector, elementInfo) ?? false;
         if (!applied) {
             toast.info('Vyberte cilovy Scope/Repeater nebo fokusujte CSS input v panelu workflow.');
@@ -429,6 +450,8 @@ export function SourceEditorContainer() {
             initialWorkflow={workflowDataV2}
             onWorkflowChange={setWorkflowDataV2}
             onSelectorPreviewChange={setSelectorPreview}
+            onSelectorTargetChange={setSelectorTarget}
+            matchCounts={matchCounts}
         />
     );
 
@@ -480,6 +503,7 @@ export function SourceEditorContainer() {
                     onPlaywrightToggleRequest={handlePlaywrightToggleRequest}
                     onWorkflowChange={setWorkflowData}
                     onSelectorPreviewChange={setSelectorPreview}
+                    onMatchCount={handleMatchCount}
                     sidebarHeader={sidebarHeader}
                     sidebarOverride={sidebarOverride}
                     frameOverride={frameOverride}

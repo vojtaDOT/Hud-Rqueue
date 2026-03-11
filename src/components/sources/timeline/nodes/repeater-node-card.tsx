@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import type { TimelineRepeaterNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface RepeaterNodeCardProps {
     node: TimelineRepeaterNode;
@@ -15,12 +16,19 @@ interface RepeaterNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelineRepeaterNode, 'selector' | 'label' | 'createSourceUrls'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
     children: React.ReactNode;
 }
 
-export function RepeaterNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, children }: RepeaterNodeCardProps) {
+export function RepeaterNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts, children }: RepeaterNodeCardProps) {
     const [collapsed, setCollapsed] = useState(false);
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
 
     return (
         <div
@@ -53,16 +61,22 @@ export function RepeaterNodeCard({ node, depth, onUpdate, onRemove, onSelectorPr
                         placeholder="Label (nepovinný)"
                         className="h-7 border-border bg-card/50 text-xs"
                     />
-                    <Input
+                    <SelectorInput
                         value={node.selector}
-                        onChange={(e) => {
-                            onUpdate({ selector: e.target.value });
-                            previewDebounced(e.target.value);
+                        onChange={(v) => {
+                            onUpdate({ selector: v });
+                            previewDebounced(v);
                         }}
-                        onFocus={() => preview(node.selector)}
-                        onBlur={clearPreview}
-                        placeholder="CSS selektor"
-                        className="h-7 border-border bg-card/50 text-xs font-mono"
+                        onFocus={() => {
+                            preview(node.selector);
+                            setPickTarget();
+                        }}
+                        onBlur={() => {
+                            clearPreview();
+                            clearPickTarget();
+                        }}
+                        matchCount={getMatchCount(node.selector)}
+                        onPick={() => setPickTarget()}
                     />
                     <div className="flex items-center gap-2 py-1">
                         <Switch

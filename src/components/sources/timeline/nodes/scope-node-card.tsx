@@ -6,7 +6,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TimelineScopeNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface ScopeNodeCardProps {
     node: TimelineScopeNode;
@@ -14,12 +15,19 @@ interface ScopeNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelineScopeNode, 'selector' | 'label'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
     children: React.ReactNode;
 }
 
-export function ScopeNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, children }: ScopeNodeCardProps) {
+export function ScopeNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts, children }: ScopeNodeCardProps) {
     const [collapsed, setCollapsed] = useState(false);
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
 
     return (
         <div
@@ -52,16 +60,22 @@ export function ScopeNodeCard({ node, depth, onUpdate, onRemove, onSelectorPrevi
                         placeholder="Label (nepovinný)"
                         className="h-7 border-border bg-card/50 text-xs"
                     />
-                    <Input
+                    <SelectorInput
                         value={node.selector}
-                        onChange={(e) => {
-                            onUpdate({ selector: e.target.value });
-                            previewDebounced(e.target.value);
+                        onChange={(v) => {
+                            onUpdate({ selector: v });
+                            previewDebounced(v);
                         }}
-                        onFocus={() => preview(node.selector)}
-                        onBlur={clearPreview}
-                        placeholder="CSS selektor"
-                        className="h-7 border-border bg-card/50 text-xs font-mono"
+                        onFocus={() => {
+                            preview(node.selector);
+                            setPickTarget();
+                        }}
+                        onBlur={() => {
+                            clearPreview();
+                            clearPickTarget();
+                        }}
+                        matchCount={getMatchCount(node.selector)}
+                        onPick={() => setPickTarget()}
                     />
                     <div className="mt-2 space-y-1.5">
                         {children}

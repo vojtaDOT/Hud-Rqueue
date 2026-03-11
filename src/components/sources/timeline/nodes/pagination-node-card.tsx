@@ -14,7 +14,8 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import type { PaginationUrlConfig, PaginationUrlMode, TimelinePaginationNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface PaginationNodeCardProps {
     node: TimelinePaginationNode;
@@ -22,11 +23,18 @@ interface PaginationNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelinePaginationNode, 'selector' | 'maxPages' | 'url'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
 }
 
-export function PaginationNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange }: PaginationNodeCardProps) {
+export function PaginationNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts }: PaginationNodeCardProps) {
     const [showUrlConfig, setShowUrlConfig] = useState(node.url !== null);
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
 
     const toggleUrlConfig = (enabled: boolean) => {
         setShowUrlConfig(enabled);
@@ -60,16 +68,23 @@ export function PaginationNodeCard({ node, depth, onUpdate, onRemove, onSelector
                 </Button>
             </div>
             <div className="mt-1.5 space-y-1.5">
-                <Input
+                <SelectorInput
                     value={node.selector}
-                    onChange={(e) => {
-                        onUpdate({ selector: e.target.value });
-                        previewDebounced(e.target.value);
+                    onChange={(v) => {
+                        onUpdate({ selector: v });
+                        previewDebounced(v);
                     }}
-                    onFocus={() => preview(node.selector)}
-                    onBlur={clearPreview}
+                    onFocus={() => {
+                        preview(node.selector);
+                        setPickTarget();
+                    }}
+                    onBlur={() => {
+                        clearPreview();
+                        clearPickTarget();
+                    }}
                     placeholder="CSS selektor (tlačítko další)"
-                    className="h-7 border-border bg-card/50 text-xs font-mono"
+                    matchCount={getMatchCount(node.selector)}
+                    onPick={() => setPickTarget()}
                 />
                 <div className="flex items-center gap-2">
                     <span className="text-[11px] text-muted-foreground whitespace-nowrap">Max stránek:</span>

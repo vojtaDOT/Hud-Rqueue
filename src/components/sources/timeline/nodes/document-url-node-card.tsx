@@ -3,9 +3,9 @@
 import { FileDown, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import type { TimelineDocumentUrlNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface DocumentUrlNodeCardProps {
     node: TimelineDocumentUrlNode;
@@ -13,10 +13,17 @@ interface DocumentUrlNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelineDocumentUrlNode, 'selector' | 'filenameSelector'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
 }
 
-export function DocumentUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange }: DocumentUrlNodeCardProps) {
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+export function DocumentUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts }: DocumentUrlNodeCardProps) {
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
 
     return (
         <div
@@ -34,27 +41,41 @@ export function DocumentUrlNodeCard({ node, depth, onUpdate, onRemove, onSelecto
                 </Button>
             </div>
             <div className="mt-1.5 space-y-1.5">
-                <Input
+                <SelectorInput
                     value={node.selector}
-                    onChange={(e) => {
-                        onUpdate({ selector: e.target.value });
-                        previewDebounced(e.target.value);
+                    onChange={(v) => {
+                        onUpdate({ selector: v });
+                        previewDebounced(v);
                     }}
-                    onFocus={() => preview(node.selector)}
-                    onBlur={clearPreview}
+                    onFocus={() => {
+                        preview(node.selector);
+                        setPickTarget();
+                    }}
+                    onBlur={() => {
+                        clearPreview();
+                        clearPickTarget();
+                    }}
                     placeholder="CSS selektor (odkaz na dokument)"
-                    className="h-7 border-border bg-card/50 text-xs font-mono"
+                    matchCount={getMatchCount(node.selector)}
+                    onPick={() => setPickTarget()}
                 />
-                <Input
+                <SelectorInput
                     value={node.filenameSelector ?? ''}
-                    onChange={(e) => {
-                        onUpdate({ filenameSelector: e.target.value });
-                        previewDebounced(e.target.value);
+                    onChange={(v) => {
+                        onUpdate({ filenameSelector: v });
+                        previewDebounced(v);
                     }}
-                    onFocus={() => preview(node.filenameSelector ?? '')}
-                    onBlur={clearPreview}
+                    onFocus={() => {
+                        preview(node.filenameSelector ?? '');
+                        setPickTarget('filenameSelector');
+                    }}
+                    onBlur={() => {
+                        clearPreview();
+                        clearPickTarget();
+                    }}
                     placeholder="Selektor pro název souboru (nepovinný)"
-                    className="h-7 border-border bg-card/50 text-xs font-mono"
+                    matchCount={getMatchCount(node.filenameSelector ?? '')}
+                    onPick={() => setPickTarget('filenameSelector')}
                 />
             </div>
         </div>

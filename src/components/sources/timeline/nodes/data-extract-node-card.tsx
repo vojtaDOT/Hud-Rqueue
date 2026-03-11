@@ -12,7 +12,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import type { DataExtractField, ExtractType, TimelineDataExtractNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface DataExtractNodeCardProps {
     node: TimelineDataExtractNode;
@@ -20,10 +21,17 @@ interface DataExtractNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelineDataExtractNode, 'groupLabel' | 'fields'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
 }
 
-export function DataExtractNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange }: DataExtractNodeCardProps) {
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+export function DataExtractNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts }: DataExtractNodeCardProps) {
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
     const updateField = (index: number, patch: Partial<DataExtractField>) => {
         const updated = node.fields.map((f, i) => (i === index ? { ...f, ...patch } : f));
         onUpdate({ fields: updated });
@@ -67,16 +75,22 @@ export function DataExtractNodeCard({ node, depth, onUpdate, onRemove, onSelecto
                                 placeholder="Klíč"
                                 className="h-7 border-border bg-card/50 text-xs"
                             />
-                            <Input
+                            <SelectorInput
                                 value={field.selector}
-                                onChange={(e) => {
-                                    updateField(i, { selector: e.target.value });
-                                    previewDebounced(e.target.value);
+                                onChange={(v) => {
+                                    updateField(i, { selector: v });
+                                    previewDebounced(v);
                                 }}
-                                onFocus={() => preview(field.selector)}
-                                onBlur={clearPreview}
-                                placeholder="CSS selektor"
-                                className="h-7 border-border bg-card/50 text-xs font-mono"
+                                onFocus={() => {
+                                    preview(field.selector);
+                                    setPickTarget(`fields.${i}.selector`);
+                                }}
+                                onBlur={() => {
+                                    clearPreview();
+                                    clearPickTarget();
+                                }}
+                                matchCount={getMatchCount(field.selector)}
+                                onPick={() => setPickTarget(`fields.${i}.selector`)}
                             />
                         </div>
                         <Select

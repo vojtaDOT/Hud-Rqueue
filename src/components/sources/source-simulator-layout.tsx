@@ -30,6 +30,7 @@ interface SourceSimulatorLayoutProps {
     onPlaywrightToggleRequest: (nextEnabled: boolean) => boolean;
     onWorkflowChange: (workflowData: ScrapingWorkflow) => void;
     onSelectorPreviewChange: (selector: string | null) => void;
+    onMatchCount?: (selector: string, count: number) => void;
     /** Rendered at the top of the sidebar panel (e.g. tab switcher) */
     sidebarHeader?: ReactNode;
     /** When provided, replaces the SimulatorSidebar below the header */
@@ -53,6 +54,7 @@ export function SourceSimulatorLayout({
     onPlaywrightToggleRequest,
     onWorkflowChange,
     onSelectorPreviewChange,
+    onMatchCount,
     sidebarHeader,
     sidebarOverride,
     frameOverride,
@@ -76,6 +78,7 @@ export function SourceSimulatorLayout({
                 playwrightEnabled={playwrightEnabled}
                 onPlaywrightToggleRequest={onPlaywrightToggleRequest}
                 highlightSelector={selectorPreview}
+                onMatchCount={onMatchCount}
             />
         );
 

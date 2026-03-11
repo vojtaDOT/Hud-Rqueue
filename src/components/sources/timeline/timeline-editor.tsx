@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import type { TimelineNode, TimelineNodeType } from '@/lib/crawler-types';
+import type { SelectorTarget } from './nodes/use-selector-preview';
 import {
     createTimelineClickNode,
     createTimelineDataExtractNode,
@@ -33,6 +34,8 @@ interface TimelineEditorProps {
     onRemoveNode: (nodeId: string) => void;
     onUpdateNode: (nodeId: string, updater: (node: TimelineNode) => TimelineNode) => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
 }
 
 function createNodeForType(type: TimelineNodeType): TimelineNode {
@@ -49,7 +52,7 @@ function createNodeForType(type: TimelineNodeType): TimelineNode {
     }
 }
 
-export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, onSelectorPreviewChange }: TimelineEditorProps) {
+export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, onSelectorPreviewChange, onSelectorTargetChange, matchCounts }: TimelineEditorProps) {
     const handleAddAtRoot = useCallback((type: TimelineNodeType) => {
         onAddNode(null, createNodeForType(type));
     }, [onAddNode]);
@@ -73,6 +76,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     >
                         {node.children.map((child) => renderNode(child, depth + 1))}
                         <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
@@ -88,6 +93,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     >
                         {node.children.map((child) => renderNode(child, depth + 1))}
                         <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
@@ -103,6 +110,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 );
 
@@ -115,6 +124,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 );
 
@@ -127,6 +138,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 );
 
@@ -139,6 +152,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 );
 
@@ -151,6 +166,8 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         onUpdate={(p) => makeUpdater(p)}
                         onRemove={() => onRemoveNode(node.id)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 );
 

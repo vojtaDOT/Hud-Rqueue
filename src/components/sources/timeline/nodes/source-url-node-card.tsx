@@ -3,7 +3,6 @@
 import { Link, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
     Select,
     SelectContent,
@@ -12,7 +11,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import type { TimelineSourceUrlNode } from '@/lib/crawler-types';
-import { useSelectorPreview } from './use-selector-preview';
+import { SelectorInput } from './selector-input';
+import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
 
 interface SourceUrlNodeCardProps {
     node: TimelineSourceUrlNode;
@@ -20,10 +20,17 @@ interface SourceUrlNodeCardProps {
     onUpdate: (patch: Partial<Pick<TimelineSourceUrlNode, 'selector' | 'urlType'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
 }
 
-export function SourceUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange }: SourceUrlNodeCardProps) {
-    const { preview, previewDebounced, clearPreview } = useSelectorPreview(onSelectorPreviewChange);
+export function SourceUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorPreviewChange, onSelectorTargetChange, matchCounts }: SourceUrlNodeCardProps) {
+    const { preview, previewDebounced, clearPreview, setPickTarget, clearPickTarget, getMatchCount } = useSelectorPreview({
+        onSelectorPreviewChange,
+        onSelectorTargetChange,
+        nodeId: node.id,
+        matchCounts,
+    });
 
     return (
         <div
@@ -41,16 +48,22 @@ export function SourceUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorP
                 </Button>
             </div>
             <div className="mt-1.5 space-y-1.5">
-                <Input
+                <SelectorInput
                     value={node.selector}
-                    onChange={(e) => {
-                        onUpdate({ selector: e.target.value });
-                        previewDebounced(e.target.value);
+                    onChange={(v) => {
+                        onUpdate({ selector: v });
+                        previewDebounced(v);
                     }}
-                    onFocus={() => preview(node.selector)}
-                    onBlur={clearPreview}
-                    placeholder="CSS selektor"
-                    className="h-7 border-border bg-card/50 text-xs font-mono"
+                    onFocus={() => {
+                        preview(node.selector);
+                        setPickTarget();
+                    }}
+                    onBlur={() => {
+                        clearPreview();
+                        clearPickTarget();
+                    }}
+                    matchCount={getMatchCount(node.selector)}
+                    onPick={() => setPickTarget()}
                 />
                 <Select value={node.urlType} onValueChange={(v) => onUpdate({ urlType: v })}>
                     <SelectTrigger className="h-7 border-border bg-card/50 text-xs">

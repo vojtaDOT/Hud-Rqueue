@@ -7,16 +7,20 @@ import type { ScrapingWorkflowV2 } from '@/lib/crawler-types';
 import { useTimelineState } from '@/components/sources/hooks/use-timeline-state';
 
 import { TimelineEditor } from './timeline-editor';
+import type { SelectorTarget } from './nodes/use-selector-preview';
 
 export interface SimulatorSidebarV2Ref {
     getWorkflow: () => ScrapingWorkflowV2;
     reset: (workflow?: ScrapingWorkflowV2) => void;
+    fillSelectorTarget: (target: SelectorTarget, selector: string) => boolean;
 }
 
 interface SimulatorSidebarV2Props {
     initialWorkflow?: ScrapingWorkflowV2 | null;
     onWorkflowChange?: (workflow: ScrapingWorkflowV2) => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
+    onSelectorTargetChange?: (target: SelectorTarget | null) => void;
+    matchCounts?: Record<string, number>;
     className?: string;
 }
 
@@ -24,6 +28,8 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
     initialWorkflow,
     onWorkflowChange,
     onSelectorPreviewChange,
+    onSelectorTargetChange,
+    matchCounts,
     className,
 }, ref) => {
     const {
@@ -46,7 +52,36 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
         reset: (next?: ScrapingWorkflowV2) => {
             if (next) resetWorkflow(next);
         },
-    }), [workflow, resetWorkflow]);
+        fillSelectorTarget: (target: SelectorTarget, selector: string) => {
+            // Try both phases to find the target node and update its selector field
+            for (const phase of ['discovery', 'process'] as const) {
+                updateNode(phase, target.nodeId, (node) => {
+                    if (target.field) {
+                        // Sub-field, e.g. "fields.0.selector" for data_extract or "filenameSelector" for document_url
+                        if (target.field === 'filenameSelector' && node.type === 'document_url') {
+                            return { ...node, filenameSelector: selector };
+                        }
+                        // data_extract: "fields.N.selector"
+                        const fieldMatch = target.field.match(/^fields\.(\d+)\.selector$/);
+                        if (fieldMatch && node.type === 'data_extract') {
+                            const idx = parseInt(fieldMatch[1], 10);
+                            const fields = node.fields.map((f, i) =>
+                                i === idx ? { ...f, selector } : f
+                            );
+                            return { ...node, fields };
+                        }
+                        return node;
+                    }
+                    // Default: update the main `selector` field
+                    if ('selector' in node) {
+                        return { ...node, selector };
+                    }
+                    return node;
+                });
+            }
+            return true;
+        },
+    }), [workflow, resetWorkflow, updateNode]);
 
     // Push changes to parent whenever workflow object updates
     // We use a simple effect-like approach by calling notify in render sync
@@ -82,6 +117,8 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
                     onRemoveNode={(nodeId) => removeNode('discovery', nodeId)}
                     onUpdateNode={(nodeId, updater) => updateNode('discovery', nodeId, updater)}
                     onSelectorPreviewChange={onSelectorPreviewChange}
+                    onSelectorTargetChange={onSelectorTargetChange}
+                    matchCounts={matchCounts}
                 />
             </div>
 
@@ -101,6 +138,8 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
                         onRemoveNode={(nodeId) => removeNode('process', nodeId)}
                         onUpdateNode={(nodeId, updater) => updateNode('process', nodeId, updater)}
                         onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
                     />
                 </div>
             )}

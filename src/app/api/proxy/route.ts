@@ -661,6 +661,32 @@ export async function GET(request: NextRequest) {
                             return { isList: false };
                         }
 
+                        function getPatternSelector(el) {
+                            const path = [];
+                            let current = el;
+                            while (current && current.nodeType === 1) {
+                                let selector = current.tagName.toLowerCase();
+                                if (current.id) {
+                                    selector += '#' + current.id;
+                                    path.unshift(selector);
+                                    break;
+                                }
+                                if (current.className && typeof current.className === 'string') {
+                                    const classes = current.className.trim().split(/\\s+/).filter(Boolean);
+                                    if (classes.length > 0) selector += '.' + classes[0];
+                                }
+                                // No :nth-of-type — this is the pattern version
+                                path.unshift(selector);
+                                current = current.parentElement;
+                            }
+                            const patternSel = path.join(' > ');
+                            try {
+                                const count = document.querySelectorAll(patternSel).length;
+                                if (count > 1) return { patternSelector: patternSel, matchCount: count };
+                            } catch {}
+                            return { patternSelector: null, matchCount: 0 };
+                        }
+
                         const inspectorNodeMap = new Map();
 
                         function getInspectorBadges(el) {
@@ -949,6 +975,11 @@ export async function GET(request: NextRequest) {
                                 fullSelector = FRAME_PATH.join(' >>> ') + ' >>> ' + localSelector;
                             }
 
+                            const patternInfo = listInfo.isList ? getPatternSelector(elementToSelect) : { patternSelector: null, matchCount: 0 };
+                            const selectorMatchCount = (function() {
+                                try { return document.querySelectorAll(localSelector).length; } catch { return 0; }
+                            })();
+
                             const elementInfo = {
                                 selector: fullSelector,
                                 localSelector: localSelector,
@@ -958,7 +989,9 @@ export async function GET(request: NextRequest) {
                                 textContent: elementToSelect.textContent?.substring(0, 100) || '',
                                 isList: listInfo.isList,
                                 listItemCount: listInfo.count,
-                                parentSelector: listInfo.isList ? getElementSelector(elementToSelect.parentElement) : undefined
+                                parentSelector: listInfo.isList ? getElementSelector(elementToSelect.parentElement) : undefined,
+                                patternSelector: patternInfo.patternSelector,
+                                matchCount: patternInfo.matchCount || selectorMatchCount
                             };
 
                             try {
@@ -1017,6 +1050,12 @@ export async function GET(request: NextRequest) {
                                 document.querySelectorAll('iframe, frame').forEach(function(iframe) {
                                     try { iframe.contentWindow?.postMessage(event.data, '*'); } catch {}
                                 });
+                            }
+                            else if (event.data.type === 'count-selector-matches') {
+                                const sel = event.data.selector;
+                                let count = 0;
+                                try { count = document.querySelectorAll(sel).length; } catch {}
+                                window.parent.postMessage({ type: 'selector-match-count', selector: sel, count: count }, '*');
                             }
                             else if (event.data.type === 'inspector:hover') {
                                 if (!event.data.selector) {

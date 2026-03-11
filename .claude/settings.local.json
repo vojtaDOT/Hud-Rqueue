@@ -97,7 +97,15 @@
       "Bash(export PATH=\"/Users/vojtechstehlik/.local/share/mise/installs/node/22/bin:$PATH\")",
       "Bash(npm run build --prefix /Users/vojtechstehlik/Documents/Personal/GitHub/HUD/queue)",
       "Bash(PATH=\"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" /usr/local/bin/npm run build)",
-      "Bash(PATH=\"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" git log --oneline -6)"
+      "Bash(PATH=\"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" git log --oneline -6)",
+      "Bash(/usr/local/bin/npx tsc:*)",
+      "Bash(export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\")",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//opt/homebrew/opt/**)",
+      "Read(//Users/vojtechstehlik/**)",
+      "Read(//opt/**)",
+      "Read(//usr/local/**)",
+      "Bash(/Users/vojtechstehlik/.local/bin/mise which:*)"
     ]
   }
 }

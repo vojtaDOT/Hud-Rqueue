@@ -4,7 +4,8 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 
 import { generateUnifiedCrawlParams } from '@/lib/crawler-export';
-import { ScrapingWorkflow } from '@/lib/crawler-types';
+import { generateCrawlParamsV2 } from '@/lib/crawler-export-v2';
+import type { ScrapingWorkflow, ScrapingWorkflowV2 } from '@/lib/crawler-types';
 import {
     buildListSourceConfig,
     buildRssSourceConfig,
@@ -12,6 +13,7 @@ import {
     type RssProbeResult,
 } from '@/lib/source-config';
 import { validateWorkflow } from '@/lib/workflow-validation';
+import { validateWorkflowV2 } from '@/lib/workflow-validation-v2';
 import type { CrawlStrategy, Obec } from '@/components/sources/types';
 import type { RssAuthoringValues } from '@/components/sources/rss-authoring-panel';
 
@@ -22,6 +24,7 @@ interface SubmitPayload {
     crawlStrategy: CrawlStrategy;
     crawlInterval: string;
     workflowData: ScrapingWorkflow | null;
+    workflowDataV2: ScrapingWorkflowV2 | null;
     playwrightEnabled: boolean;
     obec: Obec | null;
     selectedRssFeed: string;
@@ -47,6 +50,7 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
             crawlStrategy,
             crawlInterval,
             workflowData,
+            workflowDataV2,
             playwrightEnabled,
             obec,
             selectedRssFeed,
@@ -70,26 +74,39 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
         let extractionData: ReturnType<typeof buildListSourceConfig>['extraction_data'] | ReturnType<typeof buildRssSourceConfig>['extraction_data'] | null = null;
 
         if (crawlStrategy === 'list') {
-            if (!workflowData) {
-                toast.error('Workflow neni pripraveny.');
+            if (workflowDataV2) {
+                // V2 workflow path
+                const { error: validationError, warnings } = validateWorkflowV2(workflowDataV2);
+                if (validationError) {
+                    toast.error(validationError);
+                    return false;
+                }
+                warnings.forEach((warning) => toast.warning(warning));
+
+                const listConfig = buildListSourceConfig(generateCrawlParamsV2(workflowDataV2));
+                crawlParams = listConfig.crawl_params;
+                extractionData = listConfig.extraction_data;
+            } else if (workflowData) {
+                // V1 workflow fallback
+                const workflowToSave: ScrapingWorkflow = {
+                    ...workflowData,
+                    playwright_enabled: playwrightEnabled,
+                };
+
+                const { error: validationError, warnings } = validateWorkflow(workflowToSave);
+                if (validationError) {
+                    toast.error(validationError);
+                    return false;
+                }
+                warnings.forEach((warning) => toast.warning(warning));
+
+                const listConfig = buildListSourceConfig(generateUnifiedCrawlParams(workflowToSave));
+                crawlParams = listConfig.crawl_params;
+                extractionData = listConfig.extraction_data;
+            } else {
+                toast.error('Workflow není připravený.');
                 return false;
             }
-
-            const workflowToSave: ScrapingWorkflow = {
-                ...workflowData,
-                playwright_enabled: playwrightEnabled,
-            };
-
-            const { error: validationError, warnings } = validateWorkflow(workflowToSave);
-            if (validationError) {
-                toast.error(validationError);
-                return false;
-            }
-            warnings.forEach((warning) => toast.warning(warning));
-
-            const listConfig = buildListSourceConfig(generateUnifiedCrawlParams(workflowToSave));
-            crawlParams = listConfig.crawl_params;
-            extractionData = listConfig.extraction_data;
         } else {
             const feedUrl = selectedRssFeed.trim() || baseUrl.trim();
             if (!/^https?:\/\//.test(feedUrl)) {
@@ -138,7 +155,9 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
                     obec_id: obec?.id ? parseInt(obec.id, 10) : null,
                     okres_id: obec?.okres_id || null,
                     kraj_id: obec?.kraj_id || null,
-                    workflow_data: crawlStrategy === 'list' ? workflowData : null,
+                    workflow_data: crawlStrategy === 'list'
+                        ? (workflowDataV2 ?? workflowData)
+                        : (workflowDataV2 ?? null),
                 }),
             });
 

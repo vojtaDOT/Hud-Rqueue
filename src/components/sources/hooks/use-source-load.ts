@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ScrapingWorkflow } from '@/lib/crawler-types';
+import { toast } from 'sonner';
+
+import type { ScrapingWorkflow, ScrapingWorkflowV2 } from '@/lib/crawler-types';
+import { isTimelineV2 } from '@/lib/crawler-types';
+import { isV1Workflow, migrateV1toV2 } from '@/lib/workflow-migration';
 
 interface SourceData {
     id: number;
@@ -17,12 +21,19 @@ interface SourceData {
     okres_id: number | null;
     kraj_id: number | null;
     workflow_data: unknown;
+    data_extract?: unknown;
+    xml_rss?: string | null;
     [key: string]: unknown;
 }
 
 interface UseSourceLoadResult {
     source: SourceData | null;
+    /** Legacy v1 workflow — null when v2 or missing */
     workflow: ScrapingWorkflow | null;
+    /** V2 workflow — null when v1 not migrated or missing */
+    workflowV2: ScrapingWorkflowV2 | null;
+    /** Whether the loaded workflow was auto-migrated from v1 */
+    wasMigrated: boolean;
     loading: boolean;
     error: string | null;
 }
@@ -30,6 +41,8 @@ interface UseSourceLoadResult {
 export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
     const [source, setSource] = useState<SourceData | null>(null);
     const [workflow, setWorkflow] = useState<ScrapingWorkflow | null>(null);
+    const [workflowV2, setWorkflowV2] = useState<ScrapingWorkflowV2 | null>(null);
+    const [wasMigrated, setWasMigrated] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +50,8 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
         if (!sourceId) {
             setSource(null);
             setWorkflow(null);
+            setWorkflowV2(null);
+            setWasMigrated(false);
             setLoading(false);
             setError(null);
             return;
@@ -57,18 +72,38 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
             .then(({ source: data }) => {
                 setSource(data);
 
-                // Parse workflow_data if it's a valid ScrapingWorkflow shape
-                if (
-                    data.workflow_data &&
-                    typeof data.workflow_data === 'object' &&
-                    'discovery' in (data.workflow_data as object) &&
-                    'url_types' in (data.workflow_data as object)
-                ) {
-                    setWorkflow(data.workflow_data as ScrapingWorkflow);
-                } else {
+                const wd = data.workflow_data;
+
+                // V2 native workflow
+                if (isTimelineV2(wd)) {
                     setWorkflow(null);
+                    setWorkflowV2(wd);
+                    setWasMigrated(false);
+                    setLoading(false);
+                    return;
                 }
 
+                // V1 workflow — auto-migrate to V2
+                if (isV1Workflow(wd)) {
+                    setWorkflow(wd);
+                    const { workflow: migrated, droppedSteps } = migrateV1toV2(wd);
+                    setWorkflowV2(migrated);
+                    setWasMigrated(true);
+
+                    if (droppedSteps.length > 0) {
+                        for (const warning of droppedSteps) {
+                            toast.warning(warning);
+                        }
+                    }
+
+                    setLoading(false);
+                    return;
+                }
+
+                // No recognized workflow
+                setWorkflow(null);
+                setWorkflowV2(null);
+                setWasMigrated(false);
                 setLoading(false);
             })
             .catch((err: unknown) => {
@@ -82,5 +117,5 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
         };
     }, [sourceId]);
 
-    return { source, workflow, loading, error };
+    return { source, workflow, workflowV2, wasMigrated, loading, error };
 }

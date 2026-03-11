@@ -242,3 +242,130 @@ export const PLAYWRIGHT_ACTION_TYPES = new Set<BeforeAction['type']>([
     'evaluate',
     'screenshot',
 ]);
+
+// ── V2 Timeline Node Types ──────────────────────────────────────────────
+
+export type TimelineNodeType =
+    | 'scope'
+    | 'repeater'
+    | 'source_url'
+    | 'document_url'
+    | 'data_extract'
+    | 'pagination'
+    | 'click'
+    | 'timeout'
+    | 'javascript';
+
+export interface TimelineNodeBase {
+    id: string;
+    type: TimelineNodeType;
+}
+
+// Container nodes (have children)
+export interface TimelineScopeNode extends TimelineNodeBase {
+    type: 'scope';
+    selector: string;
+    label: string;
+    children: TimelineNode[];
+}
+
+export interface TimelineRepeaterNode extends TimelineNodeBase {
+    type: 'repeater';
+    selector: string;
+    label: string;
+    createSourceUrls: boolean;
+    children: TimelineNode[];
+}
+
+// Leaf nodes
+export interface TimelineSourceUrlNode extends TimelineNodeBase {
+    type: 'source_url';
+    selector: string;
+    urlType: string;
+}
+
+export interface TimelineDocumentUrlNode extends TimelineNodeBase {
+    type: 'document_url';
+    selector: string;
+    filenameSelector?: string;
+}
+
+export interface DataExtractField {
+    key: string;
+    selector: string;
+    extractType: ExtractType;
+}
+
+export interface TimelineDataExtractNode extends TimelineNodeBase {
+    type: 'data_extract';
+    groupLabel: string;
+    fields: DataExtractField[];
+}
+
+export interface TimelinePaginationNode extends TimelineNodeBase {
+    type: 'pagination';
+    selector: string;
+    maxPages: number;
+    url: PaginationUrlConfig | null;
+}
+
+export interface TimelineClickNode extends TimelineNodeBase {
+    type: 'click';
+    selector: string;
+    waitAfterMs: number;
+}
+
+export interface TimelineTimeoutNode extends TimelineNodeBase {
+    type: 'timeout';
+    ms: number;
+}
+
+export interface TimelineJavascriptNode extends TimelineNodeBase {
+    type: 'javascript';
+    script: string;
+}
+
+export type TimelineContainerNode = TimelineScopeNode | TimelineRepeaterNode;
+
+export type TimelineLeafNode =
+    | TimelineSourceUrlNode
+    | TimelineDocumentUrlNode
+    | TimelineDataExtractNode
+    | TimelinePaginationNode
+    | TimelineClickNode
+    | TimelineTimeoutNode
+    | TimelineJavascriptNode;
+
+export type TimelineNode = TimelineContainerNode | TimelineLeafNode;
+
+// V2 workflow envelope
+export interface ScrapingWorkflowV2 {
+    version: 2;
+    strategy: 'path' | 'rss';
+    singlePage: boolean;
+    discovery: TimelineNode[];
+    process: TimelineNode[] | null; // null when singlePage=true
+}
+
+// RSS input config (for rss strategy crawl_params extension)
+export interface RssInputConfig {
+    single_page: boolean;
+    workflow: ScrapingWorkflowV2;
+    xml_diff: {
+        enabled: boolean;
+        hash_algorithm: 'sha256';
+    };
+}
+
+export function isContainerNode(node: TimelineNode): node is TimelineContainerNode {
+    return node.type === 'scope' || node.type === 'repeater';
+}
+
+export function isTimelineV2(data: unknown): data is ScrapingWorkflowV2 {
+    return (
+        typeof data === 'object'
+        && data !== null
+        && 'version' in data
+        && (data as Record<string, unknown>).version === 2
+    );
+}

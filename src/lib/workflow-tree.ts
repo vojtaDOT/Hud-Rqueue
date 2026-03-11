@@ -1,16 +1,30 @@
 import {
     PLAYWRIGHT_ACTION_TYPES,
     type BeforeAction,
+    type DataExtractField,
     type DataExtractStep,
     type DocumentUrlStep,
     type DownloadFileStep,
     type PaginationConfig,
+    type PaginationUrlConfig,
     type PhaseConfig,
     type PlaywrightAction,
     type RepeaterNode,
     type RepeaterStep,
     type ScopeModule,
     type SourceUrlStep,
+    type TimelineClickNode,
+    type TimelineContainerNode,
+    type TimelineDataExtractNode,
+    type TimelineDocumentUrlNode,
+    type TimelineJavascriptNode,
+    type TimelineNode,
+    type TimelinePaginationNode,
+    type TimelineRepeaterNode,
+    type TimelineScopeNode,
+    type TimelineSourceUrlNode,
+    type TimelineTimeoutNode,
+    isContainerNode,
 } from '@/lib/crawler-types';
 
 export type SelectorKey = 'selector' | 'url_selector' | 'filename_selector';
@@ -506,4 +520,190 @@ export function firstStepTarget(
         if (child) return child;
     }
     return null;
+}
+
+// ── V2 Timeline Factory Functions ───────────────────────────────────────
+
+export function createTimelineScopeNode(label = ''): TimelineScopeNode {
+    return { id: createId('scope'), type: 'scope', selector: '', label, children: [] };
+}
+
+export function createTimelineRepeaterNode(label = ''): TimelineRepeaterNode {
+    return { id: createId('repeater'), type: 'repeater', selector: '', label, createSourceUrls: false, children: [] };
+}
+
+export function createTimelineSourceUrlNode(urlType = 'default'): TimelineSourceUrlNode {
+    return { id: createId('step'), type: 'source_url', selector: '', urlType };
+}
+
+export function createTimelineDocumentUrlNode(): TimelineDocumentUrlNode {
+    return { id: createId('step'), type: 'document_url', selector: '', filenameSelector: '' };
+}
+
+export function createTimelineDataExtractNode(groupLabel = ''): TimelineDataExtractNode {
+    return {
+        id: createId('step'),
+        type: 'data_extract',
+        groupLabel,
+        fields: [{ key: '', selector: '', extractType: 'text' }],
+    };
+}
+
+export function createTimelinePaginationNode(): TimelinePaginationNode {
+    return {
+        id: createId('step'),
+        type: 'pagination',
+        selector: '',
+        maxPages: 5,
+        url: { mode: 'hybrid', pattern: '[?&]page=(?<page>\\d+)', template: '', start_page: 1, step: 1 },
+    };
+}
+
+export function createTimelineClickNode(): TimelineClickNode {
+    return { id: createId('step'), type: 'click', selector: '', waitAfterMs: 500 };
+}
+
+export function createTimelineTimeoutNode(): TimelineTimeoutNode {
+    return { id: createId('step'), type: 'timeout', ms: 1000 };
+}
+
+export function createTimelineJavascriptNode(): TimelineJavascriptNode {
+    return { id: createId('step'), type: 'javascript', script: '' };
+}
+
+// ── V2 Timeline Tree Operations ─────────────────────────────────────────
+
+export function findTimelineNodeById(nodes: TimelineNode[], nodeId: string): TimelineNode | null {
+    for (const node of nodes) {
+        if (node.id === nodeId) return node;
+        if (isContainerNode(node)) {
+            const found = findTimelineNodeById(node.children, nodeId);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+export function findTimelineParent(nodes: TimelineNode[], nodeId: string): TimelineContainerNode | null {
+    for (const node of nodes) {
+        if (isContainerNode(node)) {
+            if (node.children.some((c) => c.id === nodeId)) return node;
+            const found = findTimelineParent(node.children, nodeId);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+export function updateTimelineNodeById(
+    nodes: TimelineNode[],
+    nodeId: string,
+    updater: (node: TimelineNode) => TimelineNode,
+): [TimelineNode[], boolean] {
+    let changed = false;
+    const next = nodes.map((node) => {
+        if (node.id === nodeId) {
+            changed = true;
+            return updater(node);
+        }
+        if (isContainerNode(node)) {
+            const [children, childChanged] = updateTimelineNodeById(node.children, nodeId, updater);
+            if (childChanged) {
+                changed = true;
+                return { ...node, children };
+            }
+        }
+        return node;
+    });
+    return [next, changed];
+}
+
+export function removeTimelineNodeById(nodes: TimelineNode[], nodeId: string): [TimelineNode[], boolean] {
+    let removed = false;
+    const filtered = nodes
+        .filter((node) => {
+            if (node.id === nodeId) { removed = true; return false; }
+            return true;
+        })
+        .map((node) => {
+            if (isContainerNode(node)) {
+                const [children, childRemoved] = removeTimelineNodeById(node.children, nodeId);
+                if (childRemoved) { removed = true; return { ...node, children }; }
+            }
+            return node;
+        });
+    return [filtered, removed];
+}
+
+export function insertTimelineNodeAt(
+    nodes: TimelineNode[],
+    parentId: string | null,
+    index: number,
+    newNode: TimelineNode,
+): TimelineNode[] {
+    if (parentId === null) {
+        const next = [...nodes];
+        const insertAt = Math.min(Math.max(0, index), next.length);
+        next.splice(insertAt, 0, newNode);
+        return next;
+    }
+    return nodes.map((node) => {
+        if (node.id === parentId && isContainerNode(node)) {
+            const children = [...node.children];
+            const insertAt = Math.min(Math.max(0, index), children.length);
+            children.splice(insertAt, 0, newNode);
+            return { ...node, children };
+        }
+        if (isContainerNode(node)) {
+            const children = insertTimelineNodeAt(node.children, parentId, index, newNode);
+            if (children !== node.children) return { ...node, children };
+        }
+        return node;
+    });
+}
+
+export function moveTimelineNode(
+    nodes: TimelineNode[],
+    nodeId: string,
+    targetParentId: string | null,
+    targetIndex: number,
+): TimelineNode[] {
+    const existing = findTimelineNodeById(nodes, nodeId);
+    if (!existing) return nodes;
+    const [withoutNode] = removeTimelineNodeById(nodes, nodeId);
+    return insertTimelineNodeAt(withoutNode, targetParentId, targetIndex, existing);
+}
+
+// ── V2 Focus System ─────────────────────────────────────────────────────
+
+export type TimelineFocusTarget =
+    | { type: 'phase'; phase: 'discovery' | 'process' }
+    | { type: 'node'; phase: 'discovery' | 'process'; nodeId: string; selectorKey?: string };
+
+export function describeTimelineTarget(target: TimelineFocusTarget): string {
+    const phaseLabel = target.phase === 'discovery' ? 'Discovery' : 'Process';
+    if (target.type === 'phase') return phaseLabel;
+    const suffix = target.selectorKey && target.selectorKey !== 'selector'
+        ? ` (${target.selectorKey})`
+        : '';
+    return `${phaseLabel} > ${target.nodeId}${suffix}`;
+}
+
+export function isSameTimelineTarget(a: TimelineFocusTarget | null, b: TimelineFocusTarget | null): boolean {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// ── V2 Data Extract Helpers ─────────────────────────────────────────────
+
+export function collectDataExtracts(nodes: TimelineNode[]): DataExtractField[] {
+    const fields: DataExtractField[] = [];
+    for (const node of nodes) {
+        if (node.type === 'data_extract') {
+            fields.push(...node.fields);
+        }
+        if (isContainerNode(node)) {
+            fields.push(...collectDataExtracts(node.children));
+        }
+    }
+    return fields;
 }

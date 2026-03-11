@@ -1,0 +1,190 @@
+'use client';
+
+import { useCallback } from 'react';
+
+import type { TimelineNode, TimelineNodeType } from '@/lib/crawler-types';
+import {
+    createTimelineClickNode,
+    createTimelineDataExtractNode,
+    createTimelineDocumentUrlNode,
+    createTimelineJavascriptNode,
+    createTimelinePaginationNode,
+    createTimelineRepeaterNode,
+    createTimelineScopeNode,
+    createTimelineSourceUrlNode,
+    createTimelineTimeoutNode,
+} from '@/lib/workflow-tree';
+
+import { StepChooserV2 } from './step-chooser-v2';
+import { ClickNodeCard } from './nodes/click-node-card';
+import { DataExtractNodeCard } from './nodes/data-extract-node-card';
+import { DocumentUrlNodeCard } from './nodes/document-url-node-card';
+import { JavascriptNodeCard } from './nodes/javascript-node-card';
+import { PaginationNodeCard } from './nodes/pagination-node-card';
+import { RepeaterNodeCard } from './nodes/repeater-node-card';
+import { ScopeNodeCard } from './nodes/scope-node-card';
+import { SourceUrlNodeCard } from './nodes/source-url-node-card';
+import { TimeoutNodeCard } from './nodes/timeout-node-card';
+
+interface TimelineEditorProps {
+    phase?: 'discovery' | 'process';
+    nodes: TimelineNode[];
+    onAddNode: (parentId: string | null, node: TimelineNode, index?: number) => void;
+    onRemoveNode: (nodeId: string) => void;
+    onUpdateNode: (nodeId: string, updater: (node: TimelineNode) => TimelineNode) => void;
+    onSelectorPreviewChange?: (selector: string | null) => void;
+}
+
+function createNodeForType(type: TimelineNodeType): TimelineNode {
+    switch (type) {
+        case 'scope': return createTimelineScopeNode();
+        case 'repeater': return createTimelineRepeaterNode();
+        case 'source_url': return createTimelineSourceUrlNode();
+        case 'document_url': return createTimelineDocumentUrlNode();
+        case 'data_extract': return createTimelineDataExtractNode();
+        case 'pagination': return createTimelinePaginationNode();
+        case 'click': return createTimelineClickNode();
+        case 'timeout': return createTimelineTimeoutNode();
+        case 'javascript': return createTimelineJavascriptNode();
+    }
+}
+
+export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, onSelectorPreviewChange }: TimelineEditorProps) {
+    const handleAddAtRoot = useCallback((type: TimelineNodeType) => {
+        onAddNode(null, createNodeForType(type));
+    }, [onAddNode]);
+
+    const handleAddToContainer = useCallback((parentId: string, type: TimelineNodeType) => {
+        onAddNode(parentId, createNodeForType(type));
+    }, [onAddNode]);
+
+    const renderNode = (node: TimelineNode, depth: number): React.ReactNode => {
+        const makeUpdater = <T extends TimelineNode>(patch: Partial<T>) => {
+            onUpdateNode(node.id, (prev) => ({ ...prev, ...patch }));
+        };
+
+        switch (node.type) {
+            case 'scope':
+                return (
+                    <ScopeNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    >
+                        {node.children.map((child) => renderNode(child, depth + 1))}
+                        <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
+                    </ScopeNodeCard>
+                );
+
+            case 'repeater':
+                return (
+                    <RepeaterNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    >
+                        {node.children.map((child) => renderNode(child, depth + 1))}
+                        <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
+                    </RepeaterNodeCard>
+                );
+
+            case 'source_url':
+                return (
+                    <SourceUrlNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    />
+                );
+
+            case 'document_url':
+                return (
+                    <DocumentUrlNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    />
+                );
+
+            case 'data_extract':
+                return (
+                    <DataExtractNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    />
+                );
+
+            case 'pagination':
+                return (
+                    <PaginationNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    />
+                );
+
+            case 'click':
+                return (
+                    <ClickNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                    />
+                );
+
+            case 'timeout':
+                return (
+                    <TimeoutNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                    />
+                );
+
+            case 'javascript':
+                return (
+                    <JavascriptNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                    />
+                );
+
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className="space-y-1.5">
+            {nodes.map((node) => renderNode(node, 0))}
+            <StepChooserV2 onSelect={handleAddAtRoot} />
+        </div>
+    );
+}

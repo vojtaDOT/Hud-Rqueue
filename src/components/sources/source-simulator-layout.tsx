@@ -34,6 +34,8 @@ interface SourceSimulatorLayoutProps {
     sidebarHeader?: ReactNode;
     /** When provided, replaces the SimulatorSidebar below the header */
     sidebarOverride?: ReactNode;
+    /** When provided, replaces the SimulatorFrame (iframe preview) */
+    frameOverride?: ReactNode;
     panelPlacement: 'right' | 'bottom';
     onPanelPlacementChange: (placement: 'right' | 'bottom') => void;
 }
@@ -53,10 +55,29 @@ export function SourceSimulatorLayout({
     onSelectorPreviewChange,
     sidebarHeader,
     sidebarOverride,
+    frameOverride,
     panelPlacement,
     onPanelPlacementChange,
 }: SourceSimulatorLayoutProps) {
     const [desktopLayout, setDesktopLayout] = useState(false);
+
+    const renderFrame = (className: string) =>
+        frameOverride ? (
+            <div className={`overflow-hidden ${className}`}>{frameOverride}</div>
+        ) : (
+            <SimulatorFrame
+                url={baseUrl}
+                loading={simulatorLoading}
+                onLoad={onIframeLoad}
+                className={className}
+                onElementSelect={onElementSelect}
+                onElementRemove={onElementRemove}
+                onQuickAction={onQuickAction}
+                playwrightEnabled={playwrightEnabled}
+                onPlaywrightToggleRequest={onPlaywrightToggleRequest}
+                highlightSelector={selectorPreview}
+            />
+        );
 
     const renderSidebarContent = (placement: 'right' | 'bottom') => placement === 'bottom'
         ? (sidebarOverride ?? (
@@ -121,18 +142,7 @@ export function SourceSimulatorLayout({
                         </div>
                     </div>
                     <div className="overflow-hidden rounded-xl border border-border bg-card">
-                        <SimulatorFrame
-                            url={baseUrl}
-                            loading={simulatorLoading}
-                            onLoad={onIframeLoad}
-                            className="h-[min(60vh,32rem)]"
-                            onElementSelect={onElementSelect}
-                            onElementRemove={onElementRemove}
-                            onQuickAction={onQuickAction}
-                            playwrightEnabled={playwrightEnabled}
-                            onPlaywrightToggleRequest={onPlaywrightToggleRequest}
-                            highlightSelector={selectorPreview}
-                        />
+                        {renderFrame('h-[min(60vh,32rem)]')}
                     </div>
                 </section>
 
@@ -153,18 +163,7 @@ export function SourceSimulatorLayout({
             <div className="h-full overflow-y-auto">
                 <div className="flex min-h-full flex-col">
                     <div className="min-h-[32rem] shrink-0">
-                        <SimulatorFrame
-                            url={baseUrl}
-                            loading={simulatorLoading}
-                            onLoad={onIframeLoad}
-                            className="h-[min(68vh,48rem)] min-h-[32rem]"
-                            onElementSelect={onElementSelect}
-                            onElementRemove={onElementRemove}
-                            onQuickAction={onQuickAction}
-                            playwrightEnabled={playwrightEnabled}
-                            onPlaywrightToggleRequest={onPlaywrightToggleRequest}
-                            highlightSelector={selectorPreview}
-                        />
+                        {renderFrame('h-[min(68vh,48rem)] min-h-[32rem]')}
                     </div>
 
                     <div className="shrink-0 border-t border-border bg-card/50 backdrop-blur-sm">
@@ -181,18 +180,7 @@ export function SourceSimulatorLayout({
     return (
         <ResizablePanelGroup direction="horizontal">
             <ResizablePanel defaultSize={75} minSize={30}>
-                <SimulatorFrame
-                    url={baseUrl}
-                    loading={simulatorLoading}
-                    onLoad={onIframeLoad}
-                    className="h-full"
-                    onElementSelect={onElementSelect}
-                    onElementRemove={onElementRemove}
-                    onQuickAction={onQuickAction}
-                    playwrightEnabled={playwrightEnabled}
-                    onPlaywrightToggleRequest={onPlaywrightToggleRequest}
-                    highlightSelector={selectorPreview}
-                />
+                {renderFrame('h-full')}
             </ResizablePanel>
 
             <ResizableHandle />

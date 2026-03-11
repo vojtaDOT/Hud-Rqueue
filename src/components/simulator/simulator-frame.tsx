@@ -31,6 +31,7 @@ interface SimulatorFrameProps {
     playwrightEnabled?: boolean;
     onPlaywrightToggleRequest?: (nextEnabled: boolean) => boolean;
     highlightSelector?: string | null;
+    onMatchCount?: (selector: string, count: number) => void;
 }
 
 function isElementInfoPayload(value: unknown): value is SimulatorElementInfo {
@@ -51,6 +52,7 @@ export function SimulatorFrame({
     playwrightEnabled = false,
     onPlaywrightToggleRequest,
     highlightSelector = null,
+    onMatchCount,
 }: SimulatorFrameProps) {
     const [iframeLoaded, setIframeLoaded] = useState(false);
     const [bridgeReady, setBridgeReady] = useState(false);
@@ -251,6 +253,8 @@ export function SimulatorFrame({
                     isList: elementInfo.isList,
                     listItemCount: elementInfo.listItemCount,
                     parentSelector: elementInfo.parentSelector,
+                    patternSelector: (elementInfo as Record<string, unknown>).patternSelector as string | null | undefined,
+                    matchCount: (elementInfo as Record<string, unknown>).matchCount as number | undefined,
                 };
                 onElementSelect?.(elementInfo.selector, selectorInfo);
                 setInteractionMode(null);
@@ -279,6 +283,14 @@ export function SimulatorFrame({
 
             if (message.type === 'proxy-error') {
                 setLoadError(String((message as { message?: unknown }).message ?? 'Proxy nacteni selhalo.'));
+                return;
+            }
+
+            if (message.type === 'selector-match-count') {
+                const data = message as unknown as { selector?: string; count?: number };
+                if (data.selector && typeof data.count === 'number') {
+                    onMatchCount?.(data.selector, data.count);
+                }
                 return;
             }
 
@@ -316,6 +328,8 @@ export function SimulatorFrame({
                     isList: elementInfo.isList,
                     listItemCount: elementInfo.listItemCount,
                     parentSelector: elementInfo.parentSelector,
+                    patternSelector: (elementInfo as Record<string, unknown>).patternSelector as string | null | undefined,
+                    matchCount: (elementInfo as Record<string, unknown>).matchCount as number | undefined,
                 };
                 onElementSelect?.(elementInfo.selector, selectorInfo);
             }
@@ -323,7 +337,7 @@ export function SimulatorFrame({
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [interactionMode, mergeInspectorNodes, onElementRemove, onElementSelect, onLoad, onPageTypeDetected]);
+    }, [interactionMode, mergeInspectorNodes, onElementRemove, onElementSelect, onLoad, onMatchCount, onPageTypeDetected]);
 
     useEffect(() => {
         if (!iframeLoaded) return;
@@ -420,6 +434,11 @@ export function SimulatorFrame({
         if (highlightSelector && highlightSelector.trim()) {
             iframeRef.current.contentWindow.postMessage({
                 type: 'highlight-selector',
+                selector: highlightSelector,
+            }, '*');
+            // Also request match count for the highlighted selector
+            iframeRef.current.contentWindow.postMessage({
+                type: 'count-selector-matches',
                 selector: highlightSelector,
             }, '*');
             return;

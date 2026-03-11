@@ -11,6 +11,8 @@ export const PREVIEW_BRIDGE_EVENT_TYPES = [
     'inspector:children',
     'selector:suggestions',
     'inspector:select',
+    'count-selector-matches',
+    'selector-match-count',
 ] as const;
 
 export type PreviewBridgeEventType = (typeof PREVIEW_BRIDGE_EVENT_TYPES)[number];

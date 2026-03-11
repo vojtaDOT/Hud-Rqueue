@@ -20,6 +20,8 @@ export interface ElementSelector {
     isList: boolean;
     listItemCount?: number;
     parentSelector?: string;
+    patternSelector?: string | null;
+    matchCount?: number;
 }
 
 // Worker Runtime Config - matches worker-runtime-minimal-template.json

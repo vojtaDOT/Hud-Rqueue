@@ -256,8 +256,8 @@ export function SimulatorFrame({
                     isList: elementInfo.isList,
                     listItemCount: elementInfo.listItemCount,
                     parentSelector: elementInfo.parentSelector,
-                    patternSelector: (elementInfo as Record<string, unknown>).patternSelector as string | null | undefined,
-                    matchCount: (elementInfo as Record<string, unknown>).matchCount as number | undefined,
+                    patternSelector: elementInfo.patternSelector,
+                    matchCount: elementInfo.matchCount,
                 };
                 onElementSelect?.(elementInfo.selector, selectorInfo);
                 setInteractionMode(null);
@@ -331,8 +331,8 @@ export function SimulatorFrame({
                     isList: elementInfo.isList,
                     listItemCount: elementInfo.listItemCount,
                     parentSelector: elementInfo.parentSelector,
-                    patternSelector: (elementInfo as Record<string, unknown>).patternSelector as string | null | undefined,
-                    matchCount: (elementInfo as Record<string, unknown>).matchCount as number | undefined,
+                    patternSelector: elementInfo.patternSelector,
+                    matchCount: elementInfo.matchCount,
                 };
                 onElementSelect?.(elementInfo.selector, selectorInfo);
             }

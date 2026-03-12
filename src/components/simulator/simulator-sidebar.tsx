@@ -81,7 +81,7 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
     const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
 
     const {
-        activeUrlTypeId, setActiveUrlTypeId, activeUrlType,
+        activeUrlType, setActiveUrlTypeId,
         handleUrlTypeAdd, handleUrlTypeRename, handleUrlTypeDelete,
     } = useUrlTypeManager(workflow, setWorkflow, setActiveTab);
 
@@ -89,8 +89,8 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         currentPhase, currentPhaseKey,
         scopeRefs, repeaterRefs,
         effectiveSelectedScopeId, effectiveSelectedRepeaterId,
-        selectedScopeId, setSelectedScopeId,
-        selectedRepeaterId, setSelectedRepeaterId,
+        setSelectedScopeId,
+        setSelectedRepeaterId,
         beforeToAdd, setBeforeToAdd,
         playwrightToAdd, setPlaywrightToAdd,
         updateWorkflowPhase,
@@ -434,6 +434,11 @@ export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebar
         onSelectorPreviewChange,
         resetWorkflow,
         resolveSelectorForTarget,
+        setArmedTarget,
+        setFocusedTarget,
+        setSelectedRepeaterId,
+        setSelectedScopeId,
+        updateWorkflowPhase,
         workflow,
     ]);
 

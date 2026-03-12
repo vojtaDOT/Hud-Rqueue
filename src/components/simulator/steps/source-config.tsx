@@ -1,10 +1,10 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BlockData } from "../types";
+import type { LegacyBlockChange, LegacyBlockData } from "./legacy-types";
 
 interface SourceConfigProps {
-    block: BlockData;
-    onChange: (id: string, newConfig: any) => void;
+    block: LegacyBlockData;
+    onChange: LegacyBlockChange;
 }
 
 export function SourceConfig({ block, onChange }: SourceConfigProps) {

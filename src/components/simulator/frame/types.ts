@@ -10,6 +10,8 @@ export interface SimulatorElementInfo {
     isList: boolean;
     listItemCount?: number;
     parentSelector?: string;
+    patternSelector?: string | null;
+    matchCount?: number;
 }
 
 export interface InspectorNode {

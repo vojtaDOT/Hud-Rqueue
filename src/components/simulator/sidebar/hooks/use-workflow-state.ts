@@ -154,7 +154,7 @@ export function useWorkflowState(options: UseWorkflowStateOptions) {
                 )),
             };
         });
-    }, []);
+    }, [setWorkflow]);
 
     /* --- step creation functions --- */
 

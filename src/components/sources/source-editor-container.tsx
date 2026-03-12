@@ -88,7 +88,6 @@ export function SourceEditorContainer() {
     const [workflowDataV2, setWorkflowDataV2] = useState<ScrapingWorkflowV2 | null>(null);
 
     // V2 pick-from-preview state
-    const [selectorTarget, setSelectorTarget] = useState<SelectorTarget | null>(null);
     const selectorTargetRef = useRef<SelectorTarget | null>(null) as MutableRefObject<SelectorTarget | null>;
     const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
 
@@ -275,7 +274,6 @@ export function SourceEditorContainer() {
 
     // Keep ref in sync: store non-null targets, don't clear on blur (null)
     const handleSelectorTargetChange = useCallback((target: SelectorTarget | null) => {
-        setSelectorTarget(target);
         if (target !== null) {
             selectorTargetRef.current = target;
         }
@@ -288,7 +286,6 @@ export function SourceEditorContainer() {
             const patternSel = elementInfo?.patternSelector || selector;
             sidebarV2Ref.current.fillSelectorTarget(target, patternSel);
             selectorTargetRef.current = null;
-            setSelectorTarget(null);
             toast.success('Selector byl vlozen do aktivniho pole.');
             return;
         }

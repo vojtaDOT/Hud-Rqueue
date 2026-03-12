@@ -361,7 +361,7 @@ function getParticleStyle(particle: ParticleLayer) {
     top: particle.top,
     transform: `translate3d(0, 0, 0)`,
     width: `${particle.size}px`,
-    ['--particle-x-drift' as '--particle-x-drift']: `${particle.xDrift}px`,
+    ['--particle-x-drift' as const]: `${particle.xDrift}px`,
   } as const;
 }
 
@@ -382,7 +382,12 @@ export function AnimatedBackground() {
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    setVariant(createBackgroundVariant(getSessionSeed()));
+    const nextVariant = createBackgroundVariant(getSessionSeed());
+    const variantFrameId = window.requestAnimationFrame(() => {
+      if (!cancelled) {
+        setVariant(nextVariant);
+      }
+    });
 
     const setupWebGPU = async () => {
       const gpu = (navigator as Navigator & { gpu?: WebGPU }).gpu;
@@ -516,13 +521,14 @@ export function AnimatedBackground() {
         }
       };
 
-      renderFrame();
+      renderFrame(startTime);
     };
 
     void setupWebGPU();
 
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(variantFrameId);
       cleanupResize();
 
       if (animationFrameId) {

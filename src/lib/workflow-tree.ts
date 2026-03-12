@@ -6,7 +6,6 @@ import {
     type DocumentUrlStep,
     type DownloadFileStep,
     type PaginationConfig,
-    type PaginationUrlConfig,
     type PhaseConfig,
     type PlaywrightAction,
     type RepeaterNode,

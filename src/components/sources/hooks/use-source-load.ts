@@ -48,18 +48,27 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
 
     useEffect(() => {
         if (!sourceId) {
-            setSource(null);
-            setWorkflow(null);
-            setWorkflowV2(null);
-            setWasMigrated(false);
-            setLoading(false);
-            setError(null);
+            queueMicrotask(() => {
+                setSource(null);
+                setWorkflow(null);
+                setWorkflowV2(null);
+                setWasMigrated(false);
+                setLoading(false);
+                setError(null);
+            });
             return;
         }
 
         const controller = new AbortController();
-        setLoading(true);
-        setError(null);
+        queueMicrotask(() => {
+            if (controller.signal.aborted) return;
+            setSource(null);
+            setWorkflow(null);
+            setWorkflowV2(null);
+            setWasMigrated(false);
+            setLoading(true);
+            setError(null);
+        });
 
         fetch(`/api/sources/${sourceId}`, { signal: controller.signal })
             .then(async (res) => {

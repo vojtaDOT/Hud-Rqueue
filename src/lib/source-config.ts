@@ -94,6 +94,9 @@ export interface SourceRssExtractionDataV1 extends SourceConfigEnvelopeBaseV1 {
 }
 
 export type SourceConfigEnvelopeV1 = SourceListExtractionDataV1 | SourceRssExtractionDataV1;
+type SourceRssExtractionDataWithNullableProbe = Omit<SourceRssExtractionDataV1, 'probe_result'> & {
+    probe_result?: RssProbeResult | null;
+};
 
 const UrlSchema = z.string().trim().url();
 
@@ -238,6 +241,25 @@ export function buildListSourceConfig(crawlParams: UnifiedWorkerCrawlParams): {
     };
 }
 
+function normalizeRssExtractionData(data: SourceRssExtractionDataWithNullableProbe): SourceRssExtractionDataV1 {
+    const normalized: SourceRssExtractionDataV1 = {
+        config_version: data.config_version,
+        strategy: 'rss',
+        selected_feed_url: data.selected_feed_url,
+        detected_feed_candidates: data.detected_feed_candidates,
+        warnings: data.warnings,
+        ...(data.authoring_summary !== undefined ? { authoring_summary: data.authoring_summary } : {}),
+        ...(data.authoring_version !== undefined ? { authoring_version: data.authoring_version } : {}),
+        ...(data.selected_preset !== undefined ? { selected_preset: data.selected_preset } : {}),
+    };
+
+    if (data.probe_result !== null && data.probe_result !== undefined) {
+        normalized.probe_result = data.probe_result;
+    }
+
+    return normalized;
+}
+
 export function buildRssSourceConfig(input: {
     feedUrl: string;
     detectedFeedCandidates?: string[];
@@ -264,6 +286,18 @@ export function buildRssSourceConfig(input: {
         entryLinkSelector,
     });
 
+    const extractionData = renderTemplate<SourceRssExtractionDataWithNullableProbe>(
+        EXTRACTION_DATA_RSS_TEMPLATE as unknown as Record<string, unknown>,
+        {
+            feed_url: feedUrl,
+            detected_feed_candidates: detectedFeedCandidates,
+            warnings,
+            probe_result: input.probeResult ?? null,
+            authoring_summary: summary,
+            selected_preset: 'rss_v1',
+        },
+    );
+
     return {
         crawl_params: renderTemplate<RssCrawlParamsV1>(
             CRAWL_PARAMS_RSS_TEMPLATE as unknown as Record<string, unknown>,
@@ -275,17 +309,7 @@ export function buildRssSourceConfig(input: {
                 entry_link_selector: entryLinkSelector,
             },
         ),
-        extraction_data: renderTemplate<SourceRssExtractionDataV1>(
-            EXTRACTION_DATA_RSS_TEMPLATE as unknown as Record<string, unknown>,
-            {
-                feed_url: feedUrl,
-                detected_feed_candidates: detectedFeedCandidates,
-                warnings,
-                probe_result: input.probeResult ?? null,
-                authoring_summary: summary,
-                selected_preset: 'rss_v1',
-            },
-        ),
+        extraction_data: normalizeRssExtractionData(extractionData),
     };
 }
 
@@ -440,7 +464,7 @@ export function validateSourcePayload(payload: unknown): SourcePayloadValidation
             enabled: parsed.enabled,
             crawl_strategy: 'rss',
             crawl_params: crawlParams.data,
-            extraction_data: extractionData.data,
+            extraction_data: normalizeRssExtractionData(extractionData.data),
             crawl_interval: parsed.crawl_interval,
             typ_id: parsed.typ_id,
             obec_id: parsed.obec_id,

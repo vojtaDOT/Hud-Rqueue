@@ -35,14 +35,20 @@ export function XmlWorkspace({ feedUrl, className }: XmlWorkspaceProps) {
 
     useEffect(() => {
         if (!feedUrl || !/^https?:\/\//.test(feedUrl)) {
-            setXmlContent('');
-            setError(null);
+            queueMicrotask(() => {
+                setXmlContent('');
+                setLoading(false);
+                setError(null);
+            });
             return;
         }
 
         const controller = new AbortController();
-        setLoading(true);
-        setError(null);
+        queueMicrotask(() => {
+            if (controller.signal.aborted) return;
+            setLoading(true);
+            setError(null);
+        });
 
         fetch(`/api/proxy?url=${encodeURIComponent(feedUrl)}`, {
             signal: controller.signal,

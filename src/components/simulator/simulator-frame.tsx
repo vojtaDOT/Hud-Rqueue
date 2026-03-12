@@ -32,6 +32,8 @@ interface SimulatorFrameProps {
     onPlaywrightToggleRequest?: (nextEnabled: boolean) => boolean;
     highlightSelector?: string | null;
     onMatchCount?: (selector: string, count: number) => void;
+    /** When true, hides the SelectedElementCard popup above the iframe */
+    hideSelectedElement?: boolean;
 }
 
 function isElementInfoPayload(value: unknown): value is SimulatorElementInfo {
@@ -53,6 +55,7 @@ export function SimulatorFrame({
     onPlaywrightToggleRequest,
     highlightSelector = null,
     onMatchCount,
+    hideSelectedElement = false,
 }: SimulatorFrameProps) {
     const [iframeLoaded, setIframeLoaded] = useState(false);
     const [bridgeReady, setBridgeReady] = useState(false);
@@ -574,7 +577,7 @@ export function SimulatorFrame({
                 onToggleRenderMode={renderMode === 'proxy' ? switchToPlaywright : retryWithProxy}
             />
 
-            {selectedElement && (
+            {!hideSelectedElement && selectedElement && (
                 <SelectedElementCard
                     selectedElement={selectedElement}
                     onRemoveElement={handleRemoveElement}

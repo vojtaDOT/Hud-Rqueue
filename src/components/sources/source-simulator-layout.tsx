@@ -39,6 +39,8 @@ interface SourceSimulatorLayoutProps {
     frameOverride?: ReactNode;
     panelPlacement: 'right' | 'bottom';
     onPanelPlacementChange: (placement: 'right' | 'bottom') => void;
+    /** When true, hides the SelectedElementCard popup in SimulatorFrame */
+    hideSelectedElement?: boolean;
 }
 
 export function SourceSimulatorLayout({
@@ -60,6 +62,7 @@ export function SourceSimulatorLayout({
     frameOverride,
     panelPlacement,
     onPanelPlacementChange,
+    hideSelectedElement,
 }: SourceSimulatorLayoutProps) {
     const [desktopLayout, setDesktopLayout] = useState(false);
 
@@ -79,6 +82,7 @@ export function SourceSimulatorLayout({
                 onPlaywrightToggleRequest={onPlaywrightToggleRequest}
                 highlightSelector={selectorPreview}
                 onMatchCount={onMatchCount}
+                hideSelectedElement={hideSelectedElement}
             />
         );
 

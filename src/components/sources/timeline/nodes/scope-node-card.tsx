@@ -32,7 +32,7 @@ export function ScopeNodeCard({ node, depth, onUpdate, onRemove, onSelectorPrevi
     return (
         <div
             className={`rounded-lg border border-primary/40 bg-primary/5 p-2 ${depth > 0 ? 'ml-4' : ''}`}
-            onClick={() => preview(node.selector)}
+            onClick={(e) => { if (e.target === e.currentTarget) preview(node.selector); }}
         >
             <div className="flex items-center gap-1.5">
                 <Button

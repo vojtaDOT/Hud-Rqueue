@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -89,6 +89,7 @@ export function SourceEditorContainer() {
 
     // V2 pick-from-preview state
     const [selectorTarget, setSelectorTarget] = useState<SelectorTarget | null>(null);
+    const selectorTargetRef = useRef<SelectorTarget | null>(null) as MutableRefObject<SelectorTarget | null>;
     const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
 
     const { sourceTypes, loadingTypes } = useSourceTypes();
@@ -272,22 +273,27 @@ export function SourceEditorContainer() {
         });
     }, []);
 
+    // Keep ref in sync: store non-null targets, don't clear on blur (null)
+    const handleSelectorTargetChange = useCallback((target: SelectorTarget | null) => {
+        setSelectorTarget(target);
+        if (target !== null) {
+            selectorTargetRef.current = target;
+        }
+    }, []);
+
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
-        // V2 sidebar: if a pick target is set, fill the pattern selector into that target
-        if (selectorTarget && sidebarV2Ref.current) {
+        // Use ref — it retains the last non-null target even after blur clears state
+        const target = selectorTargetRef.current;
+        if (target && sidebarV2Ref.current) {
             const patternSel = elementInfo?.patternSelector || selector;
-            sidebarV2Ref.current.fillSelectorTarget(selectorTarget, patternSel);
+            sidebarV2Ref.current.fillSelectorTarget(target, patternSel);
+            selectorTargetRef.current = null;
+            setSelectorTarget(null);
             toast.success('Selector byl vlozen do aktivniho pole.');
             return;
         }
 
-        // V1 sidebar fallback
-        const applied = sidebarRef.current?.applySelectedSelector(selector, elementInfo) ?? false;
-        if (!applied) {
-            toast.info('Vyberte cilovy Scope/Repeater nebo fokusujte CSS input v panelu workflow.');
-        } else {
-            toast.success('Selector byl vlozen do aktivniho pole.');
-        }
+        toast.info('Fokusujte CSS input v panelu workflow a pak kliknete na element.');
     };
 
     const handleElementRemove = (selector: string) => {
@@ -450,7 +456,7 @@ export function SourceEditorContainer() {
             initialWorkflow={workflowDataV2}
             onWorkflowChange={setWorkflowDataV2}
             onSelectorPreviewChange={setSelectorPreview}
-            onSelectorTargetChange={setSelectorTarget}
+            onSelectorTargetChange={handleSelectorTargetChange}
             matchCounts={matchCounts}
         />
     );
@@ -509,6 +515,7 @@ export function SourceEditorContainer() {
                     frameOverride={frameOverride}
                     panelPlacement={panelPlacement}
                     onPanelPlacementChange={setPanelPlacement}
+                    hideSelectedElement={activeToolboxTab === 'path'}
                 />
             </div>
 

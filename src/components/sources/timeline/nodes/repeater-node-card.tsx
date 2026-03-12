@@ -33,7 +33,7 @@ export function RepeaterNodeCard({ node, depth, onUpdate, onRemove, onSelectorPr
     return (
         <div
             className={`rounded-lg border border-amber-500/40 bg-amber-500/5 p-2 ${depth > 0 ? 'ml-4' : ''}`}
-            onClick={() => preview(node.selector)}
+            onClick={(e) => { if (e.target === e.currentTarget) preview(node.selector); }}
         >
             <div className="flex items-center gap-1.5">
                 <Button

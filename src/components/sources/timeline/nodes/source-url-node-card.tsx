@@ -3,13 +3,8 @@
 import { Link, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import type { TimelineSourceUrlNode } from '@/lib/crawler-types';
 import { SelectorInput } from './selector-input';
 import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
@@ -17,7 +12,7 @@ import { useSelectorPreview, type SelectorTarget } from './use-selector-preview'
 interface SourceUrlNodeCardProps {
     node: TimelineSourceUrlNode;
     depth: number;
-    onUpdate: (patch: Partial<Pick<TimelineSourceUrlNode, 'selector' | 'urlType'>>) => void;
+    onUpdate: (patch: Partial<Pick<TimelineSourceUrlNode, 'selector' | 'urlType' | 'emitParentUrl'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
     onSelectorTargetChange?: (target: SelectorTarget | null) => void;
@@ -49,7 +44,7 @@ export function SourceUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorP
             </div>
             <div className="mt-1.5 space-y-1.5">
                 <SelectorInput
-                    value={node.selector}
+                    value={node.emitParentUrl ? 'self' : node.selector}
                     onChange={(v) => {
                         onUpdate({ selector: v });
                         previewDebounced(v);
@@ -62,19 +57,34 @@ export function SourceUrlNodeCard({ node, depth, onUpdate, onRemove, onSelectorP
                         clearPreview();
                         clearPickTarget();
                     }}
+                    disabled={node.emitParentUrl === true}
+                    placeholder={node.emitParentUrl ? 'self' : 'CSS selektor'}
                     matchCount={getMatchCount(node.selector)}
                     onPick={() => setPickTarget()}
                 />
-                <Select value={node.urlType} onValueChange={(v) => onUpdate({ urlType: v })}>
-                    <SelectTrigger className="h-7 border-border bg-card/50 text-xs">
-                        <SelectValue placeholder="Typ URL" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="default">Výchozí</SelectItem>
-                        <SelectItem value="detail">Detail</SelectItem>
-                        <SelectItem value="document">Dokument</SelectItem>
-                    </SelectContent>
-                </Select>
+                <Input
+                    value={node.urlType}
+                    onChange={(e) => onUpdate({ urlType: e.target.value })}
+                    placeholder="url_type"
+                    className="h-7 border-border bg-card/50 text-xs"
+                    list={`source-url-type-${node.id}`}
+                />
+                <datalist id={`source-url-type-${node.id}`}>
+                    <option value="detail" />
+                    <option value="document" />
+                    <option value="attachments" />
+                </datalist>
+                <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Switch
+                        checked={node.emitParentUrl === true}
+                        onCheckedChange={(checked) => onUpdate({
+                            emitParentUrl: checked,
+                            selector: checked ? 'self' : node.selector === 'self' ? '' : node.selector,
+                        })}
+                        className="h-4 w-7"
+                    />
+                    Emit parent URL (inline-card routing)
+                </label>
             </div>
         </div>
     );

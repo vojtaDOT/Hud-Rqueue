@@ -7,18 +7,28 @@ import type { SelectorTarget } from './nodes/use-selector-preview';
 import {
     createTimelineClickNode,
     createTimelineDataExtractNode,
+    createTimelineDownloadFileNode,
     createTimelineDocumentUrlNode,
     createTimelineJavascriptNode,
+    createTimelineFillNode,
+    createTimelineRemoveElementNode,
     createTimelinePaginationNode,
     createTimelineRepeaterNode,
+    createTimelineScreenshotNode,
+    createTimelineScrollNode,
+    createTimelineSelectOptionNode,
     createTimelineScopeNode,
     createTimelineSourceUrlNode,
     createTimelineTimeoutNode,
+    createTimelineWaitNetworkNode,
+    createTimelineWaitSelectorNode,
 } from '@/lib/workflow-tree';
 
+import { BeforeActionNodeCard } from './nodes/before-action-node-card';
 import { StepChooserV2 } from './step-chooser-v2';
 import { ClickNodeCard } from './nodes/click-node-card';
 import { DataExtractNodeCard } from './nodes/data-extract-node-card';
+import { DownloadFileNodeCard } from './nodes/download-file-node-card';
 import { DocumentUrlNodeCard } from './nodes/document-url-node-card';
 import { JavascriptNodeCard } from './nodes/javascript-node-card';
 import { PaginationNodeCard } from './nodes/pagination-node-card';
@@ -44,11 +54,19 @@ function createNodeForType(type: TimelineNodeType): TimelineNode {
         case 'repeater': return createTimelineRepeaterNode();
         case 'source_url': return createTimelineSourceUrlNode();
         case 'document_url': return createTimelineDocumentUrlNode();
+        case 'download_file': return createTimelineDownloadFileNode();
         case 'data_extract': return createTimelineDataExtractNode();
         case 'pagination': return createTimelinePaginationNode();
+        case 'remove_element': return createTimelineRemoveElementNode();
+        case 'wait_selector': return createTimelineWaitSelectorNode();
+        case 'wait_network': return createTimelineWaitNetworkNode();
         case 'click': return createTimelineClickNode();
+        case 'scroll': return createTimelineScrollNode();
+        case 'fill': return createTimelineFillNode();
+        case 'select_option': return createTimelineSelectOptionNode();
         case 'timeout': return createTimelineTimeoutNode();
         case 'javascript': return createTimelineJavascriptNode();
+        case 'screenshot': return createTimelineScreenshotNode();
     }
 }
 
@@ -80,7 +98,7 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         matchCounts={matchCounts}
                     >
                         {node.children.map((child) => renderNode(child, depth + 1))}
-                        <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
+                        <StepChooserV2 mode="scope" onSelect={(type) => handleAddToContainer(node.id, type)} />
                     </ScopeNodeCard>
                 );
 
@@ -97,7 +115,7 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                         matchCounts={matchCounts}
                     >
                         {node.children.map((child) => renderNode(child, depth + 1))}
-                        <StepChooserV2 onSelect={(type) => handleAddToContainer(node.id, type)} />
+                        <StepChooserV2 mode="repeater" onSelect={(type) => handleAddToContainer(node.id, type)} />
                     </RepeaterNodeCard>
                 );
 
@@ -118,6 +136,20 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
             case 'document_url':
                 return (
                     <DocumentUrlNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
+                    />
+                );
+
+            case 'download_file':
+                return (
+                    <DownloadFileNodeCard
                         key={node.id}
                         node={node}
                         depth={depth}
@@ -171,6 +203,26 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
                     />
                 );
 
+            case 'remove_element':
+            case 'wait_selector':
+            case 'wait_network':
+            case 'scroll':
+            case 'fill':
+            case 'select_option':
+            case 'screenshot':
+                return (
+                    <BeforeActionNodeCard
+                        key={node.id}
+                        node={node}
+                        depth={depth}
+                        onUpdate={(p) => makeUpdater(p)}
+                        onRemove={() => onRemoveNode(node.id)}
+                        onSelectorPreviewChange={onSelectorPreviewChange}
+                        onSelectorTargetChange={onSelectorTargetChange}
+                        matchCounts={matchCounts}
+                    />
+                );
+
             case 'timeout':
                 return (
                     <TimeoutNodeCard
@@ -201,7 +253,7 @@ export function TimelineEditor({ nodes, onAddNode, onRemoveNode, onUpdateNode, o
     return (
         <div className="space-y-1.5">
             {nodes.map((node) => renderNode(node, 0))}
-            <StepChooserV2 onSelect={handleAddAtRoot} />
+            <StepChooserV2 mode="root" onSelect={handleAddAtRoot} />
         </div>
     );
 }

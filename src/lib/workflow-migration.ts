@@ -1,6 +1,7 @@
 import type {
     BeforeAction,
     DataExtractStep,
+    DownloadFileStep,
     DocumentUrlStep,
     RepeaterStep,
     ScrapingWorkflow,
@@ -19,11 +20,8 @@ import type {
 } from '@/lib/crawler-types';
 import { createId } from '@/lib/workflow-tree';
 
-/** V1 before action types that are dropped in V2 (not supported) */
-const DROPPED_BEFORE_TYPES = new Set(['remove_element', 'fill', 'select_option', 'scroll', 'screenshot', 'wait_selector', 'wait_network']);
-
-/** V1 repeater step types that are dropped in V2 */
-const DROPPED_STEP_TYPES = new Set(['download_file']);
+/** V1 before action types that are still unsupported in V2 timeline */
+const DROPPED_BEFORE_TYPES = new Set<string>();
 
 interface MigrationResult {
     workflow: ScrapingWorkflowV2;
@@ -32,6 +30,28 @@ interface MigrationResult {
 
 function migrateBeforeAction(action: BeforeAction, warnings: string[]): TimelineNode | null {
     switch (action.type) {
+        case 'remove_element':
+            return {
+                id: createId('step'),
+                type: 'remove_element',
+                selector: action.css_selector,
+            };
+
+        case 'wait_selector':
+            return {
+                id: createId('step'),
+                type: 'wait_selector',
+                selector: action.css_selector,
+                timeoutMs: action.timeout_ms,
+            };
+
+        case 'wait_network':
+            return {
+                id: createId('step'),
+                type: 'wait_network',
+                state: action.state,
+            };
+
         case 'click':
             return {
                 id: createId('step'),
@@ -39,6 +59,31 @@ function migrateBeforeAction(action: BeforeAction, warnings: string[]): Timeline
                 selector: action.css_selector,
                 waitAfterMs: action.wait_after_ms ?? 500,
             } satisfies TimelineClickNode;
+
+        case 'scroll':
+            return {
+                id: createId('step'),
+                type: 'scroll',
+                count: action.count,
+                delayMs: action.delay_ms,
+            };
+
+        case 'fill':
+            return {
+                id: createId('step'),
+                type: 'fill',
+                selector: action.css_selector,
+                value: action.value,
+                pressEnter: action.press_enter,
+            };
+
+        case 'select_option':
+            return {
+                id: createId('step'),
+                type: 'select_option',
+                selector: action.css_selector,
+                value: action.value,
+            };
 
         case 'wait_timeout':
             return {
@@ -54,6 +99,13 @@ function migrateBeforeAction(action: BeforeAction, warnings: string[]): Timeline
                 script: action.script,
             } satisfies TimelineJavascriptNode;
 
+        case 'screenshot':
+            return {
+                id: createId('step'),
+                type: 'screenshot',
+                filename: action.filename,
+            };
+
         default:
             if (DROPPED_BEFORE_TYPES.has(action.type)) {
                 warnings.push(`Akce "${action.type}" byla odebrána (nepodporována ve v2).`);
@@ -62,14 +114,19 @@ function migrateBeforeAction(action: BeforeAction, warnings: string[]): Timeline
     }
 }
 
-function migrateRepeaterStep(step: RepeaterStep, warnings: string[]): TimelineNode | null {
+function migrateRepeaterStep(
+    step: RepeaterStep,
+    urlTypeNamesById: Map<string, string>,
+    warnings: string[],
+): TimelineNode | null {
     switch (step.type) {
         case 'source_url':
             return {
                 id: createId('step'),
                 type: 'source_url',
                 selector: (step as SourceUrlStep).selector,
-                urlType: (step as SourceUrlStep).url_type_id ?? 'default',
+                urlType: urlTypeNamesById.get((step as SourceUrlStep).url_type_id ?? '') ?? 'detail',
+                emitParentUrl: (step as SourceUrlStep).emit_parent_url ?? false,
             } satisfies TimelineSourceUrlNode;
 
         case 'document_url':
@@ -79,6 +136,14 @@ function migrateRepeaterStep(step: RepeaterStep, warnings: string[]): TimelineNo
                 selector: (step as DocumentUrlStep).selector,
                 filenameSelector: (step as DocumentUrlStep).filename_selector ?? '',
             } satisfies TimelineDocumentUrlNode;
+
+        case 'download_file':
+            return {
+                id: createId('step'),
+                type: 'download_file',
+                urlSelector: (step as DownloadFileStep).url_selector,
+                filenameSelector: (step as DownloadFileStep).filename_selector ?? '',
+            };
 
         case 'data_extract': {
             const de = step as DataExtractStep;
@@ -95,21 +160,22 @@ function migrateRepeaterStep(step: RepeaterStep, warnings: string[]): TimelineNo
         }
 
         default:
-            if (DROPPED_STEP_TYPES.has(step.type)) {
-                warnings.push(`Krok "${step.type}" byl odebrán (nepodporován ve v2).`);
-            }
             return null;
     }
 }
 
-function migrateScopeModule(scope: ScopeModule, warnings: string[]): TimelineScopeNode {
+function migrateScopeModule(
+    scope: ScopeModule,
+    urlTypeNamesById: Map<string, string>,
+    warnings: string[],
+): TimelineScopeNode {
     const children: TimelineNode[] = [];
 
     // Migrate repeater if present
     if (scope.repeater) {
         const repeaterChildren: TimelineNode[] = [];
         for (const step of scope.repeater.steps) {
-            const migrated = migrateRepeaterStep(step, warnings);
+            const migrated = migrateRepeaterStep(step, urlTypeNamesById, warnings);
             if (migrated) repeaterChildren.push(migrated);
         }
 
@@ -118,7 +184,8 @@ function migrateScopeModule(scope: ScopeModule, warnings: string[]): TimelineSco
             type: 'repeater',
             selector: scope.repeater.css_selector,
             label: scope.repeater.label,
-            createSourceUrls: false,
+            routeKeySelector: scope.repeater.route_key_selector ?? '',
+            routeKeyExtract: scope.repeater.route_key_extract ?? 'text',
             children: repeaterChildren,
         };
         children.push(repeaterNode);
@@ -137,7 +204,7 @@ function migrateScopeModule(scope: ScopeModule, warnings: string[]): TimelineSco
 
     // Migrate child scopes recursively
     for (const child of scope.children) {
-        children.push(migrateScopeModule(child, warnings));
+        children.push(migrateScopeModule(child, urlTypeNamesById, warnings));
     }
 
     return {
@@ -149,7 +216,12 @@ function migrateScopeModule(scope: ScopeModule, warnings: string[]): TimelineSco
     };
 }
 
-function migratePhaseToTimeline(before: BeforeAction[], chain: ScopeModule[], warnings: string[]): TimelineNode[] {
+function migratePhaseToTimeline(
+    before: BeforeAction[],
+    chain: ScopeModule[],
+    urlTypeNamesById: Map<string, string>,
+    warnings: string[],
+): TimelineNode[] {
     const nodes: TimelineNode[] = [];
 
     // Migrate before actions
@@ -160,7 +232,7 @@ function migratePhaseToTimeline(before: BeforeAction[], chain: ScopeModule[], wa
 
     // Migrate scope chain
     for (const scope of chain) {
-        nodes.push(migrateScopeModule(scope, warnings));
+        nodes.push(migrateScopeModule(scope, urlTypeNamesById, warnings));
     }
 
     return nodes;
@@ -173,11 +245,13 @@ function migratePhaseToTimeline(before: BeforeAction[], chain: ScopeModule[], wa
  */
 export function migrateV1toV2(v1: ScrapingWorkflow): MigrationResult {
     const warnings: string[] = [];
+    const urlTypeNamesById = new Map(v1.url_types.map((urlType) => [urlType.id, urlType.name]));
 
     // Migrate discovery phase
     const discovery = migratePhaseToTimeline(
         v1.discovery.before,
         v1.discovery.chain,
+        urlTypeNamesById,
         warnings,
     );
 
@@ -193,6 +267,7 @@ export function migrateV1toV2(v1: ScrapingWorkflow): MigrationResult {
         process = migratePhaseToTimeline(
             firstType.processing.before,
             firstType.processing.chain,
+            urlTypeNamesById,
             warnings,
         );
     }

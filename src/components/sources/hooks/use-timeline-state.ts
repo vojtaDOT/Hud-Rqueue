@@ -96,8 +96,8 @@ export function useTimelineState(initial?: ScrapingWorkflowV2 | null) {
         setWorkflow((prev) => ({ ...prev, strategy }));
     }, []);
 
-    const resetWorkflow = useCallback((next: ScrapingWorkflowV2) => {
-        setWorkflow(next);
+    const resetWorkflow = useCallback((next?: ScrapingWorkflowV2 | null) => {
+        setWorkflow(next ?? createEmptyWorkflow());
     }, []);
 
     return {

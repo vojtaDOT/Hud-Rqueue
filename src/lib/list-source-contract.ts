@@ -8,6 +8,8 @@ import type {
     RepeaterStep,
     ScopeModule,
     ScrapingWorkflow,
+    ScrapingWorkflowV2,
+    TimelineNode,
     UnifiedWorkerBeforeAction,
     UnifiedWorkerCrawlParams,
     UnifiedWorkerPhaseV2,
@@ -19,6 +21,23 @@ import type {
 import {
     createEmptyPhase,
     createId,
+    createTimelineClickNode,
+    createTimelineDataExtractNode,
+    createTimelineDocumentUrlNode,
+    createTimelineDownloadFileNode,
+    createTimelineFillNode,
+    createTimelineJavascriptNode,
+    createTimelinePaginationNode,
+    createTimelineRemoveElementNode,
+    createTimelineRepeaterNode,
+    createTimelineScopeNode,
+    createTimelineScreenshotNode,
+    createTimelineScrollNode,
+    createTimelineSelectOptionNode,
+    createTimelineSourceUrlNode,
+    createTimelineTimeoutNode,
+    createTimelineWaitNetworkNode,
+    createTimelineWaitSelectorNode,
 } from '@/lib/workflow-tree';
 
 export interface EditorEnvelopeV1 {
@@ -674,4 +693,153 @@ export function workflowFromUnifiedConfig(crawlParams: UnifiedWorkerCrawlParams)
     };
 
     return workflow;
+}
+
+function toTimelineBeforeNode(action: UnifiedWorkerBeforeAction): TimelineNode {
+    switch (action.action) {
+        case 'remove_element': {
+            const node = createTimelineRemoveElementNode();
+            return { ...node, selector: action.selector };
+        }
+        case 'wait_selector': {
+            const node = createTimelineWaitSelectorNode();
+            return { ...node, selector: action.selector, timeoutMs: action.timeout ?? 10000 };
+        }
+        case 'wait_network': {
+            const node = createTimelineWaitNetworkNode();
+            return { ...node, state: action.state };
+        }
+        case 'click': {
+            const node = createTimelineClickNode();
+            return { ...node, selector: action.selector, waitAfterMs: action.wait_after ?? 500 };
+        }
+        case 'scroll': {
+            const node = createTimelineScrollNode();
+            return { ...node, count: action.count, delayMs: action.delay };
+        }
+        case 'fill': {
+            const node = createTimelineFillNode();
+            return { ...node, selector: action.selector, value: action.value, pressEnter: action.press_enter };
+        }
+        case 'select_option': {
+            const node = createTimelineSelectOptionNode();
+            return { ...node, selector: action.selector, value: action.value };
+        }
+        case 'wait_timeout': {
+            const node = createTimelineTimeoutNode();
+            return { ...node, ms: action.ms };
+        }
+        case 'evaluate': {
+            const node = createTimelineJavascriptNode();
+            return { ...node, script: action.script };
+        }
+        case 'screenshot': {
+            const node = createTimelineScreenshotNode();
+            return { ...node, filename: action.filename };
+        }
+    }
+}
+
+function toTimelineRepeaterChildren(steps: UnifiedWorkerRepeaterStepV2): TimelineNode[] {
+    if (steps.type === 'source_url') {
+        const node = createTimelineSourceUrlNode(steps.url_type);
+        return [{
+            ...node,
+            selector: steps.emit_parent_url ? 'self' : steps.selector,
+            urlType: steps.url_type,
+            emitParentUrl: steps.emit_parent_url ?? false,
+        }];
+    }
+
+    if (steps.type === 'document_url') {
+        const node = createTimelineDocumentUrlNode();
+        return [{
+            ...node,
+            selector: steps.selector,
+            filenameSelector: steps.filename_selector === 'self' ? '' : steps.filename_selector,
+        }];
+    }
+
+    if (steps.type === 'download_file') {
+        const node = createTimelineDownloadFileNode();
+        return [{
+            ...node,
+            urlSelector: steps.url_selector,
+            filenameSelector: steps.filename_selector === 'self' ? '' : steps.filename_selector,
+        }];
+    }
+
+    const node = createTimelineDataExtractNode();
+    return [{
+        ...node,
+        groupLabel: steps.key,
+        fields: [{
+            key: steps.key,
+            selector: steps.selector,
+            extractType: steps.extract,
+        }],
+    }];
+}
+
+function toTimelineScopeNode(scope: UnifiedWorkerScopeNodeV2): TimelineNode {
+    const scopeNode = createTimelineScopeNode(scope.label);
+    const children: TimelineNode[] = [];
+
+    if (scope.repeater) {
+        const repeaterNode = createTimelineRepeaterNode(scope.repeater.label);
+        children.push({
+            ...repeaterNode,
+            selector: scope.repeater.selector,
+            routeKeySelector: scope.repeater.route_key_selector ?? '',
+            routeKeyExtract: scope.repeater.route_key_extract ?? 'text',
+            children: scope.repeater.steps.flatMap(toTimelineRepeaterChildren),
+        });
+    }
+
+    if (scope.pagination) {
+        const paginationNode = createTimelinePaginationNode();
+        children.push({
+            ...paginationNode,
+            selector: scope.pagination.selector,
+            maxPages: scope.pagination.max_pages,
+            url: scope.pagination.url
+                ? {
+                    mode: scope.pagination.url.mode,
+                    pattern: scope.pagination.url.pattern,
+                    template: scope.pagination.url.template,
+                    start_page: scope.pagination.url.start_page,
+                    step: scope.pagination.url.step,
+                }
+                : null,
+        });
+    }
+
+    children.push(...scope.children.map(toTimelineScopeNode));
+
+    return {
+        ...scopeNode,
+        selector: scope.selector,
+        label: scope.label,
+        children,
+    };
+}
+
+function toTimelinePhase(phase: UnifiedWorkerPhaseV2): TimelineNode[] {
+    return [
+        ...phase.before.map(toTimelineBeforeNode),
+        ...phase.chain.map(toTimelineScopeNode),
+    ];
+}
+
+export function timelineWorkflowFromUnifiedConfig(crawlParams: UnifiedWorkerCrawlParams): ScrapingWorkflowV2 {
+    const processPhase = crawlParams.processing[0] ?? null;
+    const process = processPhase ? toTimelinePhase(processPhase) : null;
+
+    return {
+        version: 2,
+        strategy: 'path',
+        singlePage: crawlParams.processing.length === 0,
+        discovery: toTimelinePhase(crawlParams.discovery),
+        process,
+    };
 }

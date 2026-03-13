@@ -1,56 +1,96 @@
-// V2 workflow validation
-
-import {
-    isContainerNode,
-    type ScrapingWorkflowV2,
-    type TimelineNode,
-    type TimelineScopeNode,
-    type TimelineRepeaterNode,
-    type TimelineDataExtractNode,
-    type TimelinePaginationNode,
+import type {
+    ScrapingWorkflowV2,
+    TimelineNode,
+    TimelineRepeaterNode,
+    TimelineScopeNode,
 } from './crawler-types';
+import { buildListSourceConfig } from './list-source-contract';
+import { generateCrawlParamsV2 } from './crawler-export-v2';
 
-function flattenNodes(nodes: TimelineNode[]): TimelineNode[] {
-    const result: TimelineNode[] = [];
-    const walk = (items: TimelineNode[]) => {
-        for (const node of items) {
-            result.push(node);
-            if (isContainerNode(node)) {
-                walk(node.children);
-            }
+function validateScopeNode(scope: TimelineScopeNode, phaseName: string): string | null {
+    if (!scope.selector.trim()) {
+        return `${phaseName}: Scope musí mít CSS selektor.`;
+    }
+
+    let repeaterCount = 0;
+    let paginationCount = 0;
+
+    for (const child of scope.children) {
+        if (child.type === 'repeater') repeaterCount += 1;
+        if (child.type === 'pagination') paginationCount += 1;
+        if (child.type !== 'scope' && child.type !== 'repeater' && child.type !== 'pagination') {
+            return `${phaseName}: Scope může obsahovat jen Scope, Repeater nebo Pagination.`;
         }
-    };
-    walk(nodes);
-    return result;
+    }
+
+    if (repeaterCount > 1) {
+        return `${phaseName}: Scope může obsahovat jen jeden Repeater.`;
+    }
+
+    if (paginationCount > 1) {
+        return `${phaseName}: Scope může obsahovat jen jednu Pagination.`;
+    }
+
+    return null;
 }
 
-function validatePhaseNodes(
-    phaseName: string,
-    nodes: TimelineNode[],
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future per-node warnings
-    warnings: string[],
-): string | null {
-    const allNodes = flattenNodes(nodes);
+function validateRepeaterNode(repeater: TimelineRepeaterNode, phaseName: string): string | null {
+    if (!repeater.selector.trim()) {
+        return `${phaseName}: Repeater musí mít CSS selektor.`;
+    }
 
-    for (const node of allNodes) {
+    for (const child of repeater.children) {
+        if (
+            child.type !== 'source_url'
+            && child.type !== 'document_url'
+            && child.type !== 'download_file'
+            && child.type !== 'data_extract'
+        ) {
+            return `${phaseName}: Repeater může obsahovat jen Source URL, Document URL, Download File nebo Data Extract.`;
+        }
+    }
+
+    return null;
+}
+
+function validateNodeTree(phaseName: string, nodes: TimelineNode[], atRoot = true): string | null {
+    for (const node of nodes) {
+        if (atRoot && node.type !== 'scope' && ![
+            'remove_element',
+            'wait_selector',
+            'wait_network',
+            'click',
+            'scroll',
+            'fill',
+            'select_option',
+            'timeout',
+            'javascript',
+            'screenshot',
+        ].includes(node.type)) {
+            return `${phaseName}: Root fáze může obsahovat jen before akce a Scope.`;
+        }
+
         switch (node.type) {
             case 'scope': {
-                const scope = node as TimelineScopeNode;
-                if (!scope.selector.trim()) {
-                    return `${phaseName}: Scope musí mít CSS selektor.`;
-                }
+                const error = validateScopeNode(node, phaseName);
+                if (error) return error;
+                const childError = validateNodeTree(phaseName, node.children, false);
+                if (childError) return childError;
                 break;
             }
             case 'repeater': {
-                const rep = node as TimelineRepeaterNode;
-                if (!rep.selector.trim()) {
-                    return `${phaseName}: Repeater musí mít CSS selektor.`;
-                }
+                const error = validateRepeaterNode(node, phaseName);
+                if (error) return error;
+                const childError = validateNodeTree(phaseName, node.children, false);
+                if (childError) return childError;
                 break;
             }
             case 'source_url':
-                if (!node.selector.trim()) {
+                if (!node.selector.trim() && node.emitParentUrl !== true) {
                     return `${phaseName}: Source URL krok vyžaduje selektor.`;
+                }
+                if (!node.urlType.trim()) {
+                    return `${phaseName}: Source URL krok vyžaduje url_type.`;
                 }
                 break;
             case 'document_url':
@@ -58,62 +98,66 @@ function validatePhaseNodes(
                     return `${phaseName}: Document URL krok vyžaduje selektor.`;
                 }
                 break;
-            case 'data_extract': {
-                const extract = node as TimelineDataExtractNode;
-                if (extract.fields.length === 0) {
+            case 'download_file':
+                if (!node.urlSelector.trim()) {
+                    return `${phaseName}: Download File krok vyžaduje url selector.`;
+                }
+                break;
+            case 'data_extract':
+                if (node.fields.length === 0) {
                     return `${phaseName}: Data Extract musí mít alespoň jedno pole.`;
                 }
-                for (const field of extract.fields) {
+                for (const field of node.fields) {
                     if (!field.key.trim()) {
                         return `${phaseName}: Data Extract pole musí mít klíč.`;
                     }
                     if (!field.selector.trim()) {
                         return `${phaseName}: Data Extract pole "${field.key}" musí mít selektor.`;
                     }
-                    if (field.extractType !== 'text' && field.extractType !== 'href') {
-                        return `${phaseName}: Data Extract podporuje jen typ text nebo href.`;
-                    }
                 }
                 break;
-            }
-            case 'pagination': {
-                const pag = node as TimelinePaginationNode;
-                if (!pag.selector.trim()) {
+            case 'pagination':
+                if (!node.selector.trim()) {
                     return `${phaseName}: Pagination musí mít CSS selektor.`;
                 }
-                if (!Number.isFinite(pag.maxPages) || pag.maxPages < 0) {
+                if (!Number.isFinite(node.maxPages) || node.maxPages < 0) {
                     return `${phaseName}: Pagination max_pages musí být číslo >= 0.`;
                 }
-                if (pag.url) {
-                    if (pag.url.mode !== 'hybrid' && pag.url.mode !== 'pattern') {
+                if (node.url) {
+                    if (node.url.mode !== 'hybrid' && node.url.mode !== 'pattern') {
                         return `${phaseName}: Pagination URL mode musí být hybrid nebo pattern.`;
                     }
-                    if (!pag.url.pattern.trim()) {
+                    if (!node.url.pattern.trim()) {
                         return `${phaseName}: Pagination URL regex pattern je povinný.`;
                     }
-                    try {
-                        new RegExp(pag.url.pattern);
-                    } catch {
-                        return `${phaseName}: Pagination URL regex pattern je neplatný.`;
-                    }
-                    if (!pag.url.template.trim()) {
-                        return `${phaseName}: Pagination URL template je povinná.`;
-                    }
-                    if (!pag.url.template.includes('{page}')) {
+                    if (!node.url.template.trim() || !node.url.template.includes('{page}')) {
                         return `${phaseName}: Pagination URL template musí obsahovat {page}.`;
                     }
-                    if (!Number.isFinite(pag.url.start_page) || pag.url.start_page < 1) {
+                    if (!Number.isFinite(node.url.start_page) || node.url.start_page < 1) {
                         return `${phaseName}: Pagination start_page musí být číslo >= 1.`;
                     }
-                    if (!Number.isFinite(pag.url.step) || pag.url.step < 1) {
+                    if (!Number.isFinite(node.url.step) || node.url.step < 1) {
                         return `${phaseName}: Pagination step musí být číslo >= 1.`;
                     }
                 }
                 break;
-            }
+            case 'remove_element':
+            case 'wait_selector':
             case 'click':
+            case 'fill':
+            case 'select_option':
                 if (!node.selector.trim()) {
-                    return `${phaseName}: Click krok vyžaduje CSS selektor.`;
+                    return `${phaseName}: Akce "${node.type}" vyžaduje CSS selektor.`;
+                }
+                break;
+            case 'wait_network':
+                break;
+            case 'scroll':
+                if (!Number.isFinite(node.count) || node.count < 1) {
+                    return `${phaseName}: Scroll count musí být číslo >= 1.`;
+                }
+                if (!Number.isFinite(node.delayMs) || node.delayMs < 0) {
+                    return `${phaseName}: Scroll delay musí být číslo >= 0.`;
                 }
                 break;
             case 'timeout':
@@ -123,7 +167,12 @@ function validatePhaseNodes(
                 break;
             case 'javascript':
                 if (!node.script.trim()) {
-                    return `${phaseName}: JavaScript krok vyžaduje skript.`;
+                    return `${phaseName}: Evaluate krok vyžaduje skript.`;
+                }
+                break;
+            case 'screenshot':
+                if (!node.filename.trim()) {
+                    return `${phaseName}: Screenshot krok vyžaduje filename.`;
                 }
                 break;
         }
@@ -132,47 +181,47 @@ function validatePhaseNodes(
     return null;
 }
 
-export function validateWorkflowV2(workflow: ScrapingWorkflowV2): {
+export function validateWorkflowV2(
+    workflow: ScrapingWorkflowV2,
+    options?: { playwrightEnabled?: boolean },
+): {
     error: string | null;
     warnings: string[];
 } {
     const warnings: string[] = [];
 
-    // Discovery must have nodes
-    if (workflow.discovery.length === 0) {
-        return { error: 'Discovery musí obsahovat alespoň jeden krok.', warnings };
-    }
-
-    // Check discovery has at least one source_url or document_url (possibly nested)
-    const allDiscovery = flattenNodes(workflow.discovery);
-    const hasSourceUrl = allDiscovery.some((n) => n.type === 'source_url');
-    const hasDocumentUrl = allDiscovery.some((n) => n.type === 'document_url');
-    if (!hasSourceUrl && !hasDocumentUrl) {
-        return {
-            error: 'Discovery musí obsahovat alespoň jeden Source URL nebo Document URL krok.',
-            warnings,
-        };
-    }
-
-    // Validate discovery nodes
-    const discoveryError = validatePhaseNodes('Discovery', workflow.discovery, warnings);
+    const discoveryError = validateNodeTree('Discovery', workflow.discovery, true);
     if (discoveryError) {
         return { error: discoveryError, warnings };
     }
 
-    // If not singlePage, process should exist
-    if (!workflow.singlePage) {
-        if (!workflow.process || workflow.process.length === 0) {
-            // Not an error, just a warning — processing is optional
-            if (hasSourceUrl) {
-                warnings.push('Process fáze je prázdná, ale Discovery obsahuje Source URL. Processing se neprovede.');
-            }
-        } else {
-            const processError = validatePhaseNodes('Process', workflow.process, warnings);
-            if (processError) {
-                return { error: processError, warnings };
-            }
+    if (!workflow.singlePage && workflow.process) {
+        const processError = validateNodeTree('Process', workflow.process, true);
+        if (processError) {
+            return { error: processError, warnings };
         }
+    }
+
+    try {
+        buildListSourceConfig({
+            ...generateCrawlParamsV2(workflow),
+            playwright: options?.playwrightEnabled ?? false,
+        });
+    } catch (error) {
+        const issueMessage = (
+            typeof error === 'object'
+            && error !== null
+            && 'issues' in error
+            && Array.isArray((error as { issues?: Array<{ message?: string }> }).issues)
+            && (error as { issues?: Array<{ message?: string }> }).issues?.[0]?.message
+        )
+            ? (error as { issues: Array<{ message: string }> }).issues[0].message
+            : null;
+
+        return {
+            error: issueMessage ?? (error instanceof Error ? error.message : 'Konfigurace zdroje neni kompletni.'),
+            warnings,
+        };
     }
 
     return { error: null, warnings };

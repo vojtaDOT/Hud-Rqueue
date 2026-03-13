@@ -65,6 +65,10 @@ export function StepChooser({
     scopeRefs,
     onSelectedRepeaterChange,
 }: StepChooserProps) {
+    const selectedScopeLabel = scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none';
+    const selectedRepeaterLabel = repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none';
+    const hasRepeaters = repeaterRefs.length > 0;
+
     return (
         <>
             {armedTargetLabel && (
@@ -95,7 +99,7 @@ export function StepChooser({
                         </div>
                         <div className="flex gap-2">
                             <Select value={beforeToAdd} onValueChange={onBeforeToAddChange}>
-                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
+                                <SelectTrigger className="h-8 min-w-0 flex-1 border-border bg-card/50 text-xs text-foreground">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -119,7 +123,7 @@ export function StepChooser({
                             </div>
                             <div className="flex gap-2">
                                 <Select value={playwrightToAdd} onValueChange={onPlaywrightToAddChange}>
-                                    <SelectTrigger className="h-8 border-primary/20 bg-card/50 text-xs text-foreground">
+                                    <SelectTrigger className="h-8 min-w-0 flex-1 border-primary/20 bg-card/50 text-xs text-foreground">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -162,18 +166,27 @@ export function StepChooser({
                                 + Repeater
                             </Button>
 
-                            <Select value={effectiveSelectedRepeaterId ?? ''} onValueChange={onSelectedRepeaterChange}>
-                                <SelectTrigger className="h-8 border-emerald-500/40 bg-card/50 text-xs text-foreground">
-                                    <SelectValue placeholder="Step target repeater" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {repeaterRefs.map((item) => (
-                                        <SelectItem key={item.repeaterId} value={item.repeaterId}>
-                                            {item.scopeLabel} {'->'} {item.repeaterLabel}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <div className="col-span-2 rounded-lg border border-emerald-500/20 bg-card/40 p-2">
+                                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-200">
+                                    Step Target Repeater
+                                </div>
+                                <Select
+                                    value={effectiveSelectedRepeaterId ?? undefined}
+                                    onValueChange={onSelectedRepeaterChange}
+                                    disabled={!hasRepeaters}
+                                >
+                                    <SelectTrigger className="h-8 w-full min-w-0 border-emerald-500/40 bg-card/50 text-xs text-foreground">
+                                        <SelectValue placeholder={hasRepeaters ? 'Choose repeater' : 'Add repeater to enable step actions'} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {repeaterRefs.map((item) => (
+                                            <SelectItem key={item.repeaterId} value={item.repeaterId}>
+                                                {item.scopeLabel} {'->'} {item.repeaterLabel}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
 
                             {isDiscoveryTab ? (
                                 <>
@@ -233,9 +246,9 @@ export function StepChooser({
                             </Button>
                         </div>
                         <div className="mt-2 text-[11px] text-muted-foreground">
-                            Scope target: {scopeRefs.find((scope) => scope.scopeId === effectiveSelectedScopeId)?.scopeLabel ?? 'none'}
+                            Scope target: {selectedScopeLabel}
                             {' | '}
-                            Repeater target: {repeaterRefs.find((item) => item.repeaterId === effectiveSelectedRepeaterId)?.repeaterLabel ?? 'none'}
+                            Repeater target: {selectedRepeaterLabel}
                         </div>
                     </div>
                 </div>

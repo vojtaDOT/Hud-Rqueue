@@ -1,28 +1,52 @@
-// V2 workflow → worker crawl_params export
-
 import {
     isContainerNode,
     type ScrapingWorkflowV2,
-    type TimelineNode,
     type TimelineClickNode,
-    type TimelineTimeoutNode,
+    type TimelineFillNode,
     type TimelineJavascriptNode,
-    type TimelineRepeaterNode,
+    type TimelineNode,
     type TimelinePaginationNode,
+    type TimelineRemoveElementNode,
+    type TimelineRepeaterNode,
+    type TimelineScrollNode,
+    type TimelineScreenshotNode,
+    type TimelineSelectOptionNode,
+    type TimelineTimeoutNode,
+    type TimelineWaitNetworkNode,
+    type TimelineWaitSelectorNode,
     type UnifiedWorkerBeforeAction,
     type UnifiedWorkerCrawlParams,
-    type UnifiedWorkerPhaseV2,
-    type UnifiedWorkerScopeNodeV2,
-    type UnifiedWorkerRepeaterStepV2,
     type UnifiedWorkerPaginationV2,
+    type UnifiedWorkerPhaseV2,
     type UnifiedWorkerRepeaterNodeV2,
+    type UnifiedWorkerRepeaterStepV2,
+    type UnifiedWorkerScopeNodeV2,
 } from './crawler-types';
 
-// ── Before-action nodes (click, timeout, javascript) ───────────────────
+type BeforeActionNode =
+    | TimelineRemoveElementNode
+    | TimelineWaitSelectorNode
+    | TimelineWaitNetworkNode
+    | TimelineClickNode
+    | TimelineScrollNode
+    | TimelineFillNode
+    | TimelineSelectOptionNode
+    | TimelineTimeoutNode
+    | TimelineJavascriptNode
+    | TimelineScreenshotNode;
 
-type BeforeActionNode = TimelineClickNode | TimelineTimeoutNode | TimelineJavascriptNode;
-
-const BEFORE_ACTION_TYPES = new Set(['click', 'timeout', 'javascript']);
+const BEFORE_ACTION_TYPES = new Set<TimelineNode['type']>([
+    'remove_element',
+    'wait_selector',
+    'wait_network',
+    'click',
+    'scroll',
+    'fill',
+    'select_option',
+    'timeout',
+    'javascript',
+    'screenshot',
+]);
 
 function isBeforeActionNode(node: TimelineNode): node is BeforeActionNode {
     return BEFORE_ACTION_TYPES.has(node.type);
@@ -30,26 +54,45 @@ function isBeforeActionNode(node: TimelineNode): node is BeforeActionNode {
 
 function toWorkerBeforeAction(node: BeforeActionNode): UnifiedWorkerBeforeAction {
     switch (node.type) {
+        case 'remove_element':
+            return { action: 'remove_element', selector: node.selector };
+        case 'wait_selector':
+            return { action: 'wait_selector', selector: node.selector, timeout: node.timeoutMs };
+        case 'wait_network':
+            return { action: 'wait_network', state: node.state };
         case 'click':
             return { action: 'click', selector: node.selector, wait_after: node.waitAfterMs };
+        case 'scroll':
+            return { action: 'scroll', count: node.count, delay: node.delayMs };
+        case 'fill':
+            return {
+                action: 'fill',
+                selector: node.selector,
+                value: node.value,
+                press_enter: node.pressEnter,
+            };
+        case 'select_option':
+            return { action: 'select_option', selector: node.selector, value: node.value };
         case 'timeout':
             return { action: 'wait_timeout', ms: node.ms };
         case 'javascript':
             return { action: 'evaluate', script: node.script };
+        case 'screenshot':
+            return { action: 'screenshot', filename: node.filename };
     }
 }
 
-// ── Chain nodes (scope, repeater, source_url, document_url, data_extract, pagination) ──
-
 function buildRepeaterSteps(children: TimelineNode[]): UnifiedWorkerRepeaterStepV2[] {
     const steps: UnifiedWorkerRepeaterStepV2[] = [];
+
     for (const child of children) {
         switch (child.type) {
             case 'source_url':
                 steps.push({
                     type: 'source_url',
-                    selector: child.selector,
-                    url_type: child.urlType || 'default',
+                    selector: child.emitParentUrl ? 'self' : child.selector,
+                    url_type: child.urlType.trim(),
+                    ...(child.emitParentUrl ? { emit_parent_url: true } : {}),
                 });
                 break;
             case 'document_url':
@@ -59,85 +102,84 @@ function buildRepeaterSteps(children: TimelineNode[]): UnifiedWorkerRepeaterStep
                     filename_selector: child.filenameSelector?.trim() || 'self',
                 });
                 break;
-            case 'data_extract': {
+            case 'download_file':
+                steps.push({
+                    type: 'download_file',
+                    url_selector: child.urlSelector,
+                    filename_selector: child.filenameSelector?.trim() || 'self',
+                });
+                break;
+            case 'data_extract':
                 for (const field of child.fields) {
                     steps.push({
                         type: 'data_extract',
                         key: field.key,
-                        extract: field.extractType,
                         selector: field.selector,
+                        extract: field.extractType,
                     });
                 }
                 break;
-            }
-            // Other types inside repeater are ignored (pagination, click, timeout, javascript)
         }
     }
+
     return steps;
 }
 
 function findPagination(children: TimelineNode[]): UnifiedWorkerPaginationV2 | null {
-    const pag = children.find((n): n is TimelinePaginationNode => n.type === 'pagination');
-    if (!pag) return null;
+    const pagination = children.find((node): node is TimelinePaginationNode => node.type === 'pagination');
+    if (!pagination) return null;
+
     return {
-        selector: pag.selector,
-        max_pages: pag.maxPages,
-        url: pag.url
+        selector: pagination.selector,
+        max_pages: pagination.maxPages,
+        url: pagination.url
             ? {
-                mode: pag.url.mode,
-                pattern: pag.url.pattern,
-                template: pag.url.template,
-                start_page: pag.url.start_page,
-                step: pag.url.step,
+                mode: pagination.url.mode,
+                pattern: pagination.url.pattern,
+                template: pagination.url.template,
+                start_page: pagination.url.start_page,
+                step: pagination.url.step,
             }
             : null,
     };
 }
 
-function buildScopeChain(nodes: TimelineNode[]): UnifiedWorkerScopeNodeV2[] {
-    const scopes: UnifiedWorkerScopeNodeV2[] = [];
+function buildRepeater(repeaterNode: TimelineRepeaterNode | undefined): UnifiedWorkerRepeaterNodeV2 | null {
+    if (!repeaterNode) return null;
 
-    for (const node of nodes) {
-        if (node.type === 'scope') {
-            // Find repeater child, pagination child, and nested scopes
-            const repeaterChild = node.children.find(
-                (n): n is TimelineRepeaterNode => n.type === 'repeater',
-            );
-            const pagination = findPagination(node.children);
+    const routeKeySelector = repeaterNode.routeKeySelector?.trim();
 
-            let repeater: UnifiedWorkerRepeaterNodeV2 | null = null;
-            if (repeaterChild) {
-                repeater = {
-                    selector: repeaterChild.selector,
-                    label: repeaterChild.label,
-                    steps: buildRepeaterSteps(repeaterChild.children),
-                };
+    return {
+        selector: repeaterNode.selector,
+        label: repeaterNode.label,
+        ...(routeKeySelector
+            ? {
+                route_key_selector: routeKeySelector,
+                route_key_extract: repeaterNode.routeKeyExtract ?? 'text',
             }
+            : {}),
+        steps: buildRepeaterSteps(repeaterNode.children),
+    };
+}
 
-            scopes.push({
-                selector: node.selector,
-                label: node.label,
-                repeater,
-                pagination,
-                children: buildScopeChain(node.children.filter((n) => n.type === 'scope')),
-            });
-        } else if (node.type === 'repeater') {
-            // Top-level repeater without a scope wrapper — create an implicit scope
-            scopes.push({
-                selector: 'html',
-                label: 'Automatický scope',
-                repeater: {
-                    selector: node.selector,
-                    label: node.label,
-                    steps: buildRepeaterSteps(node.children),
-                },
-                pagination: findPagination(node.children),
-                children: [],
-            });
+function buildScopeChain(nodes: TimelineNode[]): UnifiedWorkerScopeNodeV2[] {
+    return nodes.flatMap((node) => {
+        if (node.type !== 'scope') {
+            return [];
         }
-    }
 
-    return scopes;
+        const repeaterNode = node.children.find(
+            (child): child is TimelineRepeaterNode => child.type === 'repeater',
+        );
+
+        return [{
+            selector: node.selector,
+            label: node.label,
+            repeater: buildRepeater(repeaterNode),
+            pagination: findPagination(node.children),
+            children: buildScopeChain(node.children.filter((child) => child.type === 'scope')),
+        }];
+    });
 }
 
 function toWorkerPhaseV2(nodes: TimelineNode[]): UnifiedWorkerPhaseV2 {
@@ -158,34 +200,41 @@ function toWorkerPhaseV2(nodes: TimelineNode[]): UnifiedWorkerPhaseV2 {
     };
 }
 
-// ── Public export ──────────────────────────────────────────────────────
+function collectDiscoveryUrlTypes(nodes: TimelineNode[]): string[] {
+    const urlTypes = new Set<string>();
+
+    const walk = (items: TimelineNode[]) => {
+        for (const node of items) {
+            if (node.type === 'source_url' && node.urlType.trim()) {
+                urlTypes.add(node.urlType.trim());
+            }
+            if (isContainerNode(node)) {
+                walk(node.children);
+            }
+        }
+    };
+
+    walk(nodes);
+    return [...urlTypes];
+}
 
 export function generateCrawlParamsV2(workflow: ScrapingWorkflowV2): UnifiedWorkerCrawlParams {
     const discovery = toWorkerPhaseV2(workflow.discovery);
-
-    // Determine if playwright is needed (click/timeout/javascript in discovery or process)
-    const hasPlaywrightActions = (nodes: TimelineNode[]): boolean => {
-        for (const node of nodes) {
-            if (node.type === 'click' || node.type === 'javascript') return true;
-            if (isContainerNode(node)) {
-                if (hasPlaywrightActions(node.children)) return true;
-            }
-        }
-        return false;
-    };
-
-    const playwright = hasPlaywrightActions(workflow.discovery)
-        || (workflow.process ? hasPlaywrightActions(workflow.process) : false);
-
-    // Process phase → single "default" processing entry
-    const processing = workflow.process && workflow.process.length > 0
-        ? [{ url_type: 'default', ...toWorkerPhaseV2(workflow.process) }]
-        : [];
+    const discoveryUrlTypes = collectDiscoveryUrlTypes(workflow.discovery);
+    const processPhase = workflow.process && workflow.process.length > 0
+        ? toWorkerPhaseV2(workflow.process)
+        : null;
 
     return {
         schema_version: 2,
-        playwright,
+        playwright: false,
         discovery,
-        processing,
+        processing: processPhase && discoveryUrlTypes.length > 0
+            ? discoveryUrlTypes.map((urlType) => ({
+                url_type: urlType,
+                before: processPhase.before,
+                chain: processPhase.chain,
+            }))
+            : [],
     };
 }

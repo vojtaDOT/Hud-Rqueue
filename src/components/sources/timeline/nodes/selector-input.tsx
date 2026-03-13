@@ -12,10 +12,11 @@ interface SelectorInputProps {
     placeholder?: string;
     matchCount?: number;
     onPick?: () => void;
+    disabled?: boolean;
 }
 
 /** Selector input with inline match-count badge and pick-from-preview button. */
-export function SelectorInput({ value, onChange, onFocus, onBlur, placeholder, matchCount, onPick }: SelectorInputProps) {
+export function SelectorInput({ value, onChange, onFocus, onBlur, placeholder, matchCount, onPick, disabled = false }: SelectorInputProps) {
     return (
         <div className="relative">
             <Input
@@ -23,6 +24,7 @@ export function SelectorInput({ value, onChange, onFocus, onBlur, placeholder, m
                 onChange={(e) => onChange(e.target.value)}
                 onFocus={onFocus}
                 onBlur={onBlur}
+                disabled={disabled}
                 placeholder={placeholder ?? 'CSS selektor'}
                 className="h-7 border-border bg-card/50 text-xs font-mono pr-14"
             />
@@ -38,6 +40,7 @@ export function SelectorInput({ value, onChange, onFocus, onBlur, placeholder, m
                         className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary"
                         onClick={(e) => {
                             e.stopPropagation();
+                            if (disabled) return;
                             onPick();
                         }}
                         title="Vybrat element z preview"

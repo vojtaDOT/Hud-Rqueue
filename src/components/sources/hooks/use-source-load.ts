@@ -7,10 +7,11 @@ import { isTimelineV2 } from '@/lib/crawler-types';
 import {
     coerceLegacyListCrawlParams,
     ListEditorEnvelopeSchema,
+    timelineWorkflowFromUnifiedConfig,
     workflowFromUnifiedConfig,
 } from '@/lib/list-source-contract';
 import { generateCrawlParamsV2 } from '@/lib/crawler-export-v2';
-import { isV1Workflow } from '@/lib/workflow-migration';
+import { isV1Workflow, migrateV1toV2 } from '@/lib/workflow-migration';
 
 interface SourceData {
     id: number;
@@ -89,8 +90,9 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
                 if (data.crawl_strategy === 'list') {
                     const extractionEnvelope = ListEditorEnvelopeSchema.safeParse(data.extraction_data);
                     if (extractionEnvelope.success) {
-                        setWorkflow(workflowFromUnifiedConfig(extractionEnvelope.data.editor_model));
-                        setWorkflowV2(null);
+                        const loadedWorkflow = workflowFromUnifiedConfig(extractionEnvelope.data.editor_model);
+                        setWorkflow(loadedWorkflow);
+                        setWorkflowV2(timelineWorkflowFromUnifiedConfig(extractionEnvelope.data.editor_model));
                         setWasMigrated(false);
                         setLoading(false);
                         return;
@@ -98,8 +100,9 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
 
                     const legacyCrawlParams = coerceLegacyListCrawlParams(data.crawl_params);
                     if (legacyCrawlParams) {
-                        setWorkflow(workflowFromUnifiedConfig(legacyCrawlParams));
-                        setWorkflowV2(null);
+                        const loadedWorkflow = workflowFromUnifiedConfig(legacyCrawlParams);
+                        setWorkflow(loadedWorkflow);
+                        setWorkflowV2(timelineWorkflowFromUnifiedConfig(legacyCrawlParams));
                         setWasMigrated(false);
                         setLoading(false);
                         return;
@@ -109,8 +112,8 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
                 const wd = data.workflow_data;
                 if (isV1Workflow(wd)) {
                     setWorkflow(wd);
-                    setWorkflowV2(null);
-                    setWasMigrated(false);
+                    setWorkflowV2(migrateV1toV2(wd).workflow);
+                    setWasMigrated(true);
                     setLoading(false);
                     return;
                 }
@@ -120,7 +123,7 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
                     if (legacyTimelineCrawlParams) {
                         setWorkflow(workflowFromUnifiedConfig(legacyTimelineCrawlParams));
                         setWorkflowV2(wd);
-                        setWasMigrated(true);
+                        setWasMigrated(false);
                         setLoading(false);
                         return;
                     }

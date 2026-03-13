@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,6 +11,8 @@ import { RssToolboxPanel } from '@/components/sources/rss-toolbox-panel';
 import { XmlWorkspace } from '@/components/sources/rss/xml-workspace';
 import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
+import { SimulatorSidebarV2, type SimulatorSidebarV2Ref } from '@/components/sources/timeline/simulator-sidebar-v2';
+import type { SelectorTarget } from '@/components/sources/timeline/nodes/use-selector-preview';
 import { ToolboxTabs, type ToolboxTab } from '@/components/sources/toolbox-tabs';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
@@ -33,7 +35,7 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
+import { ElementSelector, ScrapingWorkflow, type ScrapingWorkflowV2 } from '@/lib/crawler-types';
 import { buildRssAuthoringSummary, buildRssSourceConfig } from '@/lib/source-config';
 
 const DEFAULT_RSS_AUTHORING: RssAuthoringValues = {
@@ -56,7 +58,7 @@ export function SourceEditorContainer() {
     const searchParams = useSearchParams();
     const editSourceId = searchParams.get('edit');
     const isEditMode = Boolean(editSourceId);
-    const { source: loadedSource, workflow: loadedWorkflow, loading: sourceLoading } = useSourceLoad(editSourceId);
+    const { source: loadedSource, workflow: loadedWorkflow, workflowV2: loadedWorkflowV2, loading: sourceLoading } = useSourceLoad(editSourceId);
 
     const [name, setName] = useState('');
     const [typeId, setTypeId] = useState('');
@@ -82,6 +84,10 @@ export function SourceEditorContainer() {
     const [activeToolboxTab, setActiveToolboxTab] = useState<ToolboxTab>('path');
 
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
+    const sidebarV2Ref = useRef<SimulatorSidebarV2Ref>(null);
+    const [workflowDataV2, setWorkflowDataV2] = useState<ScrapingWorkflowV2 | null>(null);
+    const selectorTargetRef = useRef<SelectorTarget | null>(null) as MutableRefObject<SelectorTarget | null>;
+    const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
 
     const { sourceTypes, loadingTypes } = useSourceTypes();
 
@@ -135,7 +141,9 @@ export function SourceEditorContainer() {
                 setRssPreviewError(null);
                 setRssAuthoring(DEFAULT_RSS_AUTHORING);
                 setActiveToolboxTab('path');
+                setWorkflowDataV2(null);
                 sidebarRef.current?.reset();
+                sidebarV2Ref.current?.reset();
             }
         },
     });
@@ -241,6 +249,10 @@ export function SourceEditorContainer() {
             setWorkflowData(loadedWorkflow);
             setPlaywrightEnabled(loadedWorkflow.playwright_enabled ?? false);
         }
+        if (loadedWorkflowV2) {
+            setWorkflowDataV2(loadedWorkflowV2);
+            sidebarV2Ref.current?.reset(loadedWorkflowV2);
+        }
         // Restore RSS authoring values from saved crawl_params when in RSS mode
         if (loadedSource.crawl_strategy === 'rss' && loadedSource.crawl_params) {
             const cp = loadedSource.crawl_params as Record<string, unknown>;
@@ -250,9 +262,31 @@ export function SourceEditorContainer() {
                 entryLinkSelector: typeof cp.entry_link_selector === 'string' ? cp.entry_link_selector : '',
             });
         }
-    }, [loadedSource, loadedWorkflow]);
+    }, [loadedSource, loadedWorkflow, loadedWorkflowV2]);
+
+    const handleMatchCount = useCallback((selector: string, count: number) => {
+        setMatchCounts((prev) => {
+            if (prev[selector] === count) return prev;
+            return { ...prev, [selector]: count };
+        });
+    }, []);
+
+    const handleSelectorTargetChange = useCallback((target: SelectorTarget | null) => {
+        if (target !== null) {
+            selectorTargetRef.current = target;
+        }
+    }, []);
 
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
+        const target = selectorTargetRef.current;
+        if (activeToolboxTab === 'path' && target && sidebarV2Ref.current) {
+            const patternSelector = elementInfo?.patternSelector || selector;
+            sidebarV2Ref.current.fillSelectorTarget(target, patternSelector);
+            selectorTargetRef.current = null;
+            toast.success('Selector byl vlozen do aktivniho pole.');
+            return;
+        }
+
         if (sidebarRef.current?.applySelectedSelector(selector, elementInfo)) {
             toast.success('Selector byl vlozen do aktivniho pole.');
             return;
@@ -262,21 +296,55 @@ export function SourceEditorContainer() {
     };
 
     const handleElementRemove = (selector: string) => {
+        if (activeToolboxTab === 'path') {
+            toast.info('Ve V2 timeline použij picker na konkrétním node místo rychlého Remove Element.');
+            return;
+        }
         sidebarRef.current?.appendRemoveElementBeforeAction(selector);
         toast.success('Pridan Before step: Remove Element.');
     };
 
     const handleQuickAction = (action: SidebarQuickAction, selector: string, elementInfo?: ElementSelector) => {
+        if (activeToolboxTab === 'path') {
+            toast.info('Rychlé akce preview nejsou pro timeline editor zapojené. Použij node picker v panelu.');
+            return;
+        }
         sidebarRef.current?.applyQuickAction(action, selector, elementInfo);
         toast.success('Workflow aktualizovan z preview inspektoru.');
     };
 
     const handlePlaywrightToggleRequest = (nextEnabled: boolean) => {
+        const hasTimelinePlaywrightNodes = (nodes: ScrapingWorkflowV2['discovery'] | null | undefined): boolean => {
+            if (!nodes) return false;
+            return nodes.some((node) => {
+                if (
+                    node.type === 'wait_selector'
+                    || node.type === 'wait_network'
+                    || node.type === 'click'
+                    || node.type === 'scroll'
+                    || node.type === 'fill'
+                    || node.type === 'select_option'
+                    || node.type === 'javascript'
+                    || node.type === 'screenshot'
+                ) {
+                    return true;
+                }
+                if (node.type === 'scope' || node.type === 'repeater') {
+                    return hasTimelinePlaywrightNodes(node.children);
+                }
+                return false;
+            });
+        };
+
         if (crawlStrategy === 'rss' && nextEnabled) {
             toast.info('Playwright neni pro RSS feed potreba.');
             return false;
         }
-        if (!nextEnabled && sidebarRef.current?.hasAnyPlaywrightActions()) {
+        const hasPlaywrightActions = activeToolboxTab === 'path'
+            ? hasTimelinePlaywrightNodes(workflowDataV2?.discovery) || hasTimelinePlaywrightNodes(workflowDataV2?.process)
+            : Boolean(sidebarRef.current?.hasAnyPlaywrightActions());
+
+        if (!nextEnabled && hasPlaywrightActions) {
             setShowPlaywrightConfirm(true);
             return false;
         }
@@ -285,7 +353,39 @@ export function SourceEditorContainer() {
     };
 
     const handlePlaywrightDisableConfirm = () => {
-        sidebarRef.current?.clearAllPlaywrightActions();
+        if (activeToolboxTab === 'path') {
+            const stripPlaywrightNodes = (nodes: ScrapingWorkflowV2['discovery']): ScrapingWorkflowV2['discovery'] => nodes.flatMap((node) => {
+                if (
+                    node.type === 'wait_selector'
+                    || node.type === 'wait_network'
+                    || node.type === 'click'
+                    || node.type === 'scroll'
+                    || node.type === 'fill'
+                    || node.type === 'select_option'
+                    || node.type === 'javascript'
+                    || node.type === 'screenshot'
+                ) {
+                    return [];
+                }
+                if (node.type === 'scope' || node.type === 'repeater') {
+                    return [{ ...node, children: stripPlaywrightNodes(node.children) }];
+                }
+                return [node];
+            });
+
+            setWorkflowDataV2((current) => {
+                if (!current) return current;
+                const nextWorkflow: ScrapingWorkflowV2 = {
+                    ...current,
+                    discovery: stripPlaywrightNodes(current.discovery),
+                    process: current.process ? stripPlaywrightNodes(current.process) : null,
+                };
+                sidebarV2Ref.current?.reset(nextWorkflow);
+                return nextWorkflow;
+            });
+        } else {
+            sidebarRef.current?.clearAllPlaywrightActions();
+        }
         setPlaywrightEnabled(false);
         setShowPlaywrightConfirm(false);
     };
@@ -309,6 +409,7 @@ export function SourceEditorContainer() {
             crawlStrategy,
             crawlInterval,
             workflowData,
+            workflowDataV2,
             playwrightEnabled,
             obec: selectedObec,
             selectedRssFeed,
@@ -383,7 +484,7 @@ export function SourceEditorContainer() {
     // RSS feed URL for XML workspace
     const effectiveRssFeedUrl = selectedRssFeed || baseUrl;
 
-    // Sidebar override: RSS tab uses RSS toolbox, Path tab falls back to the standard workflow sidebar
+    // Sidebar override: RSS tab uses RSS toolbox, Path tab uses the prepared V2 timeline editor
     const sidebarOverride = activeToolboxTab === 'rss' ? (
         <RssToolboxPanel
             baseUrl={baseUrl}
@@ -414,7 +515,16 @@ export function SourceEditorContainer() {
                     : null
             }
         />
-    ) : undefined;
+    ) : (
+        <SimulatorSidebarV2
+            ref={sidebarV2Ref}
+            initialWorkflow={workflowDataV2}
+            onWorkflowChange={setWorkflowDataV2}
+            onSelectorPreviewChange={setSelectorPreview}
+            onSelectorTargetChange={handleSelectorTargetChange}
+            matchCounts={matchCounts}
+        />
+    );
 
     // Frame override: RSS mode shows XML workspace instead of iframe
     const frameOverride = activeToolboxTab === 'rss' ? (
@@ -453,12 +563,10 @@ export function SourceEditorContainer() {
             <div className="flex-1 overflow-hidden min-h-0">
                 <SourceSimulatorLayout
                     sidebarRef={sidebarRef}
-                    sidebarKey={editSourceId ?? 'new-source'}
                     baseUrl={baseUrl}
                     simulatorLoading={simulatorLoading}
                     selectorPreview={selectorPreview}
                     playwrightEnabled={playwrightEnabled}
-                    initialWorkflow={loadedWorkflow}
                     onIframeLoad={handleIframeLoad}
                     onElementSelect={handleElementSelect}
                     onElementRemove={handleElementRemove}
@@ -466,11 +574,13 @@ export function SourceEditorContainer() {
                     onPlaywrightToggleRequest={handlePlaywrightToggleRequest}
                     onWorkflowChange={setWorkflowData}
                     onSelectorPreviewChange={setSelectorPreview}
+                    onMatchCount={handleMatchCount}
                     sidebarHeader={sidebarHeader}
                     sidebarOverride={sidebarOverride}
                     frameOverride={frameOverride}
                     panelPlacement={panelPlacement}
                     onPanelPlacementChange={setPanelPlacement}
+                    hideSelectedElement={activeToolboxTab === 'path'}
                 />
             </div>
 

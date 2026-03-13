@@ -15,14 +15,22 @@ import {
     type TimelineClickNode,
     type TimelineContainerNode,
     type TimelineDataExtractNode,
+    type TimelineDownloadFileNode,
+    type TimelineFillNode,
     type TimelineDocumentUrlNode,
     type TimelineJavascriptNode,
+    type TimelineRemoveElementNode,
     type TimelineNode,
     type TimelinePaginationNode,
     type TimelineRepeaterNode,
+    type TimelineScreenshotNode,
+    type TimelineScrollNode,
+    type TimelineSelectOptionNode,
     type TimelineScopeNode,
     type TimelineSourceUrlNode,
     type TimelineTimeoutNode,
+    type TimelineWaitNetworkNode,
+    type TimelineWaitSelectorNode,
     isContainerNode,
 } from '@/lib/crawler-types';
 
@@ -531,15 +539,27 @@ export function createTimelineScopeNode(label = ''): TimelineScopeNode {
 }
 
 export function createTimelineRepeaterNode(label = ''): TimelineRepeaterNode {
-    return { id: createId('repeater'), type: 'repeater', selector: '', label, createSourceUrls: false, children: [] };
+    return {
+        id: createId('repeater'),
+        type: 'repeater',
+        selector: '',
+        label,
+        routeKeySelector: '',
+        routeKeyExtract: 'text',
+        children: [],
+    };
 }
 
-export function createTimelineSourceUrlNode(urlType = 'default'): TimelineSourceUrlNode {
-    return { id: createId('step'), type: 'source_url', selector: '', urlType };
+export function createTimelineSourceUrlNode(urlType = 'detail'): TimelineSourceUrlNode {
+    return { id: createId('step'), type: 'source_url', selector: '', urlType, emitParentUrl: false };
 }
 
 export function createTimelineDocumentUrlNode(): TimelineDocumentUrlNode {
     return { id: createId('step'), type: 'document_url', selector: '', filenameSelector: '' };
+}
+
+export function createTimelineDownloadFileNode(): TimelineDownloadFileNode {
+    return { id: createId('step'), type: 'download_file', urlSelector: '', filenameSelector: '' };
 }
 
 export function createTimelineDataExtractNode(groupLabel = ''): TimelineDataExtractNode {
@@ -561,8 +581,32 @@ export function createTimelinePaginationNode(): TimelinePaginationNode {
     };
 }
 
+export function createTimelineRemoveElementNode(): TimelineRemoveElementNode {
+    return { id: createId('step'), type: 'remove_element', selector: '' };
+}
+
+export function createTimelineWaitSelectorNode(): TimelineWaitSelectorNode {
+    return { id: createId('step'), type: 'wait_selector', selector: '', timeoutMs: 10000 };
+}
+
+export function createTimelineWaitNetworkNode(): TimelineWaitNetworkNode {
+    return { id: createId('step'), type: 'wait_network', state: 'networkidle' };
+}
+
 export function createTimelineClickNode(): TimelineClickNode {
     return { id: createId('step'), type: 'click', selector: '', waitAfterMs: 500 };
+}
+
+export function createTimelineScrollNode(): TimelineScrollNode {
+    return { id: createId('step'), type: 'scroll', count: 3, delayMs: 500 };
+}
+
+export function createTimelineFillNode(): TimelineFillNode {
+    return { id: createId('step'), type: 'fill', selector: '', value: '', pressEnter: false };
+}
+
+export function createTimelineSelectOptionNode(): TimelineSelectOptionNode {
+    return { id: createId('step'), type: 'select_option', selector: '', value: '' };
 }
 
 export function createTimelineTimeoutNode(): TimelineTimeoutNode {
@@ -571,6 +615,10 @@ export function createTimelineTimeoutNode(): TimelineTimeoutNode {
 
 export function createTimelineJavascriptNode(): TimelineJavascriptNode {
     return { id: createId('step'), type: 'javascript', script: '' };
+}
+
+export function createTimelineScreenshotNode(): TimelineScreenshotNode {
+    return { id: createId('step'), type: 'screenshot', filename: 'debug.png' };
 }
 
 // ── V2 Timeline Tree Operations ─────────────────────────────────────────

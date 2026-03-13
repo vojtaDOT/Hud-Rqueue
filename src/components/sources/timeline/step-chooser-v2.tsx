@@ -2,15 +2,22 @@
 
 import {
     ArrowRight,
+    Camera,
     Code,
     Clock,
     Database,
     FileDown,
+    Download,
+    Eraser,
+    Globe,
     Layers,
+    List,
     Link,
     MousePointerClick,
+    Pencil,
     Plus,
     Repeat,
+    Search,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -26,7 +33,31 @@ interface StepGroup {
     items: { type: TimelineNodeType; label: string; icon: React.ReactNode }[];
 }
 
-const STEP_GROUPS: StepGroup[] = [
+const ROOT_STEP_GROUPS: StepGroup[] = [
+    {
+        label: 'Before',
+        items: [
+            { type: 'remove_element', label: 'Remove Element', icon: <Eraser className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'timeout', label: 'Wait Timeout', icon: <Clock className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'wait_selector', label: 'Wait Selector', icon: <Search className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'wait_network', label: 'Wait Network', icon: <Globe className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'click', label: 'Click', icon: <MousePointerClick className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'scroll', label: 'Scroll', icon: <ArrowRight className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'fill', label: 'Fill', icon: <Pencil className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'select_option', label: 'Select Option', icon: <List className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'javascript', label: 'Evaluate', icon: <Code className="h-3.5 w-3.5 text-primary" /> },
+            { type: 'screenshot', label: 'Screenshot', icon: <Camera className="h-3.5 w-3.5 text-primary" /> },
+        ],
+    },
+    {
+        label: 'Struktura',
+        items: [
+            { type: 'scope', label: 'Scope', icon: <Layers className="h-3.5 w-3.5 text-primary" /> },
+        ],
+    },
+];
+
+const SCOPE_STEP_GROUPS: StepGroup[] = [
     {
         label: 'Struktura',
         items: [
@@ -37,9 +68,18 @@ const STEP_GROUPS: StepGroup[] = [
     {
         label: 'Navigace',
         items: [
+            { type: 'pagination', label: 'Pagination', icon: <ArrowRight className="h-3.5 w-3.5 text-red-500" /> },
+        ],
+    },
+];
+
+const REPEATER_STEP_GROUPS: StepGroup[] = [
+    {
+        label: 'Navigace',
+        items: [
             { type: 'source_url', label: 'Source URL', icon: <Link className="h-3.5 w-3.5 text-primary" /> },
             { type: 'document_url', label: 'Document URL', icon: <FileDown className="h-3.5 w-3.5 text-primary" /> },
-            { type: 'pagination', label: 'Pagination', icon: <ArrowRight className="h-3.5 w-3.5 text-red-500" /> },
+            { type: 'download_file', label: 'Download File', icon: <Download className="h-3.5 w-3.5 text-primary" /> },
         ],
     },
     {
@@ -48,21 +88,20 @@ const STEP_GROUPS: StepGroup[] = [
             { type: 'data_extract', label: 'Data Extract', icon: <Database className="h-3.5 w-3.5 text-green-500" /> },
         ],
     },
-    {
-        label: 'Akce',
-        items: [
-            { type: 'click', label: 'Click', icon: <MousePointerClick className="h-3.5 w-3.5 text-primary" /> },
-            { type: 'timeout', label: 'Timeout', icon: <Clock className="h-3.5 w-3.5 text-primary" /> },
-            { type: 'javascript', label: 'JavaScript', icon: <Code className="h-3.5 w-3.5 text-primary" /> },
-        ],
-    },
 ];
 
 interface StepChooserV2Props {
+    mode?: 'root' | 'scope' | 'repeater';
     onSelect: (type: TimelineNodeType) => void;
 }
 
-export function StepChooserV2({ onSelect }: StepChooserV2Props) {
+export function StepChooserV2({ mode = 'root', onSelect }: StepChooserV2Props) {
+    const groups = mode === 'scope'
+        ? SCOPE_STEP_GROUPS
+        : mode === 'repeater'
+            ? REPEATER_STEP_GROUPS
+            : ROOT_STEP_GROUPS;
+
     return (
         <Popover>
             <PopoverTrigger asChild>
@@ -72,7 +111,7 @@ export function StepChooserV2({ onSelect }: StepChooserV2Props) {
                 </Button>
             </PopoverTrigger>
             <PopoverContent className="w-48 p-1" align="start">
-                {STEP_GROUPS.map((group, gi) => (
+                {groups.map((group, gi) => (
                     <div key={group.label}>
                         {gi > 0 && <div className="my-1 h-px bg-border" />}
                         <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

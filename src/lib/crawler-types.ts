@@ -258,11 +258,19 @@ export type TimelineNodeType =
     | 'repeater'
     | 'source_url'
     | 'document_url'
+    | 'download_file'
     | 'data_extract'
     | 'pagination'
+    | 'remove_element'
+    | 'wait_selector'
+    | 'wait_network'
     | 'click'
+    | 'scroll'
+    | 'fill'
+    | 'select_option'
     | 'timeout'
-    | 'javascript';
+    | 'javascript'
+    | 'screenshot';
 
 export interface TimelineNodeBase {
     id: string;
@@ -281,7 +289,8 @@ export interface TimelineRepeaterNode extends TimelineNodeBase {
     type: 'repeater';
     selector: string;
     label: string;
-    createSourceUrls: boolean;
+    routeKeySelector?: string;
+    routeKeyExtract?: ExtractType;
     children: TimelineNode[];
 }
 
@@ -290,11 +299,18 @@ export interface TimelineSourceUrlNode extends TimelineNodeBase {
     type: 'source_url';
     selector: string;
     urlType: string;
+    emitParentUrl?: boolean;
 }
 
 export interface TimelineDocumentUrlNode extends TimelineNodeBase {
     type: 'document_url';
     selector: string;
+    filenameSelector?: string;
+}
+
+export interface TimelineDownloadFileNode extends TimelineNodeBase {
+    type: 'download_file';
+    urlSelector: string;
     filenameSelector?: string;
 }
 
@@ -317,10 +333,45 @@ export interface TimelinePaginationNode extends TimelineNodeBase {
     url: PaginationUrlConfig | null;
 }
 
+export interface TimelineRemoveElementNode extends TimelineNodeBase {
+    type: 'remove_element';
+    selector: string;
+}
+
+export interface TimelineWaitSelectorNode extends TimelineNodeBase {
+    type: 'wait_selector';
+    selector: string;
+    timeoutMs: number;
+}
+
+export interface TimelineWaitNetworkNode extends TimelineNodeBase {
+    type: 'wait_network';
+    state: 'networkidle' | 'domcontentloaded' | 'load';
+}
+
 export interface TimelineClickNode extends TimelineNodeBase {
     type: 'click';
     selector: string;
     waitAfterMs: number;
+}
+
+export interface TimelineScrollNode extends TimelineNodeBase {
+    type: 'scroll';
+    count: number;
+    delayMs: number;
+}
+
+export interface TimelineFillNode extends TimelineNodeBase {
+    type: 'fill';
+    selector: string;
+    value: string;
+    pressEnter: boolean;
+}
+
+export interface TimelineSelectOptionNode extends TimelineNodeBase {
+    type: 'select_option';
+    selector: string;
+    value: string;
 }
 
 export interface TimelineTimeoutNode extends TimelineNodeBase {
@@ -333,16 +384,29 @@ export interface TimelineJavascriptNode extends TimelineNodeBase {
     script: string;
 }
 
+export interface TimelineScreenshotNode extends TimelineNodeBase {
+    type: 'screenshot';
+    filename: string;
+}
+
 export type TimelineContainerNode = TimelineScopeNode | TimelineRepeaterNode;
 
 export type TimelineLeafNode =
     | TimelineSourceUrlNode
     | TimelineDocumentUrlNode
+    | TimelineDownloadFileNode
     | TimelineDataExtractNode
     | TimelinePaginationNode
+    | TimelineRemoveElementNode
+    | TimelineWaitSelectorNode
+    | TimelineWaitNetworkNode
     | TimelineClickNode
+    | TimelineScrollNode
+    | TimelineFillNode
+    | TimelineSelectOptionNode
     | TimelineTimeoutNode
-    | TimelineJavascriptNode;
+    | TimelineJavascriptNode
+    | TimelineScreenshotNode;
 
 export type TimelineNode = TimelineContainerNode | TimelineLeafNode;
 

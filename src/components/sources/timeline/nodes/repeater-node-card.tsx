@@ -5,7 +5,13 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import type { TimelineRepeaterNode } from '@/lib/crawler-types';
 import { SelectorInput } from './selector-input';
 import { useSelectorPreview, type SelectorTarget } from './use-selector-preview';
@@ -13,7 +19,7 @@ import { useSelectorPreview, type SelectorTarget } from './use-selector-preview'
 interface RepeaterNodeCardProps {
     node: TimelineRepeaterNode;
     depth: number;
-    onUpdate: (patch: Partial<Pick<TimelineRepeaterNode, 'selector' | 'label' | 'createSourceUrls'>>) => void;
+    onUpdate: (patch: Partial<Pick<TimelineRepeaterNode, 'selector' | 'label' | 'routeKeySelector' | 'routeKeyExtract'>>) => void;
     onRemove: () => void;
     onSelectorPreviewChange?: (selector: string | null) => void;
     onSelectorTargetChange?: (target: SelectorTarget | null) => void;
@@ -78,16 +84,39 @@ export function RepeaterNodeCard({ node, depth, onUpdate, onRemove, onSelectorPr
                         matchCount={getMatchCount(node.selector)}
                         onPick={() => setPickTarget()}
                     />
-                    <div className="flex items-center gap-2 py-1">
-                        <Switch
-                            checked={node.createSourceUrls}
-                            onCheckedChange={(checked) => onUpdate({ createSourceUrls: checked })}
-                            className="h-4 w-7"
-                        />
-                        <span className="text-[11px] text-muted-foreground">
-                            Vytvářet source URL
-                        </span>
-                    </div>
+                    <SelectorInput
+                        value={node.routeKeySelector ?? ''}
+                        onChange={(value) => {
+                            onUpdate({
+                                routeKeySelector: value,
+                                routeKeyExtract: value.trim() ? (node.routeKeyExtract ?? 'text') : 'text',
+                            });
+                            previewDebounced(value);
+                        }}
+                        onFocus={() => {
+                            preview(node.routeKeySelector ?? '');
+                            setPickTarget('routeKeySelector');
+                        }}
+                        onBlur={() => {
+                            clearPreview();
+                            clearPickTarget();
+                        }}
+                        placeholder="Route key selector (nepovinný)"
+                        matchCount={getMatchCount(node.routeKeySelector ?? '')}
+                        onPick={() => setPickTarget('routeKeySelector')}
+                    />
+                    <Select
+                        value={node.routeKeyExtract ?? 'text'}
+                        onValueChange={(value) => onUpdate({ routeKeyExtract: value as 'text' | 'href' })}
+                    >
+                        <SelectTrigger className="h-7 border-border bg-card/50 text-xs">
+                            <SelectValue placeholder="Route key extract" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="text">Route key: text</SelectItem>
+                            <SelectItem value="href">Route key: href</SelectItem>
+                        </SelectContent>
+                    </Select>
                     <div className="mt-2 space-y-1.5">
                         {children}
                     </div>

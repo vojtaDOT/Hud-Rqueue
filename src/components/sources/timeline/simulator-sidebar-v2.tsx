@@ -42,6 +42,12 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
         resetWorkflow,
     } = useTimelineState(initialWorkflow);
 
+    useEffect(() => {
+        if (initialWorkflow) {
+            resetWorkflow(initialWorkflow);
+        }
+    }, [initialWorkflow, resetWorkflow]);
+
     // Notify parent whenever workflow state changes
     useEffect(() => {
         onWorkflowChange?.(workflow);
@@ -50,7 +56,7 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
     useImperativeHandle(ref, () => ({
         getWorkflow: () => workflow,
         reset: (next?: ScrapingWorkflowV2) => {
-            if (next) resetWorkflow(next);
+            resetWorkflow(next);
         },
         fillSelectorTarget: (target: SelectorTarget, selector: string) => {
             // Try both phases to find the target node and update its selector field
@@ -58,7 +64,16 @@ export const SimulatorSidebarV2 = forwardRef<SimulatorSidebarV2Ref, SimulatorSid
                 updateNode(phase, target.nodeId, (node) => {
                     if (target.field) {
                         // Sub-field, e.g. "fields.0.selector" for data_extract or "filenameSelector" for document_url
+                        if (target.field === 'routeKeySelector' && node.type === 'repeater') {
+                            return { ...node, routeKeySelector: selector };
+                        }
                         if (target.field === 'filenameSelector' && node.type === 'document_url') {
+                            return { ...node, filenameSelector: selector };
+                        }
+                        if (target.field === 'urlSelector' && node.type === 'download_file') {
+                            return { ...node, urlSelector: selector };
+                        }
+                        if (target.field === 'filenameSelector' && node.type === 'download_file') {
                             return { ...node, filenameSelector: selector };
                         }
                         // data_extract: "fields.N.selector"

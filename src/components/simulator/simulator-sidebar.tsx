@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import {
     Workflow,
 } from 'lucide-react';
@@ -56,6 +56,7 @@ export type SidebarQuickAction =
     | 'auto_scaffold';
 
 interface SimulatorSidebarProps {
+    initialWorkflow?: ScrapingWorkflow | null;
     onWorkflowChange?: (workflowData: ScrapingWorkflow) => void;
     playwrightEnabled: boolean;
     onSelectorPreviewChange?: (selector: string | null) => void;
@@ -72,13 +73,20 @@ export interface SimulatorSidebarRef {
 }
 
 export const SimulatorSidebar = forwardRef<SimulatorSidebarRef, SimulatorSidebarProps>(({
+    initialWorkflow,
     onWorkflowChange,
     playwrightEnabled,
     onSelectorPreviewChange,
     className,
 }, ref) => {
-    const [workflow, setWorkflow] = useState(() => createDefaultWorkflow(playwrightEnabled));
+    const [workflow, setWorkflow] = useState(() => initialWorkflow ?? createDefaultWorkflow(playwrightEnabled));
     const [activeTab, setActiveTab] = useState<PhaseTab>('discovery');
+
+    useEffect(() => {
+        if (!initialWorkflow) return;
+        setWorkflow(initialWorkflow);
+        setActiveTab('discovery');
+    }, [initialWorkflow]);
 
     const {
         activeUrlType, setActiveUrlTypeId,

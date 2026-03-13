@@ -85,8 +85,8 @@ function validatePhaseNodes(
                     return `${phaseName}: Pagination max_pages musí být číslo >= 0.`;
                 }
                 if (pag.url) {
-                    if (pag.url.mode !== 'hybrid' && pag.url.mode !== 'url') {
-                        return `${phaseName}: Pagination URL mode musí být hybrid nebo url.`;
+                    if (pag.url.mode !== 'hybrid' && pag.url.mode !== 'pattern') {
+                        return `${phaseName}: Pagination URL mode musí být hybrid nebo pattern.`;
                     }
                     if (!pag.url.pattern.trim()) {
                         return `${phaseName}: Pagination URL regex pattern je povinný.`;
@@ -101,6 +101,12 @@ function validatePhaseNodes(
                     }
                     if (!pag.url.template.includes('{page}')) {
                         return `${phaseName}: Pagination URL template musí obsahovat {page}.`;
+                    }
+                    if (!Number.isFinite(pag.url.start_page) || pag.url.start_page < 1) {
+                        return `${phaseName}: Pagination start_page musí být číslo >= 1.`;
+                    }
+                    if (!Number.isFinite(pag.url.step) || pag.url.step < 1) {
+                        return `${phaseName}: Pagination step musí být číslo >= 1.`;
                     }
                 }
                 break;

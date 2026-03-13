@@ -19,10 +19,12 @@ import { Button } from '@/components/ui/button';
 
 interface SourceSimulatorLayoutProps {
     sidebarRef: RefObject<SimulatorSidebarRef | null>;
+    sidebarKey?: string;
     baseUrl: string;
     simulatorLoading: boolean;
     selectorPreview: string | null;
     playwrightEnabled: boolean;
+    initialWorkflow?: ScrapingWorkflow | null;
     onIframeLoad: () => void;
     onElementSelect: (selector: string, elementInfo?: ElementSelector) => void;
     onElementRemove: (selector: string) => void;
@@ -45,10 +47,12 @@ interface SourceSimulatorLayoutProps {
 
 export function SourceSimulatorLayout({
     sidebarRef,
+    sidebarKey,
     baseUrl,
     simulatorLoading,
     selectorPreview,
     playwrightEnabled,
+    initialWorkflow,
     onIframeLoad,
     onElementSelect,
     onElementRemove,
@@ -89,7 +93,9 @@ export function SourceSimulatorLayout({
     const renderSidebarContent = (placement: 'right' | 'bottom') => placement === 'bottom'
         ? (sidebarOverride ?? (
             <SimulatorSidebar
+                key={sidebarKey}
                 ref={sidebarRef}
+                initialWorkflow={initialWorkflow}
                 className="h-auto min-h-[32rem] border-l-0"
                 onWorkflowChange={onWorkflowChange}
                 playwrightEnabled={playwrightEnabled}
@@ -98,7 +104,9 @@ export function SourceSimulatorLayout({
         ))
         : (sidebarOverride ?? (
             <SimulatorSidebar
+                key={sidebarKey}
                 ref={sidebarRef}
+                initialWorkflow={initialWorkflow}
                 onWorkflowChange={onWorkflowChange}
                 playwrightEnabled={playwrightEnabled}
                 onSelectorPreviewChange={onSelectorPreviewChange}

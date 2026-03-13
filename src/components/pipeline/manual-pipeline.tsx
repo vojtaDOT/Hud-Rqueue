@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { analyzeDiscovery, isDownloadFanoutSkipMessage } from '@/lib/pipeline-discovery-diagnostics';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { useSources, type Source } from '@/hooks/use-sources';
@@ -301,6 +302,13 @@ interface OcrUnifiedRow {
     jobCount: number;
     isCandidate: boolean;
     blobUuid: string | null;
+}
+
+interface IngestionDiagnosticsSnapshot {
+    run: IngestionRunItem | null;
+    discoveredSourceUrls: SourceUrlMeta[];
+    downloadDocuments: DocumentItem[];
+    changedDocuments: DocumentItem[];
 }
 
 type StepHealth = 'neutral' | 'success' | 'warning' | 'error';
@@ -659,6 +667,27 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         () => allRuns.find((run) => String(run.id) === runState.selectedRunId) ?? null,
         [allRuns, runState.selectedRunId],
     );
+    const selectedSourceHasDiscoveryDownloadFile = React.useMemo(
+        () => hasDiscoveryDownloadFileStep(selectedSource?.crawl_params),
+        [selectedSource?.crawl_params],
+    );
+    const selectedRunStatsJson = React.useMemo(
+        () => selectedRun?.stats_json ?? ingestionRuns[0]?.stats_json ?? null,
+        [ingestionRuns, selectedRun?.stats_json],
+    );
+    const selectedRunStatus = React.useMemo(
+        () => selectedRun?.status ?? ingestionRuns[0]?.status ?? null,
+        [ingestionRuns, selectedRun?.status],
+    );
+    const discoveryDiagnosis = React.useMemo(() => analyzeDiscovery({
+        crawlParams: selectedSource?.crawl_params,
+        statsJson: selectedRunStatsJson,
+        runStatus: selectedRunStatus,
+        manualModeHint: discoverJobs.some((job) => job.manual === true),
+        jobErrorMessages: discoverJobs
+            .map((job) => job.error_message)
+            .filter((message): message is string => hasText(message)),
+    }), [discoverJobs, selectedRunStatsJson, selectedRunStatus, selectedSource?.crawl_params]);
     const historicalStepColoring = React.useMemo(
         () => Boolean(selectedRun && !isRunIncomplete(selectedRun.status)),
         [selectedRun],
@@ -721,13 +750,24 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             base.summary = 'warning';
         }
 
-        return base;
-    }, [historicalStepColoring, ingestionItems, runState.selectedRunId, selectedRun]);
-    const selectedSourceHasDiscoveryDownloadFile = React.useMemo(
-        () => hasDiscoveryDownloadFileStep(selectedSource?.crawl_params),
-        [selectedSource?.crawl_params],
-    );
+        if (counts.discovery.total === 0) {
+            if (discoveryDiagnosis.kind === 'zero_match_success') {
+                base.discovery = 'success';
+            } else if (discoveryDiagnosis.kind === 'config_drift') {
+                base.discovery = 'warning';
+            }
+        }
 
+        if (discoveryDiagnosis.kind === 'runtime_failure') {
+            base.discovery = 'error';
+        }
+
+        if (runStatus === 'completed' && discoveryDiagnosis.kind === 'config_drift' && base.summary === 'success') {
+            base.summary = 'warning';
+        }
+
+        return base;
+    }, [discoveryDiagnosis.kind, historicalStepColoring, ingestionItems, runState.selectedRunId, selectedRun]);
     const sourceStats = React.useMemo(() => {
         const countBySource = new Map<string, number>();
         const latestBySource = new Map<string, string>();
@@ -1092,7 +1132,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         return allRows;
     }, []);
 
-    const fetchIngestionDiagnostics = React.useCallback(async (runId: string) => {
+    const fetchIngestionDiagnostics = React.useCallback(async (runId: string): Promise<IngestionDiagnosticsSnapshot | null> => {
         setIngestionLoading(true);
         try {
             const { data: runData, error: runError } = await supabase
@@ -1108,7 +1148,12 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 setDiscoveredSourceUrls([]);
                 setDownloadDocuments([]);
                 setChangedDocuments([]);
-                return;
+                return {
+                    run: null,
+                    discoveredSourceUrls: [],
+                    downloadDocuments: [],
+                    changedDocuments: [],
+                };
             }
 
             const normalizedRun: IngestionRunItem = {
@@ -1242,6 +1287,12 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 ? docs.filter((doc) => ocrCandidateIds.has(String(doc.id)))
                 : docs;
             setChangedDocuments(changed);
+            return {
+                run: normalizedRun,
+                discoveredSourceUrls: discovered,
+                downloadDocuments: docs,
+                changedDocuments: changed,
+            };
         } catch (error) {
             const message = getErrorMessage(error, 'Nepodařilo se načíst ingestion diagnostiku');
             console.error('Failed to fetch ingestion diagnostics:', {
@@ -1250,6 +1301,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 error: getErrorLogPayload(error),
             });
             toast.error(message);
+            return null;
         } finally {
             setIngestionLoading(false);
         }
@@ -1822,9 +1874,39 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
 
         (async () => {
             try {
-                await fetchIngestionDiagnostics(runState.selectedRunId!);
+                const diagnostics = await fetchIngestionDiagnostics(runState.selectedRunId!);
                 await fetchAllSourceUrlMeta();
-                if (selectedSourceHasDiscoveryDownloadFile) {
+                const diagnosis = analyzeDiscovery({
+                    crawlParams: selectedSource?.crawl_params,
+                    statsJson: diagnostics?.run?.stats_json ?? selectedRunStatsJson,
+                    runStatus: diagnostics?.run?.status ?? selectedRunStatus,
+                    manualModeHint: discoverJobs.some((job) => job.manual === true),
+                    jobErrorMessages: discoverJobs
+                        .map((job) => job.error_message)
+                        .filter((message): message is string => hasText(message)),
+                });
+
+                if (diagnosis.isZeroOutputFinished) {
+                    setDownloadSkippedByDiscovery(selectedSourceHasDiscoveryDownloadFile);
+                    setDownloadSettled(true);
+                    setOcrSettled(true);
+                    unlockStage('summary');
+                    setRunState((prev) => ({ ...prev, activeStage: 'summary' }));
+                    void patchSelectedRun({
+                        active_stage: 'summary',
+                        status: 'completed',
+                        error_message: null,
+                        finished_at: diagnostics?.run?.finished_at ?? new Date().toISOString(),
+                    });
+                    toast.success(
+                        diagnosis.kind === 'config_drift'
+                            ? 'Discovery dokončeno bez matchů. Zdroj vypadá na selector/config drift.'
+                            : 'Discovery dokončeno bez matchů.',
+                    );
+                } else if (
+                    selectedSourceHasDiscoveryDownloadFile
+                    && (diagnostics?.downloadDocuments.length ?? 0) > 0
+                ) {
                     setDownloadSkippedByDiscovery(true);
                     setDownloadSettled(true);
                     void patchSelectedRun({ active_stage: 'ocr', status: 'running', error_message: null });
@@ -1846,10 +1928,14 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     }, [
         discoverCompleted,
         discoverySettled,
+        discoverJobs,
         fetchAllSourceUrlMeta,
         fetchIngestionDiagnostics,
         patchSelectedRun,
         runState.selectedRunId,
+        selectedRunStatsJson,
+        selectedRunStatus,
+        selectedSource?.crawl_params,
         selectedSourceHasDiscoveryDownloadFile,
         unlockStage,
     ]);
@@ -2120,9 +2206,11 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         }
         if (stage === 'sources') return Boolean(runState.selectedRunId);
         if (stage === 'discovery') return discoverCompleted;
-        if (stage === 'download') return downloadStageCompleted;
-        if (stage === 'ocr') return ocrSettled || ocrCompleted;
-        if (stage === 'summary') return ocrSettled || ocrCompleted || ocrJobs.some((job) => job.status === 'failed');
+        if (stage === 'download') return downloadStageCompleted || discoveryDiagnosis.isZeroOutputFinished;
+        if (stage === 'ocr') return ocrSettled || ocrCompleted || discoveryDiagnosis.isZeroOutputFinished;
+        if (stage === 'summary') {
+            return ocrSettled || ocrCompleted || discoveryDiagnosis.isZeroOutputFinished || ocrJobs.some((job) => job.status === 'failed');
+        }
         return false;
     };
 
@@ -2251,12 +2339,15 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     const discoveryErrors = React.useMemo(() => (
         discoverJobs
             .filter((job) => hasText(job.error_message))
+            .filter((job) => (
+                !(discoveryDiagnosis.suppressFanoutAsPrimaryCause && isDownloadFanoutSkipMessage(job.error_message))
+            ))
             .map((job) => ({
                 id: `redis-discovery-${job.id}`,
                 source: `Redis job #${job.id}`,
                 message: job.error_message,
             }))
-    ), [discoverJobs]);
+    ), [discoverJobs, discoveryDiagnosis.suppressFanoutAsPrimaryCause]);
 
     const downloadErrors = React.useMemo(() => {
         const redisErrors = downloadJobs
@@ -2374,6 +2465,70 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     {toPrettyJson(payload)}
                 </pre>
             </details>
+        );
+    };
+
+    const renderDiscoveryDiagnosisPanel = () => {
+        if (!runState.selectedRunId && discoverJobs.length === 0 && selectedRunStatsJson === null) {
+            return null;
+        }
+
+        const toneClass = discoveryDiagnosis.severity === 'error'
+            ? 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-100'
+            : discoveryDiagnosis.severity === 'warning'
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-100'
+                : discoveryDiagnosis.severity === 'success'
+                    ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-100'
+                    : 'border-border bg-background/40 text-muted-foreground';
+
+        return (
+            <div className={cn('rounded-md border p-3 space-y-2', toneClass)}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h4 className="text-sm font-semibold">{discoveryDiagnosis.title}</h4>
+                    <div className="flex flex-wrap gap-2 text-[11px]">
+                        <span className="rounded-full border border-current/20 px-2 py-0.5">
+                            reason: {discoveryDiagnosis.stats.reason ?? '—'}
+                        </span>
+                        <span className="rounded-full border border-current/20 px-2 py-0.5">
+                            errors: {discoveryDiagnosis.stats.errors ?? '—'}
+                        </span>
+                        <span className="rounded-full border border-current/20 px-2 py-0.5">
+                            rows: {discoveryDiagnosis.stats.rows ?? '—'}
+                        </span>
+                        <span className="rounded-full border border-current/20 px-2 py-0.5">
+                            emitters: {discoveryDiagnosis.config.emitterStepCount}
+                        </span>
+                    </div>
+                </div>
+                <p className="text-xs leading-relaxed">{discoveryDiagnosis.summary}</p>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                    <span className="rounded-full border border-current/20 px-2 py-0.5">
+                        source_urls_found: {discoveryDiagnosis.stats.sourceUrlsFound ?? '—'}
+                    </span>
+                    <span className="rounded-full border border-current/20 px-2 py-0.5">
+                        documents_found: {discoveryDiagnosis.stats.documentsFound ?? '—'}
+                    </span>
+                    <span className="rounded-full border border-current/20 px-2 py-0.5">
+                        manual_mode: {discoveryDiagnosis.stats.manualMode ? 'true' : 'false'}
+                    </span>
+                    <span className="rounded-full border border-current/20 px-2 py-0.5">
+                        repeaters: {discoveryDiagnosis.config.repeaterCount}
+                    </span>
+                    <span className="rounded-full border border-current/20 px-2 py-0.5">
+                        before actions: {discoveryDiagnosis.config.beforeActionCount}
+                    </span>
+                </div>
+                {discoveryDiagnosis.action && (
+                    <p className="text-xs leading-relaxed">
+                        {discoveryDiagnosis.action}
+                    </p>
+                )}
+                {discoveryDiagnosis.suppressFanoutAsPrimaryCause && (
+                    <p className="text-xs leading-relaxed">
+                        Hlaseni o skipping download fanout je v manual mode pouze sekundarni signal a ne primarni pricina.
+                    </p>
+                )}
+            </div>
         );
     };
 
@@ -2508,16 +2663,18 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                     discoverCounts,
                     discoveryOperatorState,
                 )}
+                {renderDiscoveryDiagnosisPanel()}
                 {renderErrorPanel('Chyby discovery', discoveryErrors)}
                 {renderRawDebugPanel('DEV raw: Discovery jobs + Queue-Operator', {
                     discoverJobs,
                     discoverCounts,
+                    discoveryDiagnosis,
                     discoveryOperatorState,
                     operatorConnectionState,
                     operatorError,
                     queueOperatorTrackedJobIds,
                 })}
-                {downloadSkippedByDiscovery && (
+                {downloadSkippedByDiscovery && !discoveryDiagnosis.isZeroOutputFinished && (
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
                     </div>
@@ -2605,7 +2762,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         )}
                     </Button>
                 </div>
-                {downloadSkippedByDiscovery && (
+                {downloadSkippedByDiscovery && !discoveryDiagnosis.isZeroOutputFinished && (
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-100">
                         Download krok přeskočen: soubory byly staženy již v Discovery, připraveno pro OCR.
                     </div>

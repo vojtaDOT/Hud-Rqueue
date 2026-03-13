@@ -14,9 +14,51 @@ function createListCrawlParams(): UnifiedWorkerCrawlParams {
         playwright: false,
         discovery: {
             before: [],
-            chain: [],
+            chain: [
+                {
+                    selector: '.list',
+                    label: 'Cards',
+                    repeater: {
+                        selector: '.card',
+                        label: 'Card repeater',
+                        steps: [
+                            {
+                                type: 'source_url',
+                                selector: 'a.detail',
+                                url_type: 'detail',
+                            },
+                        ],
+                    },
+                    pagination: null,
+                    children: [],
+                },
+            ],
         },
-        processing: [],
+        processing: [
+            {
+                url_type: 'detail',
+                before: [],
+                chain: [
+                    {
+                        selector: 'main',
+                        label: 'Detail page',
+                        repeater: {
+                            selector: '.attachments',
+                            label: 'Attachments',
+                            steps: [
+                                {
+                                    type: 'download_file',
+                                    url_selector: 'a[href$=".pdf"]',
+                                    filename_selector: 'self',
+                                },
+                            ],
+                        },
+                        pagination: null,
+                        children: [],
+                    },
+                ],
+            },
+        ],
     };
 }
 
@@ -24,13 +66,15 @@ describe('source-config', () => {
     it('builds list source config envelope', () => {
         const list = buildListSourceConfig(createListCrawlParams());
         expect(list.crawl_params.schema_version).toBe(2);
-        expect(list.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
-        expect(list.crawl_params.worker_contract).toBe('scrapy-worker.instructions.v1');
-        expect(list.crawl_params.flow).toEqual(['source', 'source_urls']);
+        expect(list.crawl_params).not.toHaveProperty('runtime_contract');
+        expect(list.crawl_params).not.toHaveProperty('worker_contract');
+        expect(list.crawl_params).not.toHaveProperty('flow');
         expect(list.extraction_data.config_version).toBe(1);
         expect(list.extraction_data.strategy).toBe('list');
-        expect(list.extraction_data.pagination_defaults.mode).toBe('hybrid');
-        expect(list.extraction_data.dedupe.rss_identity).toBe('link_then_guid');
+        expect(list.extraction_data.generator_kind).toBe('ui-step-builder');
+        expect(list.extraction_data.generator_version).toBe(1);
+        expect(list.extraction_data.editor_model).toEqual(list.crawl_params);
+        expect(list.extraction_data.ui_state).toEqual({});
     });
 
     it('builds rss source config envelope', () => {
@@ -84,6 +128,7 @@ describe('source-config', () => {
         expect(result.success).toBe(true);
         if (result.success) {
             expect(result.data.crawl_strategy).toBe('list');
+            expect(result.data.extraction_data.editor_model).toEqual(result.data.crawl_params);
         }
     });
 });

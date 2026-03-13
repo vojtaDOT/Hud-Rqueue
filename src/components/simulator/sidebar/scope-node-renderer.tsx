@@ -217,6 +217,44 @@ export function ScopeNodeRenderer({
                                     });
                                 }}
                             />
+                            <Input
+                                value={repeater.route_key_selector ?? ''}
+                                placeholder="Route key selector (optional)"
+                                className="h-8 border-border bg-card/50 text-xs text-foreground"
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    updatePhase(phaseKey, (phase) => {
+                                        const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
+                                            ...current,
+                                            route_key_selector: value,
+                                            route_key_extract: value.trim()
+                                                ? (current.route_key_extract ?? 'text')
+                                                : 'text',
+                                        }));
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            />
+                            <Select
+                                value={repeater.route_key_extract ?? 'text'}
+                                onValueChange={(value) => {
+                                    updatePhase(phaseKey, (phase) => {
+                                        const [chain] = updateRepeaterInTree(phase.chain, repeater.id, (current) => ({
+                                            ...current,
+                                            route_key_extract: value as 'text' | 'href',
+                                        }));
+                                        return { ...phase, chain };
+                                    });
+                                }}
+                            >
+                                <SelectTrigger className="h-8 border-border bg-card/50 text-xs text-foreground">
+                                    <SelectValue placeholder="Route key extract" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="text">Route key: text</SelectItem>
+                                    <SelectItem value="href">Route key: href</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div className="mt-2 space-y-2">
@@ -318,7 +356,7 @@ export function ScopeNodeRenderer({
                                                 ...pagination,
                                                 url: {
                                                     ...currentUrl,
-                                                    mode: value as 'hybrid' | 'url',
+                                                    mode: value as 'hybrid' | 'pattern',
                                                 },
                                             },
                                         };
@@ -332,7 +370,7 @@ export function ScopeNodeRenderer({
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="hybrid">Hybrid URL + CSS</SelectItem>
-                                <SelectItem value="url">URL only</SelectItem>
+                                <SelectItem value="pattern">Pattern only</SelectItem>
                             </SelectContent>
                         </Select>
                         <Input

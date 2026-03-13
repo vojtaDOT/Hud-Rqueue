@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PanelBottomOpen, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,8 +11,6 @@ import { RssToolboxPanel } from '@/components/sources/rss-toolbox-panel';
 import { XmlWorkspace } from '@/components/sources/rss/xml-workspace';
 import { SourceMetadataForm } from '@/components/sources/source-metadata-form';
 import { SourceSimulatorLayout } from '@/components/sources/source-simulator-layout';
-import { SimulatorSidebarV2, type SimulatorSidebarV2Ref } from '@/components/sources/timeline/simulator-sidebar-v2';
-import type { SelectorTarget } from '@/components/sources/timeline/nodes/use-selector-preview';
 import { ToolboxTabs, type ToolboxTab } from '@/components/sources/toolbox-tabs';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
@@ -35,7 +33,7 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { ElementSelector, ScrapingWorkflow, type ScrapingWorkflowV2 } from '@/lib/crawler-types';
+import { ElementSelector, ScrapingWorkflow } from '@/lib/crawler-types';
 import { buildRssAuthoringSummary, buildRssSourceConfig } from '@/lib/source-config';
 
 const DEFAULT_RSS_AUTHORING: RssAuthoringValues = {
@@ -58,7 +56,7 @@ export function SourceEditorContainer() {
     const searchParams = useSearchParams();
     const editSourceId = searchParams.get('edit');
     const isEditMode = Boolean(editSourceId);
-    const { source: loadedSource, workflow: loadedWorkflow, workflowV2: loadedWorkflowV2, loading: sourceLoading } = useSourceLoad(editSourceId);
+    const { source: loadedSource, workflow: loadedWorkflow, loading: sourceLoading } = useSourceLoad(editSourceId);
 
     const [name, setName] = useState('');
     const [typeId, setTypeId] = useState('');
@@ -84,12 +82,6 @@ export function SourceEditorContainer() {
     const [activeToolboxTab, setActiveToolboxTab] = useState<ToolboxTab>('path');
 
     const sidebarRef = useRef<SimulatorSidebarRef>(null);
-    const sidebarV2Ref = useRef<SimulatorSidebarV2Ref>(null);
-    const [workflowDataV2, setWorkflowDataV2] = useState<ScrapingWorkflowV2 | null>(null);
-
-    // V2 pick-from-preview state
-    const selectorTargetRef = useRef<SelectorTarget | null>(null) as MutableRefObject<SelectorTarget | null>;
-    const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
 
     const { sourceTypes, loadingTypes } = useSourceTypes();
 
@@ -143,9 +135,7 @@ export function SourceEditorContainer() {
                 setRssPreviewError(null);
                 setRssAuthoring(DEFAULT_RSS_AUTHORING);
                 setActiveToolboxTab('path');
-                setWorkflowDataV2(null);
                 sidebarRef.current?.reset();
-                sidebarV2Ref.current?.reset();
             }
         },
     });
@@ -251,9 +241,6 @@ export function SourceEditorContainer() {
             setWorkflowData(loadedWorkflow);
             setPlaywrightEnabled(loadedWorkflow.playwright_enabled ?? false);
         }
-        if (loadedWorkflowV2) {
-            setWorkflowDataV2(loadedWorkflowV2);
-        }
         // Restore RSS authoring values from saved crawl_params when in RSS mode
         if (loadedSource.crawl_strategy === 'rss' && loadedSource.crawl_params) {
             const cp = loadedSource.crawl_params as Record<string, unknown>;
@@ -263,29 +250,10 @@ export function SourceEditorContainer() {
                 entryLinkSelector: typeof cp.entry_link_selector === 'string' ? cp.entry_link_selector : '',
             });
         }
-    }, [loadedSource, loadedWorkflow, loadedWorkflowV2]);
-
-    const handleMatchCount = useCallback((selector: string, count: number) => {
-        setMatchCounts((prev) => {
-            if (prev[selector] === count) return prev;
-            return { ...prev, [selector]: count };
-        });
-    }, []);
-
-    // Keep ref in sync: store non-null targets, don't clear on blur (null)
-    const handleSelectorTargetChange = useCallback((target: SelectorTarget | null) => {
-        if (target !== null) {
-            selectorTargetRef.current = target;
-        }
-    }, []);
+    }, [loadedSource, loadedWorkflow]);
 
     const handleElementSelect = (selector: string, elementInfo?: ElementSelector) => {
-        // Use ref — it retains the last non-null target even after blur clears state
-        const target = selectorTargetRef.current;
-        if (target && sidebarV2Ref.current) {
-            const patternSel = elementInfo?.patternSelector || selector;
-            sidebarV2Ref.current.fillSelectorTarget(target, patternSel);
-            selectorTargetRef.current = null;
+        if (sidebarRef.current?.applySelectedSelector(selector, elementInfo)) {
             toast.success('Selector byl vlozen do aktivniho pole.');
             return;
         }
@@ -341,7 +309,6 @@ export function SourceEditorContainer() {
             crawlStrategy,
             crawlInterval,
             workflowData,
-            workflowDataV2,
             playwrightEnabled,
             obec: selectedObec,
             selectedRssFeed,
@@ -416,7 +383,7 @@ export function SourceEditorContainer() {
     // RSS feed URL for XML workspace
     const effectiveRssFeedUrl = selectedRssFeed || baseUrl;
 
-    // Sidebar override: RSS tab → RssToolboxPanel, Path tab → V2 timeline sidebar
+    // Sidebar override: RSS tab uses RSS toolbox, Path tab falls back to the standard workflow sidebar
     const sidebarOverride = activeToolboxTab === 'rss' ? (
         <RssToolboxPanel
             baseUrl={baseUrl}
@@ -447,16 +414,7 @@ export function SourceEditorContainer() {
                     : null
             }
         />
-    ) : (
-        <SimulatorSidebarV2
-            ref={sidebarV2Ref}
-            initialWorkflow={workflowDataV2}
-            onWorkflowChange={setWorkflowDataV2}
-            onSelectorPreviewChange={setSelectorPreview}
-            onSelectorTargetChange={handleSelectorTargetChange}
-            matchCounts={matchCounts}
-        />
-    );
+    ) : undefined;
 
     // Frame override: RSS mode shows XML workspace instead of iframe
     const frameOverride = activeToolboxTab === 'rss' ? (
@@ -495,10 +453,12 @@ export function SourceEditorContainer() {
             <div className="flex-1 overflow-hidden min-h-0">
                 <SourceSimulatorLayout
                     sidebarRef={sidebarRef}
+                    sidebarKey={editSourceId ?? 'new-source'}
                     baseUrl={baseUrl}
                     simulatorLoading={simulatorLoading}
                     selectorPreview={selectorPreview}
                     playwrightEnabled={playwrightEnabled}
+                    initialWorkflow={loadedWorkflow}
                     onIframeLoad={handleIframeLoad}
                     onElementSelect={handleElementSelect}
                     onElementRemove={handleElementRemove}
@@ -506,13 +466,11 @@ export function SourceEditorContainer() {
                     onPlaywrightToggleRequest={handlePlaywrightToggleRequest}
                     onWorkflowChange={setWorkflowData}
                     onSelectorPreviewChange={setSelectorPreview}
-                    onMatchCount={handleMatchCount}
                     sidebarHeader={sidebarHeader}
                     sidebarOverride={sidebarOverride}
                     frameOverride={frameOverride}
                     panelPlacement={panelPlacement}
                     onPanelPlacementChange={setPanelPlacement}
-                    hideSelectedElement={activeToolboxTab === 'path'}
                 />
             </div>
 

@@ -21,6 +21,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { RepeaterStepCard } from '@/components/simulator/sidebar/repeater-step-card';
 
 import type { PhaseKey } from '@/components/simulator/sidebar/hooks/use-workflow-state';
@@ -135,9 +136,10 @@ export function RepeaterStepRenderer({
                 <div className="space-y-2">
                     <div className="flex items-center gap-1">
                         <Input
-                            value={step.selector}
+                            value={step.emit_parent_url ? 'self' : step.selector}
                             placeholder="Selector for source URL"
                             className="h-8 border-border bg-card/50 text-xs text-foreground"
+                            disabled={step.emit_parent_url === true}
                             onFocus={() => setSelectorFocus(stepTarget('selector'), step.selector)}
                             onChange={(event) => {
                                 const value = event.target.value;
@@ -152,6 +154,27 @@ export function RepeaterStepRenderer({
                         />
                         {renderPickButton(stepTarget('selector'), step.selector)}
                     </div>
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Switch
+                            checked={step.emit_parent_url === true}
+                            onCheckedChange={(checked) => {
+                                updatePhase(phaseKey, (phase) => {
+                                    const [chain] = updateStepInTree(phase.chain, step.id, (current) => (
+                                        current.type === 'source_url'
+                                            ? {
+                                                ...current,
+                                                emit_parent_url: checked,
+                                                selector: checked ? 'self' : current.selector,
+                                            }
+                                            : current
+                                    ));
+                                    return { ...phase, chain };
+                                });
+                            }}
+                            className="h-4 w-7"
+                        />
+                        Emit parent URL (inline-card routing)
+                    </label>
                     <div className="grid grid-cols-2 gap-2">
                         <Input
                             value="href"

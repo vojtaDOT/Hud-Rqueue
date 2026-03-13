@@ -4,7 +4,6 @@ import {
     BeforeAction,
     PhaseConfig,
     PLAYWRIGHT_ACTION_TYPES,
-    ScopeModule,
     RepeaterStep,
     ScrapingWorkflow,
     UnifiedWorkerBeforeAction,
@@ -13,7 +12,7 @@ import {
     UnifiedWorkerScopeNodeV2,
     UnifiedWorkerRepeaterStepV2,
 } from './crawler-types';
-import { renderTemplate, CRAWL_PARAMS_LIST_TEMPLATE } from './templates';
+import { normalizeUnifiedListCrawlParams } from './list-source-contract';
 
 function toWorkerBeforeActions(before: BeforeAction[]): UnifiedWorkerBeforeAction[] {
     return before.map((action) => {
@@ -60,8 +59,9 @@ function toWorkerRepeaterStep(
     if (step.type === 'source_url') {
         return {
             type: 'source_url',
-            selector: step.selector,
+            selector: step.emit_parent_url ? 'self' : step.selector,
             url_type: resolveUrlTypeName(step.url_type_id),
+            ...(step.emit_parent_url ? { emit_parent_url: true } : {}),
         };
     }
 
@@ -90,16 +90,22 @@ function toWorkerRepeaterStep(
 }
 
 function toWorkerScopeChain(
-    scopes: ScopeModule[],
+    scopes: PhaseConfig['chain'],
     resolveUrlTypeName: (urlTypeId?: string) => string,
 ): UnifiedWorkerScopeNodeV2[] {
     return scopes.map((scope) => ({
         selector: scope.css_selector.trim(),
-        label: scope.label.trim(),
+        label: scope.label,
         repeater: scope.repeater
             ? {
                 selector: scope.repeater.css_selector.trim(),
-                label: scope.repeater.label.trim(),
+                label: scope.repeater.label,
+                ...(scope.repeater.route_key_selector?.trim()
+                    ? {
+                        route_key_selector: scope.repeater.route_key_selector.trim(),
+                        route_key_extract: scope.repeater.route_key_extract ?? 'text',
+                    }
+                    : {}),
                 steps: scope.repeater.steps.map((step) => toWorkerRepeaterStep(step, resolveUrlTypeName)),
             }
             : null,
@@ -157,17 +163,21 @@ export function hasPlaywrightBeforeAction(actions: BeforeAction[]): boolean {
  */
 export function generateUnifiedCrawlParams(workflowData: ScrapingWorkflow): UnifiedWorkerCrawlParams {
     const resolveUrlTypeName = createUrlTypeNameResolver(workflowData.url_types);
+    const discovery = toWorkerPhase(workflowData.discovery, resolveUrlTypeName);
+    const hasDiscoverySourceUrl = discovery.chain.some(function hasSourceUrl(scope: UnifiedWorkerScopeNodeV2): boolean {
+        if (scope.repeater?.steps.some((step) => step.type === 'source_url')) return true;
+        return scope.children.some(hasSourceUrl);
+    });
 
-    return renderTemplate<UnifiedWorkerCrawlParams>(
-        CRAWL_PARAMS_LIST_TEMPLATE as unknown as Record<string, unknown>,
-        {
-            contract_metadata: {},
-            playwright: workflowData.playwright_enabled,
-            discovery: toWorkerPhase(workflowData.discovery, resolveUrlTypeName),
-            processing: workflowData.url_types.map((urlType) => ({
+    return normalizeUnifiedListCrawlParams({
+        schema_version: 2,
+        playwright: workflowData.playwright_enabled,
+        discovery,
+        processing: hasDiscoverySourceUrl
+            ? workflowData.url_types.map((urlType) => ({
                 url_type: urlType.name.trim() || urlType.id,
                 ...toWorkerPhase(urlType.processing, resolveUrlTypeName),
-            })),
-        },
-    );
+            }))
+            : [],
+    });
 }

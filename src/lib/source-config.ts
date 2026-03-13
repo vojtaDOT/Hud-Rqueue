@@ -3,24 +3,19 @@ import { z } from 'zod';
 import type { RssCrawlParamsV1, UnifiedWorkerCrawlParams } from '@/lib/crawler-types';
 import { normalizeUrlForDedupe } from '@/lib/dedupe-url';
 import {
+    buildListSourceConfig as buildCanonicalListSourceConfig,
+    createValidationError,
+    type EditorEnvelopeV1,
+    ListEditorEnvelopeSchema,
+    UnifiedListCrawlParamsSchema,
+    validateUnifiedListCrawlParams,
+} from '@/lib/list-source-contract';
+import {
     renderTemplate,
     CRAWL_PARAMS_RSS_TEMPLATE,
-    EXTRACTION_DATA_LIST_TEMPLATE,
     EXTRACTION_DATA_RSS_TEMPLATE,
 } from '@/lib/templates';
 import { WORKER_CONTRACT_METADATA_V11 } from '@/lib/worker-contract-metadata';
-
-export const IGNORED_DEDUPE_QUERY_PARAMS = [
-    'utm_source',
-    'utm_medium',
-    'utm_campaign',
-    'utm_term',
-    'utm_content',
-    'gclid',
-    'fbclid',
-    'mc_cid',
-    'mc_eid',
-] as const;
 
 export type SourceStrategy = 'list' | 'rss';
 export type RssIdentityMode = 'link_then_guid';
@@ -30,18 +25,7 @@ export interface SourceConfigEnvelopeBaseV1 {
     strategy: SourceStrategy;
 }
 
-export interface SourceListExtractionDataV1 extends SourceConfigEnvelopeBaseV1 {
-    strategy: 'list';
-    dedupe: {
-        url_norm_version: 'v2';
-        rss_identity: RssIdentityMode;
-        ignored_query_params: string[];
-    };
-    pagination_defaults: {
-        mode: 'hybrid';
-        max_pages: number;
-    };
-}
+export type SourceListExtractionDataV1 = EditorEnvelopeV1;
 
 export type RssWarningReason = 'http_error' | 'not_feed' | 'network_error' | 'timeout';
 
@@ -129,35 +113,6 @@ const ContractMetadataShape = {
     runtime_rules: RuntimeRulesSchema.optional(),
 } satisfies z.ZodRawShape;
 
-const ListCrawlParamsSchema = z.object({
-    schema_version: z.literal(2),
-    playwright: z.boolean(),
-    discovery: z.object({
-        before: z.array(z.unknown()),
-        chain: z.array(z.unknown()),
-    }),
-    processing: z.array(z.object({
-        url_type: z.string().trim().min(1),
-        before: z.array(z.unknown()),
-        chain: z.array(z.unknown()),
-    }).passthrough()),
-    ...ContractMetadataShape,
-}).passthrough();
-
-const ListExtractionDataSchema = z.object({
-    config_version: z.literal(1),
-    strategy: z.literal('list'),
-    dedupe: z.object({
-        url_norm_version: z.literal('v2'),
-        rss_identity: z.literal('link_then_guid'),
-        ignored_query_params: z.array(z.string().min(1)).min(1),
-    }),
-    pagination_defaults: z.object({
-        mode: z.literal('hybrid'),
-        max_pages: z.number().int().min(0),
-    }),
-}).strict();
-
 const RssWarningSchema = z.object({
     url: UrlSchema,
     status: z.number().int().nullable(),
@@ -225,20 +180,15 @@ const BaseSourcePayloadSchema = z.object({
     kraj_id: NullableStringSchema.optional().default(null),
 });
 
-export function buildListSourceConfig(crawlParams: UnifiedWorkerCrawlParams): {
+export function buildListSourceConfig(
+    crawlParams: UnifiedWorkerCrawlParams,
+    uiState: Record<string, unknown> = {},
+): {
+    crawl_strategy: 'list';
     crawl_params: UnifiedWorkerCrawlParams;
     extraction_data: SourceListExtractionDataV1;
 } {
-    return {
-        crawl_params: {
-            ...WORKER_CONTRACT_METADATA_V11,
-            ...crawlParams,
-        },
-        extraction_data: renderTemplate<SourceListExtractionDataV1>(
-            EXTRACTION_DATA_LIST_TEMPLATE as unknown as Record<string, unknown>,
-            { ignored_query_params: [...IGNORED_DEDUPE_QUERY_PARAMS] },
-        ),
-    };
+    return buildCanonicalListSourceConfig(crawlParams, uiState);
 }
 
 function normalizeRssExtractionData(data: SourceRssExtractionDataWithNullableProbe): SourceRssExtractionDataV1 {
@@ -406,7 +356,7 @@ export function validateSourcePayload(payload: unknown): SourcePayloadValidation
 
     const parsed = base.data;
     if (parsed.crawl_strategy === 'list') {
-        const crawlParams = ListCrawlParamsSchema.safeParse(parsed.crawl_params);
+        const crawlParams = UnifiedListCrawlParamsSchema.safeParse(parsed.crawl_params);
         if (!crawlParams.success) {
             return {
                 success: false,
@@ -414,11 +364,29 @@ export function validateSourcePayload(payload: unknown): SourcePayloadValidation
             };
         }
 
-        const extractionData = ListExtractionDataSchema.safeParse(parsed.extraction_data);
+        const extractionData = ListEditorEnvelopeSchema.safeParse(parsed.extraction_data);
         if (!extractionData.success) {
             return {
                 success: false,
                 error: extractionData.error,
+            };
+        }
+
+        const semanticIssues = validateUnifiedListCrawlParams(crawlParams.data);
+        if (semanticIssues.length > 0) {
+            return {
+                success: false,
+                error: createValidationError(semanticIssues),
+            };
+        }
+
+        if (JSON.stringify(extractionData.data.editor_model) !== JSON.stringify(crawlParams.data)) {
+            return {
+                success: false,
+                error: createValidationError([{
+                    path: ['extraction_data', 'editor_model'],
+                    message: 'extraction_data.editor_model musí být 1:1 mirror crawl_params.',
+                }]),
             };
         }
 

@@ -36,7 +36,7 @@ export interface WorkerRuntimeEnqueueConfig {
 
 export type ExtractType = 'text' | 'href';
 
-export type PaginationUrlMode = 'hybrid' | 'url';
+export type PaginationUrlMode = 'hybrid' | 'pattern';
 
 export interface PaginationUrlConfig {
     mode: PaginationUrlMode;
@@ -73,6 +73,7 @@ export interface SourceUrlStep {
     selector: string;
     extract_type: 'href';
     url_type_id?: string;
+    emit_parent_url?: boolean;
 }
 
 export interface DocumentUrlStep {
@@ -104,6 +105,8 @@ export interface RepeaterNode {
     id: string;
     css_selector: string;
     label: string;
+    route_key_selector?: string;
+    route_key_extract?: ExtractType;
     steps: RepeaterStep[];
 }
 
@@ -156,6 +159,7 @@ export interface UnifiedWorkerSourceUrlStepV2 {
     type: 'source_url';
     selector: string;
     url_type: string;
+    emit_parent_url?: boolean;
 }
 
 export interface UnifiedWorkerDocumentUrlStepV2 {
@@ -191,6 +195,8 @@ export interface UnifiedWorkerPaginationV2 {
 export interface UnifiedWorkerRepeaterNodeV2 {
     selector: string;
     label: string;
+    route_key_selector?: string;
+    route_key_extract?: ExtractType;
     steps: UnifiedWorkerRepeaterStepV2[];
 }
 
@@ -211,7 +217,7 @@ export interface UnifiedWorkerProcessingPhaseV2 extends UnifiedWorkerPhaseV2 {
     url_type: string;
 }
 
-export interface UnifiedWorkerCrawlParams extends Partial<WorkerContractMetadataV11> {
+export interface UnifiedWorkerCrawlParams {
     schema_version: 2;
     playwright: boolean;
     discovery: UnifiedWorkerPhaseV2;

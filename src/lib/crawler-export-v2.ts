@@ -17,7 +17,6 @@ import {
     type UnifiedWorkerPaginationV2,
     type UnifiedWorkerRepeaterNodeV2,
 } from './crawler-types';
-import { WORKER_CONTRACT_METADATA_V11 } from './worker-contract-metadata';
 
 // ── Before-action nodes (click, timeout, javascript) ───────────────────
 
@@ -184,7 +183,6 @@ export function generateCrawlParamsV2(workflow: ScrapingWorkflowV2): UnifiedWork
         : [];
 
     return {
-        ...WORKER_CONTRACT_METADATA_V11,
         schema_version: 2,
         playwright,
         discovery,

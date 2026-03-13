@@ -1,4 +1,4 @@
-import { hasPlaywrightBeforeAction } from '@/lib/crawler-export';
+import { generateUnifiedCrawlParams, hasPlaywrightBeforeAction } from '@/lib/crawler-export';
 import {
     BeforeAction,
     PhaseConfig,
@@ -6,6 +6,7 @@ import {
     ScopeModule,
     ScrapingWorkflow,
 } from '@/lib/crawler-types';
+import { validateUnifiedListCrawlParams } from '@/lib/list-source-contract';
 
 function flattenScopes(scopes: ScopeModule[]): ScopeModule[] {
     const output: ScopeModule[] = [];
@@ -43,11 +44,18 @@ function isPositiveInteger(value: number): boolean {
 }
 
 export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | null; warnings: string[] } {
-    if (workflow.url_types.length < 1) {
-        return { error: 'Musi existovat alespon jeden URL Type.', warnings: [] };
-    }
-
     const validUrlTypeIds = new Set(workflow.url_types.map((item) => item.id));
+    const duplicateUrlTypeNames = new Set<string>();
+    for (const urlType of workflow.url_types) {
+        const name = urlType.name.trim();
+        if (!name) {
+            return { error: 'Kazdy URL Type musi mit nazev.', warnings: [] };
+        }
+        if (duplicateUrlTypeNames.has(name)) {
+            return { error: `URL Type "${name}" je duplicitni.`, warnings: [] };
+        }
+        duplicateUrlTypeNames.add(name);
+    }
 
     const sourceUrlSteps = getPhaseSteps(workflow.discovery).filter(
         (step) => step.type === 'source_url' && step.selector.trim().length > 0,
@@ -55,8 +63,11 @@ export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | 
     const documentUrlSteps = getPhaseSteps(workflow.discovery).filter(
         (step) => step.type === 'document_url' && step.selector.trim().length > 0,
     );
-    if (sourceUrlSteps.length < 1 && documentUrlSteps.length < 1) {
-        return { error: 'Phase 1 musi obsahovat alespon jeden source_url nebo document_url krok s CSS selektorem.', warnings: [] };
+    const downloadFileSteps = getPhaseSteps(workflow.discovery).filter(
+        (step) => step.type === 'download_file' && step.url_selector.trim().length > 0,
+    );
+    if (sourceUrlSteps.length < 1 && documentUrlSteps.length < 1 && downloadFileSteps.length < 1) {
+        return { error: 'Phase 1 musi obsahovat alespon jeden source_url, document_url nebo download_file krok.', warnings: [] };
     }
 
     const allPhases: Array<{ phaseName: string; phase: PhaseConfig }> = [
@@ -90,8 +101,8 @@ export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | 
                 }
 
                 const urlConfig = scope.pagination.url;
-                if (urlConfig.mode !== 'hybrid' && urlConfig.mode !== 'url') {
-                    return { error: 'Pagination URL mode musi byt hybrid nebo url.', warnings };
+                if (urlConfig.mode !== 'hybrid' && urlConfig.mode !== 'pattern') {
+                    return { error: 'Pagination URL mode musi byt hybrid nebo pattern.', warnings };
                 }
                 if (urlConfig.mode === 'hybrid' && !scope.pagination.css_selector.trim()) {
                     return { error: 'Pagination v hybrid mode musi mit CSS selector.', warnings };
@@ -126,17 +137,20 @@ export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | 
         }
 
         for (const step of phaseSteps) {
-            if (step.type === 'source_url') {
-                if (!step.selector.trim()) {
-                    return { error: 'source_url krok vyzaduje selector.', warnings };
+                if (step.type === 'source_url') {
+                    if (!step.selector.trim()) {
+                        return { error: 'source_url krok vyzaduje selector.', warnings };
+                    }
+                    if (step.extract_type !== 'href') {
+                        return { error: 'source_url krok musi mit extract_type=href.', warnings };
+                    }
+                    if (!step.url_type_id) {
+                        return { error: 'source_url krok musi mit explicitne vyplneny URL Type.', warnings };
+                    }
+                    if (step.url_type_id && !validUrlTypeIds.has(step.url_type_id)) {
+                        return { error: 'source_url krok odkazuje na neexistujici URL Type.', warnings };
+                    }
                 }
-                if (step.extract_type !== 'href') {
-                    return { error: 'source_url krok musi mit extract_type=href.', warnings };
-                }
-                if (step.url_type_id && !validUrlTypeIds.has(step.url_type_id)) {
-                    return { error: 'source_url krok odkazuje na neexistujici URL Type.', warnings };
-                }
-            }
 
             if (step.type === 'document_url' && !step.selector.trim()) {
                 return { error: 'document_url krok vyzaduje selector.', warnings };
@@ -173,6 +187,11 @@ export function validateWorkflow(workflow: ScrapingWorkflow): { error: string | 
 
     if (!hasDiscoverySourceUrls && hasProcessingSteps) {
         warnings.push('Phase 2 je vyplnena, ale Discovery neobsahuje source_url. Processing se nepouzije.');
+    }
+
+    const runtimeIssues = validateUnifiedListCrawlParams(generateUnifiedCrawlParams(workflow));
+    if (runtimeIssues.length > 0) {
+        return { error: runtimeIssues[0].message, warnings };
     }
 
     return { error: null, warnings };

@@ -1,11 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
 
 import type { ScrapingWorkflow, ScrapingWorkflowV2 } from '@/lib/crawler-types';
 import { isTimelineV2 } from '@/lib/crawler-types';
-import { isV1Workflow, migrateV1toV2 } from '@/lib/workflow-migration';
+import {
+    coerceLegacyListCrawlParams,
+    ListEditorEnvelopeSchema,
+    workflowFromUnifiedConfig,
+} from '@/lib/list-source-contract';
+import { generateCrawlParamsV2 } from '@/lib/crawler-export-v2';
+import { isV1Workflow } from '@/lib/workflow-migration';
 
 interface SourceData {
     id: number;
@@ -81,35 +86,46 @@ export function useSourceLoad(sourceId: string | null): UseSourceLoadResult {
             .then(({ source: data }) => {
                 setSource(data);
 
-                const wd = data.workflow_data;
+                if (data.crawl_strategy === 'list') {
+                    const extractionEnvelope = ListEditorEnvelopeSchema.safeParse(data.extraction_data);
+                    if (extractionEnvelope.success) {
+                        setWorkflow(workflowFromUnifiedConfig(extractionEnvelope.data.editor_model));
+                        setWorkflowV2(null);
+                        setWasMigrated(false);
+                        setLoading(false);
+                        return;
+                    }
 
-                // V2 native workflow
-                if (isTimelineV2(wd)) {
-                    setWorkflow(null);
-                    setWorkflowV2(wd);
+                    const legacyCrawlParams = coerceLegacyListCrawlParams(data.crawl_params);
+                    if (legacyCrawlParams) {
+                        setWorkflow(workflowFromUnifiedConfig(legacyCrawlParams));
+                        setWorkflowV2(null);
+                        setWasMigrated(false);
+                        setLoading(false);
+                        return;
+                    }
+                }
+
+                const wd = data.workflow_data;
+                if (isV1Workflow(wd)) {
+                    setWorkflow(wd);
+                    setWorkflowV2(null);
                     setWasMigrated(false);
                     setLoading(false);
                     return;
                 }
 
-                // V1 workflow — auto-migrate to V2
-                if (isV1Workflow(wd)) {
-                    setWorkflow(wd);
-                    const { workflow: migrated, droppedSteps } = migrateV1toV2(wd);
-                    setWorkflowV2(migrated);
-                    setWasMigrated(true);
-
-                    if (droppedSteps.length > 0) {
-                        for (const warning of droppedSteps) {
-                            toast.warning(warning);
-                        }
+                if (isTimelineV2(wd)) {
+                    const legacyTimelineCrawlParams = coerceLegacyListCrawlParams(generateCrawlParamsV2(wd));
+                    if (legacyTimelineCrawlParams) {
+                        setWorkflow(workflowFromUnifiedConfig(legacyTimelineCrawlParams));
+                        setWorkflowV2(wd);
+                        setWasMigrated(true);
+                        setLoading(false);
+                        return;
                     }
-
-                    setLoading(false);
-                    return;
                 }
 
-                // No recognized workflow
                 setWorkflow(null);
                 setWorkflowV2(null);
                 setWasMigrated(false);

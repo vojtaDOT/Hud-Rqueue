@@ -166,6 +166,8 @@ export function createRepeaterNode(): RepeaterNode {
         id: createId('repeater'),
         css_selector: '',
         label: '',
+        route_key_selector: '',
+        route_key_extract: 'text',
         steps: [],
     };
 }
@@ -177,6 +179,7 @@ export function createSourceUrlStep(defaultUrlTypeId?: string): SourceUrlStep {
         selector: '',
         extract_type: 'href',
         url_type_id: defaultUrlTypeId,
+        emit_parent_url: false,
     };
 }
 

@@ -91,7 +91,7 @@ export async function POST(request: Request) {
                     obec_id: payload.obec_id,
                     okres_id: payload.okres_id,
                     kraj_id: payload.kraj_id,
-                    workflow_data: body.workflow_data ?? null,
+                    workflow_data: payload.crawl_strategy === 'list' ? null : (body.workflow_data ?? null),
                     updated_at: now,
                 },
             ])

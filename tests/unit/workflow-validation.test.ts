@@ -142,4 +142,48 @@ describe('validateWorkflow', () => {
         const result = validateWorkflow(workflow);
         expect(result.error).toContain('max_pages');
     });
+
+    it('accepts direct download discovery without processing steps', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].repeater!.steps = [
+            {
+                id: 'download-1',
+                type: 'download_file',
+                url_selector: 'a[href$=".pdf"]',
+                filename_selector: 'self',
+            },
+        ];
+        workflow.url_types[0].processing.chain = [];
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toBeNull();
+    });
+
+    it('fails when source_url is missing explicit url type', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].repeater!.steps[0] = {
+            id: 's-1',
+            type: 'source_url',
+            selector: 'a',
+            extract_type: 'href',
+        };
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toContain('URL Type');
+    });
+
+    it('fails when emit_parent_url has no route key', () => {
+        const workflow = createWorkflow();
+        workflow.discovery.chain[0].repeater!.steps[0] = {
+            id: 's-1',
+            type: 'source_url',
+            selector: 'self',
+            extract_type: 'href',
+            url_type_id: 'url-type-1',
+            emit_parent_url: true,
+        };
+
+        const result = validateWorkflow(workflow);
+        expect(result.error).toContain('route_key_selector');
+    });
 });

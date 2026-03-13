@@ -115,7 +115,7 @@ export function PaginationNodeCard({ node, depth, onUpdate, onRemove, onSelector
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="hybrid">Hybrid</SelectItem>
-                                <SelectItem value="url">URL</SelectItem>
+                                <SelectItem value="pattern">Pattern</SelectItem>
                             </SelectContent>
                         </Select>
                         <Input

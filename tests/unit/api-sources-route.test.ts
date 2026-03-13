@@ -20,8 +20,53 @@ function createListPayload() {
     const crawlParams: UnifiedWorkerCrawlParams = {
         schema_version: 2,
         playwright: false,
-        discovery: { before: [], chain: [] },
-        processing: [],
+        discovery: {
+            before: [],
+            chain: [
+                {
+                    selector: '.list',
+                    label: 'Cards',
+                    repeater: {
+                        selector: '.card',
+                        label: 'Card repeater',
+                        steps: [
+                            {
+                                type: 'source_url',
+                                selector: 'a.detail',
+                                url_type: 'detail',
+                            },
+                        ],
+                    },
+                    pagination: null,
+                    children: [],
+                },
+            ],
+        },
+        processing: [
+            {
+                url_type: 'detail',
+                before: [],
+                chain: [
+                    {
+                        selector: 'main',
+                        label: 'Detail page',
+                        repeater: {
+                            selector: '.attachments',
+                            label: 'Attachments',
+                            steps: [
+                                {
+                                    type: 'download_file',
+                                    url_selector: 'a[href$=\".pdf\"]',
+                                    filename_selector: 'self',
+                                },
+                            ],
+                        },
+                        pagination: null,
+                        children: [],
+                    },
+                ],
+            },
+        ],
     };
     const list = buildListSourceConfig(crawlParams);
 
@@ -178,10 +223,80 @@ describe('POST /api/sources', () => {
         expect(json.source.id).toBe(101);
         const insertedBody = insertSources.mock.calls[0][0][0];
         expect(insertedBody.crawl_params.schema_version).toBe(2);
-        expect(insertedBody.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
+        expect(insertedBody.crawl_params).not.toHaveProperty('runtime_contract');
         expect(insertedBody.extraction_data.strategy).toBe('list');
         expect(insertedBody.extraction_data.config_version).toBe(1);
-        // workflow_data passes through from raw body (null when not provided)
-        expect(insertedBody).toHaveProperty('workflow_data');
+        expect(insertedBody.extraction_data.editor_model).toEqual(insertedBody.crawl_params);
+        expect(insertedBody.workflow_data).toBeNull();
+    });
+
+    it('rejects list payload with non-canonical crawl_params', async () => {
+        const invalidPayload = createListPayload();
+        invalidPayload.crawl_params = ({
+            ...invalidPayload.crawl_params,
+            runtime_contract: 'scrapy-worker.runtime.minimal.v1',
+        } as unknown) as UnifiedWorkerCrawlParams;
+
+        const { POST } = await import('@/app/api/sources/route');
+        const response = await POST(new Request('http://localhost/api/sources', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(invalidPayload),
+        }));
+        const json = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(json.error).toBe('Invalid source payload');
+    });
+});
+
+describe('PUT /api/sources/[id]', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('updates list source with canonical payload and clears workflow_data', async () => {
+        findSourceDuplicate.mockResolvedValueOnce(null);
+
+        const updateSources = vi.fn(() => ({
+            eq: vi.fn(() => ({
+                select: vi.fn(() => ({
+                    single: vi.fn().mockResolvedValue({
+                        data: {
+                            id: 101,
+                            name: 'List source',
+                            base_url: 'https://example.com/list',
+                        },
+                        error: null,
+                    }),
+                })),
+            })),
+        }));
+
+        from.mockImplementation((table: string) => {
+            if (table === 'sources') {
+                return { update: updateSources };
+            }
+            throw new Error(`Unexpected table ${table}`);
+        });
+
+        const payload = createListPayload();
+
+        const { PUT } = await import('@/app/api/sources/[id]/route');
+        const response = await PUT(new Request('http://localhost/api/sources/101', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+        }) as never, {
+            params: Promise.resolve({ id: '101' }),
+        });
+        const json = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(json.source.id).toBe(101);
+        const updatedBody = updateSources.mock.calls[0][0];
+        expect(updatedBody.crawl_params).not.toHaveProperty('runtime_contract');
+        expect(updatedBody.extraction_data.editor_model).toEqual(updatedBody.crawl_params);
+        expect(updatedBody.workflow_data).toBeNull();
     });
 });

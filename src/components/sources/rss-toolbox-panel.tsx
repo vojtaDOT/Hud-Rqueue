@@ -7,9 +7,10 @@ import { RssDetectionPanel } from '@/components/sources/rss-detection-panel';
 import type { RssDetectionStatus } from '@/components/sources/hooks/use-rss-detection';
 import { RssPreviewPanel, type FeedPreview } from '@/components/sources/rss-preview-panel';
 import { RssProbeResultsPanel } from '@/components/sources/rss-probe-results-panel';
+import { RssSampleResultsPanel } from '@/components/sources/rss-sample-results-panel';
 import { RssScraperSummaryPanel } from '@/components/sources/rss-scraper-summary-panel';
 import { Button } from '@/components/ui/button';
-import type { RssProbeResult } from '@/lib/source-config';
+import type { RssProbeResult, RssSampleResult } from '@/lib/source-config';
 
 interface RssToolboxPanelProps {
     // Detection
@@ -38,6 +39,13 @@ interface RssToolboxPanelProps {
     onRssAuthoringChange: (values: RssAuthoringValues) => void;
     selectorError: string | null;
 
+    // Sampling
+    sampling: boolean;
+    sampleResult: RssSampleResult | null;
+    sampleError: string | null;
+    onRunSampling: () => void;
+    onApplySuggestedSelector: (selector: string) => void;
+
     // Summary
     rssSummary: string;
     crawlParamsPreview: Record<string, unknown> | null;
@@ -61,6 +69,11 @@ export function RssToolboxPanel({
     rssAuthoring,
     onRssAuthoringChange,
     selectorError,
+    sampling,
+    sampleResult,
+    sampleError,
+    onRunSampling,
+    onApplySuggestedSelector,
     rssSummary,
     crawlParamsPreview,
     extractionDataPreview,
@@ -125,6 +138,18 @@ export function RssToolboxPanel({
                     onChange={onRssAuthoringChange}
                     selectorError={selectorError}
                 />
+
+                {/* 6b. Item sampling — shown when single_page is OFF */}
+                {!rssAuthoring.singlePage && selectedRssFeed && (
+                    <RssSampleResultsPanel
+                        sampling={sampling}
+                        sampleResult={sampleResult}
+                        sampleError={sampleError}
+                        onRunSampling={onRunSampling}
+                        onApplySelector={onApplySuggestedSelector}
+                        disabled={!selectedRssFeed}
+                    />
+                )}
 
                 {/* 7. Scraper summary */}
                 {rssSummary && (

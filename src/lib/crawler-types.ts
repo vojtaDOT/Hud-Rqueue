@@ -224,17 +224,27 @@ export interface UnifiedWorkerCrawlParams {
     processing: UnifiedWorkerProcessingPhaseV2[];
 }
 
+export interface RssProcessingConfig {
+    document_url_selector: string;
+    document_url_extract: 'href' | 'text';
+    filename_selector?: string;
+    filename_extract?: 'href' | 'text';
+    use_playwright?: boolean;
+}
+
 export interface RssCrawlParamsV1 extends Partial<WorkerContractMetadataV11> {
     schema_version: 1;
     strategy: 'rss';
     feed_url: string;
     item_identity: 'link_then_guid';
+    single_page?: boolean;
     route: {
-        emit_to: 'source_urls';
+        emit_to: 'source_urls' | 'documents';
     };
     fetch: {
         timeout_ms: number;
     };
+    processing?: RssProcessingConfig;
     allow_html_documents?: boolean;
     use_playwright?: boolean;
     entry_link_selector?: string;

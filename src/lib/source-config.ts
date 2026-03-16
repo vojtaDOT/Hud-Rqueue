@@ -56,6 +56,25 @@ export interface RssProbeResult {
     warnings: RssDetectionWarningLike[];
 }
 
+export interface RssSampleDocument {
+    url: string;
+    text: string;
+    selector: string;
+}
+
+export interface RssSampleEntry {
+    entryTitle: string;
+    entryUrl: string;
+    documents: RssSampleDocument[];
+    error?: string;
+}
+
+export interface RssSampleResult {
+    samples: RssSampleEntry[];
+    suggestedSelector: string | null;
+    totalDocuments: number;
+}
+
 export interface RssAuthoringDraft {
     strategy: 'rss';
     feed_url: string;
@@ -119,17 +138,27 @@ const RssWarningSchema = z.object({
     reason: z.enum(['http_error', 'not_feed', 'network_error', 'timeout']),
 }).strict();
 
+const RssProcessingConfigSchema = z.object({
+    document_url_selector: z.string().trim().min(1),
+    document_url_extract: z.enum(['href', 'text']),
+    filename_selector: z.string().trim().optional(),
+    filename_extract: z.enum(['href', 'text']).optional(),
+    use_playwright: z.boolean().optional(),
+}).strict();
+
 const RssCrawlParamsSchema = z.object({
     schema_version: z.literal(1),
     strategy: z.literal('rss'),
     feed_url: UrlSchema,
     item_identity: z.literal('link_then_guid'),
+    single_page: z.boolean().optional().default(true),
     route: z.object({
-        emit_to: z.literal('source_urls'),
+        emit_to: z.enum(['source_urls', 'documents']),
     }).strict(),
     fetch: z.object({
         timeout_ms: z.number().int().min(1),
     }).strict(),
+    processing: RssProcessingConfigSchema.optional(),
     allow_html_documents: z.boolean().optional().default(false),
     use_playwright: z.boolean().optional().default(false),
     entry_link_selector: z.string().trim().optional(),
@@ -214,9 +243,15 @@ export function buildRssSourceConfig(input: {
     feedUrl: string;
     detectedFeedCandidates?: string[];
     warnings?: RssDetectionWarningLike[];
+    singlePage?: boolean;
     allowHtmlDocuments?: boolean;
     usePlaywright?: boolean;
     entryLinkSelector?: string;
+    documentUrlSelector?: string;
+    documentUrlExtract?: 'href' | 'text';
+    filenameSelector?: string;
+    filenameExtract?: 'href' | 'text';
+    processingUsePlaywright?: boolean;
     probeResult?: RssProbeResult | null;
 }): {
     crawl_params: RssCrawlParamsV1;
@@ -225,15 +260,18 @@ export function buildRssSourceConfig(input: {
     const feedUrl = input.feedUrl.trim();
     const detectedFeedCandidates = (input.detectedFeedCandidates ?? []).map((item) => item.trim()).filter(Boolean);
     const warnings = input.warnings ?? [];
+    const singlePage = input.singlePage ?? true;
     const allowHtmlDocuments = input.allowHtmlDocuments ?? false;
     const usePlaywright = input.usePlaywright ?? false;
     const entryLinkSelector = (input.entryLinkSelector ?? '').trim();
 
     const summary = buildRssAuthoringSummary({
         feedUrl,
+        singlePage,
         allowHtmlDocuments,
         usePlaywright,
         entryLinkSelector,
+        documentUrlSelector: input.documentUrlSelector ?? '',
     });
 
     const extractionData = renderTemplate<SourceRssExtractionDataWithNullableProbe>(
@@ -248,15 +286,31 @@ export function buildRssSourceConfig(input: {
         },
     );
 
+    // Build processing config when not single_page
+    const processing = !singlePage && input.documentUrlSelector?.trim()
+        ? {
+            document_url_selector: input.documentUrlSelector.trim(),
+            document_url_extract: input.documentUrlExtract ?? 'href',
+            ...(input.filenameSelector?.trim() ? {
+                filename_selector: input.filenameSelector.trim(),
+                filename_extract: input.filenameExtract ?? 'text',
+            } : {}),
+            ...(input.processingUsePlaywright ? { use_playwright: true } : {}),
+        }
+        : undefined;
+
     return {
         crawl_params: renderTemplate<RssCrawlParamsV1>(
             CRAWL_PARAMS_RSS_TEMPLATE as unknown as Record<string, unknown>,
             {
                 contract_metadata: { ...WORKER_CONTRACT_METADATA_V11 },
                 feed_url: feedUrl,
+                single_page: singlePage,
+                emit_to: singlePage ? 'documents' : 'source_urls',
                 allow_html_documents: allowHtmlDocuments,
                 use_playwright: usePlaywright,
                 entry_link_selector: entryLinkSelector,
+                processing: processing ?? null,
             },
         ),
         extraction_data: normalizeRssExtractionData(extractionData),
@@ -265,15 +319,26 @@ export function buildRssSourceConfig(input: {
 
 export function buildRssAuthoringSummary(input: {
     feedUrl: string;
+    singlePage?: boolean;
     allowHtmlDocuments: boolean;
     usePlaywright: boolean;
     entryLinkSelector: string;
+    documentUrlSelector?: string;
 }): string {
+    const singlePage = input.singlePage ?? true;
     const parts: string[] = [
         'Detect feed',
         'Use RSS strategy',
-        'Discover per entry',
     ];
+
+    if (singlePage) {
+        parts.push('Primo dokumenty');
+    } else {
+        parts.push('Discover per entry → Source URL');
+        if (input.documentUrlSelector?.trim()) {
+            parts.push(`Extrakce dokumentu via "${input.documentUrlSelector.trim()}"`);
+        }
+    }
 
     if (input.entryLinkSelector) {
         parts.push(`Follow detail page via "${input.entryLinkSelector}"`);
@@ -281,8 +346,6 @@ export function buildRssAuthoringSummary(input: {
 
     if (input.allowHtmlDocuments) {
         parts.push('Store HTML pages');
-    } else {
-        parts.push('Do not store HTML pages');
     }
 
     if (input.usePlaywright) {

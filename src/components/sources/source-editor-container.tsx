@@ -16,6 +16,7 @@ import type { SelectorTarget } from '@/components/sources/timeline/nodes/use-sel
 import { ToolboxTabs, type ToolboxTab } from '@/components/sources/toolbox-tabs';
 import { useObecSearch } from '@/components/sources/hooks/use-obec-search';
 import { useRssDetection } from '@/components/sources/hooks/use-rss-detection';
+import { useRssSampling } from '@/components/sources/hooks/use-rss-sampling';
 import { useSourceLoad } from '@/components/sources/hooks/use-source-load';
 import { useSourceSubmit } from '@/components/sources/hooks/use-source-submit';
 import { useSourceTypes } from '@/components/sources/hooks/use-source-types';
@@ -39,9 +40,15 @@ import { ElementSelector, ScrapingWorkflow, type ScrapingWorkflowV2 } from '@/li
 import { buildRssAuthoringSummary, buildRssSourceConfig } from '@/lib/source-config';
 
 const DEFAULT_RSS_AUTHORING: RssAuthoringValues = {
+    singlePage: true,
     allowHtmlDocuments: false,
     usePlaywright: false,
     entryLinkSelector: '',
+    documentUrlSelector: '',
+    documentUrlExtract: 'href',
+    filenameSelector: '',
+    filenameExtract: 'text',
+    processingUsePlaywright: false,
 };
 
 /** Map CrawlStrategy → ToolboxTab */
@@ -121,6 +128,8 @@ export function SourceEditorContainer() {
         setPlaywrightEnabled,
     });
 
+    const { sampling, sampleResult, sampleError, runSampling, clearSampling } = useRssSampling();
+
     const { submitting, submitSource } = useSourceSubmit({
         editSourceId: editSourceId ?? undefined,
         onSubmitted: () => {
@@ -160,9 +169,11 @@ export function SourceEditorContainer() {
         if (!feedUrl) return '';
         return buildRssAuthoringSummary({
             feedUrl,
+            singlePage: rssAuthoring.singlePage,
             allowHtmlDocuments: rssAuthoring.allowHtmlDocuments,
             usePlaywright: rssAuthoring.usePlaywright,
             entryLinkSelector: rssAuthoring.entryLinkSelector,
+            documentUrlSelector: rssAuthoring.documentUrlSelector,
         });
     }, [crawlStrategy, selectedRssFeed, baseUrl, rssAuthoring]);
 
@@ -175,9 +186,15 @@ export function SourceEditorContainer() {
                 feedUrl,
                 detectedFeedCandidates: rssFeedOptions,
                 warnings: rssWarnings,
+                singlePage: rssAuthoring.singlePage,
                 allowHtmlDocuments: rssAuthoring.allowHtmlDocuments,
                 usePlaywright: rssAuthoring.usePlaywright,
                 entryLinkSelector: rssAuthoring.entryLinkSelector,
+                documentUrlSelector: rssAuthoring.documentUrlSelector,
+                documentUrlExtract: rssAuthoring.documentUrlExtract,
+                filenameSelector: rssAuthoring.filenameSelector,
+                filenameExtract: rssAuthoring.filenameExtract,
+                processingUsePlaywright: rssAuthoring.processingUsePlaywright,
                 probeResult,
             });
         } catch {
@@ -256,10 +273,17 @@ export function SourceEditorContainer() {
         // Restore RSS authoring values from saved crawl_params when in RSS mode
         if (loadedSource.crawl_strategy === 'rss' && loadedSource.crawl_params) {
             const cp = loadedSource.crawl_params as Record<string, unknown>;
+            const processing = (cp.processing ?? {}) as Record<string, unknown>;
             setRssAuthoring({
+                singlePage: cp.single_page !== false,
                 allowHtmlDocuments: cp.allow_html_documents === true,
                 usePlaywright: cp.use_playwright === true,
                 entryLinkSelector: typeof cp.entry_link_selector === 'string' ? cp.entry_link_selector : '',
+                documentUrlSelector: typeof processing.document_url_selector === 'string' ? processing.document_url_selector : '',
+                documentUrlExtract: processing.document_url_extract === 'text' ? 'text' : 'href',
+                filenameSelector: typeof processing.filename_selector === 'string' ? processing.filename_selector : '',
+                filenameExtract: processing.filename_extract === 'text' ? 'text' : 'href',
+                processingUsePlaywright: processing.use_playwright === true,
             });
         }
     }, [loadedSource, loadedWorkflow, loadedWorkflowV2]);
@@ -452,6 +476,21 @@ export function SourceEditorContainer() {
         setSelectedRssFeed(feedUrl);
     };
 
+    const handleRunSampling = useCallback(() => {
+        const feedUrl = selectedRssFeed || baseUrl;
+        void runSampling(feedUrl);
+    }, [selectedRssFeed, baseUrl, runSampling]);
+
+    const handleApplySuggestedSelector = useCallback((selector: string) => {
+        setRssAuthoring((prev) => ({
+            ...prev,
+            singlePage: false,
+            documentUrlSelector: selector,
+            documentUrlExtract: 'href',
+        }));
+        toast.success('Selektor aplikovan');
+    }, []);
+
     // Sidebar header: tab switcher (always visible above sidebar content)
     const sidebarHeader = (
         <ToolboxTabs
@@ -503,6 +542,11 @@ export function SourceEditorContainer() {
             rssAuthoring={rssAuthoring}
             onRssAuthoringChange={setRssAuthoring}
             selectorError={selectorValidationError}
+            sampling={sampling}
+            sampleResult={sampleResult}
+            sampleError={sampleError}
+            onRunSampling={handleRunSampling}
+            onApplySuggestedSelector={handleApplySuggestedSelector}
             rssSummary={rssSummary}
             crawlParamsPreview={
                 rssConfigPreview

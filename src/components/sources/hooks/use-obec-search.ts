@@ -3,7 +3,6 @@
 import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 
 import type { Obec } from '@/components/sources/types';
-import { supabase } from '@/lib/supabase';
 
 export function useObecSearch() {
     const [selectedObec, setSelectedObec] = useState<Obec | null>(null);
@@ -23,75 +22,63 @@ export function useObecSearch() {
 
     useEffect(() => {
         if (selectedObec && selectedObec.nazev === deferredObecSearch) {
+            setSearchingObec(false);
+            setShowObecDropdown(false);
             return;
         }
 
         if (deferredObecSearch.length < 2) {
+            setObecResults([]);
+            setShowObecDropdown(false);
+            setSearchingObec(false);
             return;
         }
 
         const requestId = ++searchRequestRef.current;
+        const controller = new AbortController();
+
         void (async () => {
-            const { data, error } = await supabase
-                .from('cz_regions_obec')
-                .select(`
-                    id,
-                    kod,
-                    nazev,
-                    okres_id,
-                    cz_regions_okres!inner (
-                        id,
-                        name,
-                        kraj_id,
-                        cz_regions_kraj!inner (
-                            id,
-                            name
-                        )
-                    )
-                `)
-                .ilike('nazev->>cs', `%${deferredObecSearch}%`)
-                .limit(12);
+            try {
+                const response = await fetch(`/api/regions/obce?q=${encodeURIComponent(deferredObecSearch)}`, {
+                    signal: controller.signal,
+                });
 
-            if (!mountedRef.current || requestId !== searchRequestRef.current) {
-                return;
-            }
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
 
-            if (error) {
+                const payload = await response.json() as { obce?: Obec[] };
+
+                if (!mountedRef.current || requestId !== searchRequestRef.current) {
+                    return;
+                }
+
+                const results = Array.isArray(payload.obce) ? payload.obce : [];
+                setObecResults(results);
+                setShowObecDropdown(true);
+            } catch (error) {
+                if (error instanceof Error && error.name === 'AbortError') {
+                    return;
+                }
+
                 console.error('Error searching obce:', error);
+
+                if (!mountedRef.current || requestId !== searchRequestRef.current) {
+                    return;
+                }
+
                 setObecResults([]);
                 setShowObecDropdown(false);
-                setSearchingObec(false);
-                return;
+            } finally {
+                if (mountedRef.current && requestId === searchRequestRef.current) {
+                    setSearchingObec(false);
+                }
             }
-
-            const transformedResults: Obec[] = (data ?? []).map((obec) => {
-                const okres = obec.cz_regions_okres as unknown as {
-                    id: string;
-                    name: { cs: string } | string;
-                    kraj_id: string;
-                    cz_regions_kraj: {
-                        id: string;
-                        name: { cs: string } | string;
-                    };
-                };
-
-                return {
-                    id: obec.id,
-                    kod: obec.kod,
-                    nazev: typeof obec.nazev === 'object' ? (obec.nazev as { cs: string }).cs : obec.nazev,
-                    okres_id: obec.okres_id,
-                    okres_nazev: typeof okres.name === 'object' ? okres.name.cs : okres.name,
-                    kraj_id: okres.kraj_id,
-                    kraj_nazev: typeof okres.cz_regions_kraj.name === 'object'
-                        ? okres.cz_regions_kraj.name.cs
-                        : okres.cz_regions_kraj.name,
-                };
-            });
-
-            setObecResults(transformedResults);
-            setShowObecDropdown(true);
-            setSearchingObec(false);
         })();
+
+        return () => {
+            controller.abort();
+        };
     }, [deferredObecSearch, selectedObec]);
 
     const onObecInputChange = useCallback((value: string) => {

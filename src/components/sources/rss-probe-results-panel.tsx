@@ -69,7 +69,7 @@ function CandidateRow({
                     {pct}%
                 </span>
             </div>
-            <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
+            <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground min-w-0 overflow-hidden">
                 <span className="truncate">{candidate.feed_url}</span>
             </div>
             <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground/70">
@@ -135,9 +135,9 @@ export function RssProbeResultsPanel({
             </div>
 
             <div className="space-y-1.5">
-                {candidates.map((candidate) => (
+                {candidates.map((candidate, idx) => (
                     <CandidateRow
-                        key={candidate.feed_url}
+                        key={`${candidate.feed_url}-${idx}`}
                         candidate={candidate}
                         isSelected={candidate.feed_url === selectedFeedUrl}
                         onSelect={() => onSelectCandidate(candidate.feed_url)}

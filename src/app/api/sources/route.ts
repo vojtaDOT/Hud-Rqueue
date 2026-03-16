@@ -32,6 +32,7 @@ async function ensureSeedSourceUrl(input: {
     const payload = {
         source_id: input.sourceId,
         url: input.baseUrl,
+        route_key: input.baseUrl,
         label: `Seed URL for source: ${input.sourceName}`,
         enabled: true,
         created_at: now,

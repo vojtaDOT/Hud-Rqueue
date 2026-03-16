@@ -4,17 +4,47 @@ import { xml } from '@codemirror/lang-xml';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface XmlWorkspaceProps {
     feedUrl: string;
     className?: string;
 }
 
+function formatXml(raw: string): string {
+    const INDENT = '  ';
+    let formatted = '';
+    let indent = 0;
+    // Split on tags while keeping them
+    const parts = raw.replace(/>\s*</g, '><').split(/(<[^>]+>)/);
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('</')) {
+            indent = Math.max(indent - 1, 0);
+            formatted += INDENT.repeat(indent) + trimmed + '\n';
+        } else if (trimmed.startsWith('<?')) {
+            formatted += trimmed + '\n';
+        } else if (trimmed.startsWith('<') && trimmed.endsWith('/>')) {
+            formatted += INDENT.repeat(indent) + trimmed + '\n';
+        } else if (trimmed.startsWith('<') && !trimmed.startsWith('</')) {
+            formatted += INDENT.repeat(indent) + trimmed + '\n';
+            indent++;
+        } else {
+            // Text content
+            formatted += INDENT.repeat(indent) + trimmed + '\n';
+        }
+    }
+    return formatted.trimEnd();
+}
+
 const darkTheme = EditorView.theme({
     '&': {
         backgroundColor: 'oklch(0.16 0.005 260)',
         color: 'oklch(0.9 0 0)',
+    },
+    '.cm-scroller': {
+        overflow: 'auto',
     },
     '.cm-gutters': {
         backgroundColor: 'oklch(0.14 0.004 260)',
@@ -32,6 +62,22 @@ export function XmlWorkspace({ feedUrl, className }: XmlWorkspaceProps) {
     const [xmlContent, setXmlContent] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [height, setHeight] = useState<number>(400);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Measure container height with ResizeObserver
+    useEffect(() => {
+        const node = containerRef.current;
+        if (!node) return;
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const h = entry.contentRect.height;
+                if (h > 0) setHeight(h);
+            }
+        });
+        ro.observe(node);
+        return () => ro.disconnect();
+    }, []);
 
     useEffect(() => {
         if (!feedUrl || !/^https?:\/\//.test(feedUrl)) {
@@ -58,7 +104,7 @@ export function XmlWorkspace({ feedUrl, className }: XmlWorkspaceProps) {
                 return res.text();
             })
             .then((text) => {
-                setXmlContent(text);
+                setXmlContent(formatXml(text));
                 setLoading(false);
             })
             .catch((err: unknown) => {
@@ -99,12 +145,12 @@ export function XmlWorkspace({ feedUrl, className }: XmlWorkspaceProps) {
     }
 
     return (
-        <div className={`overflow-hidden ${className ?? ''}`}>
+        <div ref={containerRef} className={`overflow-hidden ${className ?? ''}`}>
             <CodeMirror
                 value={xmlContent}
                 extensions={[xml()]}
                 theme={darkTheme}
-                height="100%"
+                height={`${height}px`}
                 readOnly
                 basicSetup={{
                     lineNumbers: true,

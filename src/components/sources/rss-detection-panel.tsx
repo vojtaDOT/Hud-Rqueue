@@ -32,13 +32,13 @@ export function RssDetectionPanel({
     return (
         <div className="rounded-md border border-border bg-muted/50 p-3">
             <Label className="mb-1.5 block text-sm text-muted-foreground">Nalezene RSS/Atom feedy</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
                 <Select value={selectedRssFeed} onValueChange={onSelectedRssFeedChange}>
-                    <SelectTrigger>
+                    <SelectTrigger className="min-w-0">
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        {rssFeedOptions.map((feedUrl) => (
+                        {[...new Set(rssFeedOptions)].map((feedUrl) => (
                             <SelectItem key={feedUrl} value={feedUrl}>
                                 {feedUrl}
                             </SelectItem>

@@ -85,7 +85,7 @@ describe('source-config', () => {
         expect(rss.crawl_params.schema_version).toBe(1);
         expect(rss.crawl_params.strategy).toBe('rss');
         expect(rss.crawl_params.runtime_contract).toBe('scrapy-worker.runtime.minimal.v1');
-        expect(rss.crawl_params.route.emit_to).toBe('source_urls');
+        expect(rss.crawl_params.route.emit_to).toBe('documents');
         expect(rss.extraction_data.strategy).toBe('rss');
         expect(rss.extraction_data.selected_feed_url).toBe('https://example.com/feed.xml');
     });

@@ -4,9 +4,9 @@ import { supabase } from '@/lib/supabase';
 export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
-        const query = searchParams.get('q');
+        const query = searchParams.get('q')?.trim() ?? '';
 
-        if (!query || query.length < 2) {
+        if (query.length < 2) {
             return NextResponse.json({ obce: [] });
         }
 
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
                 )
             `)
             .ilike('nazev->>cs', `%${query}%`)
-            .limit(10);
+            .limit(12);
 
         if (error) {
             console.error('Supabase error:', error);

@@ -125,9 +125,15 @@ export function useSourceSubmit({ editSourceId, onSubmitted }: UseSourceSubmitOp
                     feedUrl,
                     detectedFeedCandidates: rssFeedOptions,
                     warnings: rssWarnings,
+                    singlePage: rssAuthoring?.singlePage,
                     allowHtmlDocuments: rssAuthoring?.allowHtmlDocuments,
                     usePlaywright: rssAuthoring?.usePlaywright,
                     entryLinkSelector: rssAuthoring?.entryLinkSelector,
+                    documentUrlSelector: rssAuthoring?.documentUrlSelector,
+                    documentUrlExtract: rssAuthoring?.documentUrlExtract,
+                    filenameSelector: rssAuthoring?.filenameSelector,
+                    filenameExtract: rssAuthoring?.filenameExtract,
+                    processingUsePlaywright: rssAuthoring?.processingUsePlaywright,
                     probeResult: probeResult ?? null,
                 });
                 crawlParams = rssConfig.crawl_params;

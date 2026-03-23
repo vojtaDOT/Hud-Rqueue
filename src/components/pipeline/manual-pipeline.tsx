@@ -20,6 +20,10 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    buildDiscoveredSourceUrls,
+    isPendingDiscoveredSourceUrlId,
+} from '@/lib/discovered-source-urls';
 import { analyzeDiscovery, isDownloadFanoutSkipMessage } from '@/lib/pipeline-discovery-diagnostics';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
@@ -1132,14 +1136,17 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         return allRows;
     }, []);
 
-    const fetchIngestionDiagnostics = React.useCallback(async (runId: string): Promise<IngestionDiagnosticsSnapshot | null> => {
+    const fetchIngestionDiagnostics = React.useCallback(async (
+        runId: string,
+        sourceUrlMetaOverride?: SourceUrlMeta[],
+    ): Promise<IngestionDiagnosticsSnapshot | null> => {
         setIngestionLoading(true);
         try {
             const { data: runData, error: runError } = await supabase
                 .from('ingestion_runs')
                 .select('*')
                 .eq('id', runId)
-                .single();
+                .maybeSingle();
 
             if (runError) throw runError;
             if (!runData) {
@@ -1221,7 +1228,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
             setIngestionItems(allItems);
 
             const sourceUrlMetaById = new Map<string, SourceUrlMeta>();
-            for (const meta of sourceUrlMeta) {
+            for (const meta of sourceUrlMetaOverride ?? sourceUrlMeta) {
                 sourceUrlMetaById.set(String(meta.id), meta);
             }
 
@@ -1249,18 +1256,10 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                 }
             }
 
-            const discovered = sourceUrlIds.map((sourceUrlId) => {
-                const existing = sourceUrlMetaById.get(sourceUrlId);
-                if (existing) return existing;
-                const item = allItems.find((row) => row.source_url_id === sourceUrlId);
-                return {
-                    id: sourceUrlId,
-                    source_id: normalizedRun.source_id,
-                    url: item?.document_url || item?.item_label || undefined,
-                    label: item?.item_label ?? null,
-                    created_at: item?.created_at,
-                    updated_at: item?.updated_at,
-                } satisfies SourceUrlMeta;
+            const discovered = buildDiscoveredSourceUrls({
+                items: allItems,
+                sourceUrlMeta: Array.from(sourceUrlMetaById.values()),
+                sourceId: normalizedRun.source_id,
             });
             setDiscoveredSourceUrls(discovered);
 
@@ -1307,13 +1306,18 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         }
     }, [fetchDocumentsByIds, runState.selectedSourceId, sourceUrlMeta]);
 
+    const actionableDiscoveredSourceUrls = React.useMemo(
+        () => discoveredSourceUrls.filter((item) => !isPendingDiscoveredSourceUrlId(String(item.id))),
+        [discoveredSourceUrls],
+    );
+
     const refreshDerivedData = React.useCallback(async () => {
         if (!runState.selectedRunId) return;
 
         setRefreshingData(true);
         try {
-            await fetchIngestionDiagnostics(runState.selectedRunId);
-            await fetchAllSourceUrlMeta();
+            const latestSourceUrlMeta = await fetchAllSourceUrlMeta();
+            await fetchIngestionDiagnostics(runState.selectedRunId, latestSourceUrlMeta);
             await Promise.all([refreshActiveRuns(), refreshHistoryRuns(), refreshSelectedRunItems()]);
         } catch (error) {
             console.error('Refresh pipeline data failed:', error);
@@ -1612,12 +1616,12 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
     }, [createPipelineRun, enqueueJobs, patchPipelineRun, refreshActiveRuns, refreshHistoryRuns, resetRunStateForSource]);
 
     const handleStartDownload = React.useCallback(async () => {
-        if (!runState.selectedSourceId || !runState.selectedRunId || discoveredSourceUrls.length === 0 || downloadSkippedByDiscovery) return;
+        if (!runState.selectedSourceId || !runState.selectedRunId || actionableDiscoveredSourceUrls.length === 0 || downloadSkippedByDiscovery) return;
         setSubmittingDownload(true);
 
         try {
             const jobs = await enqueueJobs(
-                discoveredSourceUrls.map((sourceUrl) => ({
+                actionableDiscoveredSourceUrls.map((sourceUrl) => ({
                     task: 'download',
                     run_id: runState.selectedRunId!,
                     source_id: runState.selectedSourceId!,
@@ -1638,7 +1642,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
         } finally {
             setSubmittingDownload(false);
         }
-    }, [discoveredSourceUrls, downloadSkippedByDiscovery, enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
+    }, [actionableDiscoveredSourceUrls, downloadSkippedByDiscovery, enqueueJobs, patchSelectedRun, runState.selectedRunId, runState.selectedSourceId, unlockStage]);
 
     const handleStartDownloadForSourceUrl = React.useCallback(async (sourceUrlId: string) => {
         if (!runState.selectedSourceId || !runState.selectedRunId || downloadSkippedByDiscovery) return;
@@ -1874,8 +1878,8 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
 
         (async () => {
             try {
-                const diagnostics = await fetchIngestionDiagnostics(runState.selectedRunId!);
-                await fetchAllSourceUrlMeta();
+                const latestSourceUrlMeta = await fetchAllSourceUrlMeta();
+                const diagnostics = await fetchIngestionDiagnostics(runState.selectedRunId!, latestSourceUrlMeta);
                 const diagnosis = analyzeDiscovery({
                     crawlParams: selectedSource?.crawl_params,
                     statsJson: diagnostics?.run?.stats_json ?? selectedRunStatsJson,
@@ -2685,7 +2689,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                         <h3 className="text-sm font-semibold">Discovered source URLs (aktuální run)</h3>
                         <Button
                             onClick={handleStartDownload}
-                            disabled={!discoverCompleted || discoveredSourceUrls.length === 0 || submittingDownload || downloadSkippedByDiscovery}
+                            disabled={!discoverCompleted || actionableDiscoveredSourceUrls.length === 0 || submittingDownload || downloadSkippedByDiscovery}
                             size="sm"
                         >
                             {submittingDownload ? (
@@ -2719,7 +2723,7 @@ export function ManualPipeline({ devMode }: ManualPipelineProps) {
                                     <button
                                         type="button"
                                         onClick={() => handleStartDownloadForSourceUrl(String(item.id))}
-                                        disabled={!discoverCompleted || submittingDownload || downloadSkippedByDiscovery}
+                                        disabled={!discoverCompleted || submittingDownload || downloadSkippedByDiscovery || isPendingDiscoveredSourceUrlId(String(item.id))}
                                         className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <Play className="h-3 w-3 text-muted-foreground" />
